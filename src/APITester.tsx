@@ -60,12 +60,7 @@ export function APITester() {
         <Label htmlFor="name" className="sr-only">
           Name
         </Label>
-        <Input
-          id="name"
-          type="text"
-          name="name"
-          placeholder="(unused)"
-        />
+        <Input id="name" type="text" name="name" placeholder="(unused)" />
         <Button type="submit" variant="secondary">
           Send
         </Button>

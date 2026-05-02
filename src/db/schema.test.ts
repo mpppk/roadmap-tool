@@ -1,12 +1,20 @@
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { features, members, quarters, featureQuarters, memberAllocations } from "./schema";
+import {
+  features,
+  members,
+  quarters,
+  featureQuarters,
+  memberAllocations,
+} from "./schema";
 import { eq, and } from "drizzle-orm";
 
 describe("DB schema", () => {
   const sqlite = new Database(":memory:");
-  const db = drizzle(sqlite, { schema: { features, members, quarters, featureQuarters, memberAllocations } });
+  const db = drizzle(sqlite, {
+    schema: { features, members, quarters, featureQuarters, memberAllocations },
+  });
 
   beforeAll(() => {
     sqlite.exec(`
@@ -39,8 +47,14 @@ describe("DB schema", () => {
   });
 
   test("can insert quarter and feature_quarter allocation", async () => {
-    const [f] = await db.insert(features).values({ name: "Dashboard", createdAt: new Date() }).returning();
-    const [q] = await db.insert(quarters).values({ year: 2025, quarter: 1 }).returning();
+    const [f] = await db
+      .insert(features)
+      .values({ name: "Dashboard", createdAt: new Date() })
+      .returning();
+    const [q] = await db
+      .insert(quarters)
+      .values({ year: 2025, quarter: 1 })
+      .returning();
     const [fq] = await db
       .insert(featureQuarters)
       .values({ featureId: f!.id, quarterId: q!.id, totalPersonMonths: 2.0 })
@@ -49,13 +63,29 @@ describe("DB schema", () => {
   });
 
   test("can insert member allocation", async () => {
-    const [f] = await db.insert(features).values({ name: "Search", createdAt: new Date() }).returning();
-    const [q] = await db.insert(quarters).values({ year: 2025, quarter: 2 }).returning();
-    const [m] = await db.insert(members).values({ name: "Bob", createdAt: new Date() }).returning();
-    await db.insert(featureQuarters).values({ featureId: f!.id, quarterId: q!.id, totalPersonMonths: 1.0 });
+    const [f] = await db
+      .insert(features)
+      .values({ name: "Search", createdAt: new Date() })
+      .returning();
+    const [q] = await db
+      .insert(quarters)
+      .values({ year: 2025, quarter: 2 })
+      .returning();
+    const [m] = await db
+      .insert(members)
+      .values({ name: "Bob", createdAt: new Date() })
+      .returning();
+    await db
+      .insert(featureQuarters)
+      .values({ featureId: f!.id, quarterId: q!.id, totalPersonMonths: 1.0 });
     const [alloc] = await db
       .insert(memberAllocations)
-      .values({ featureId: f!.id, quarterId: q!.id, memberId: m!.id, personMonths: 0.5 })
+      .values({
+        featureId: f!.id,
+        quarterId: q!.id,
+        memberId: m!.id,
+        personMonths: 0.5,
+      })
       .returning();
     expect(alloc?.personMonths).toBe(0.5);
   });

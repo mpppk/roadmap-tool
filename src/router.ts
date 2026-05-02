@@ -92,7 +92,12 @@ const quartersList = o
   .handler(async ({ context }) => context.db.select().from(quarters).all());
 
 const quartersCreate = o
-  .input(z.object({ year: z.number().int(), quarter: z.number().int().min(1).max(4) }))
+  .input(
+    z.object({
+      year: z.number().int(),
+      quarter: z.number().int().min(1).max(4),
+    }),
+  )
   .handler(async ({ input, context }) => {
     const [row] = await context.db
       .insert(quarters)
@@ -215,7 +220,8 @@ const allocationsGetFeatureView = o
         memberAllocations: allMembers
           .map((m) => ({
             member: m,
-            personMonths: qAllocs.find((a) => a.memberId === m.id)?.personMonths ?? 0,
+            personMonths:
+              qAllocs.find((a) => a.memberId === m.id)?.personMonths ?? 0,
           }))
           .filter((a) => a.personMonths > 0),
       };
@@ -250,7 +256,8 @@ const allocationsGetMemberView = o
         featureAllocations: allFeatures
           .map((f) => ({
             feature: f,
-            personMonths: qAllocs.find((a) => a.featureId === f.id)?.personMonths ?? 0,
+            personMonths:
+              qAllocs.find((a) => a.featureId === f.id)?.personMonths ?? 0,
           }))
           .filter((a) => a.personMonths > 0),
       };
@@ -286,7 +293,9 @@ const allocationsUpdateTotal = o
           ),
         );
     } else {
-      await db.insert(featureQuarters).values({ featureId, quarterId, totalPersonMonths: newTotal });
+      await db
+        .insert(featureQuarters)
+        .values({ featureId, quarterId, totalPersonMonths: newTotal });
     }
 
     // Proportionally redistribute member allocations
@@ -343,7 +352,12 @@ const allocationsUpdateMemberAllocation = o
     const { featureId, quarterId, memberId, personMonths } = input;
 
     // Check member×quarter cap
-    const usedElsewhere = await getMemberUsageInQuarter(db, memberId, quarterId, featureId);
+    const usedElsewhere = await getMemberUsageInQuarter(
+      db,
+      memberId,
+      quarterId,
+      featureId,
+    );
     const cap = Math.max(0, 1.0 - usedElsewhere);
     const capped = Math.min(personMonths, cap);
 
@@ -488,56 +502,66 @@ const allocationsMoveQuarter = o
 // Export
 // ---------------------------------------------------------------------------
 
-const exportFeatureCSV = o
-  .input(z.object({}))
-  .handler(async ({ context }) => {
-    const { db } = context;
-    const allFeatures = await db.select().from(features).all();
-    const allQuarters = await db.select().from(quarters).orderBy(quarters.year, quarters.quarter).all();
-    const fqRows = await db.select().from(featureQuarters).all();
+const exportFeatureCSV = o.input(z.object({})).handler(async ({ context }) => {
+  const { db } = context;
+  const allFeatures = await db.select().from(features).all();
+  const allQuarters = await db
+    .select()
+    .from(quarters)
+    .orderBy(quarters.year, quarters.quarter)
+    .all();
+  const fqRows = await db.select().from(featureQuarters).all();
 
-    const header = ["機能", ...allQuarters.map((q) => `${q.year}-Q${q.quarter}`)].join(",");
-    const rows = allFeatures.map((f) => {
-      const cells = allQuarters.map((q) => {
-        const fq = fqRows.find((r) => r.featureId === f.id && r.quarterId === q.id);
-        return fq?.totalPersonMonths ?? 0;
-      });
-      return [f.name, ...cells].join(",");
+  const header = [
+    "機能",
+    ...allQuarters.map((q) => `${q.year}-Q${q.quarter}`),
+  ].join(",");
+  const rows = allFeatures.map((f) => {
+    const cells = allQuarters.map((q) => {
+      const fq = fqRows.find(
+        (r) => r.featureId === f.id && r.quarterId === q.id,
+      );
+      return fq?.totalPersonMonths ?? 0;
     });
-
-    return [header, ...rows].join("\n");
+    return [f.name, ...cells].join(",");
   });
 
-const exportMemberCSV = o
-  .input(z.object({}))
-  .handler(async ({ context }) => {
-    const { db } = context;
-    const allMembers = await db.select().from(members).all();
-    const allQuarters = await db.select().from(quarters).orderBy(quarters.year, quarters.quarter).all();
-    const allFeatures = await db.select().from(features).all();
-    const maRows = await db.select().from(memberAllocations).all();
+  return [header, ...rows].join("\n");
+});
 
-    // Header: 担当者, 機能, Q1, Q2, ...
-    const qHeaders = allQuarters.map((q) => `${q.year}-Q${q.quarter}`);
-    const header = ["担当者", "機能", ...qHeaders].join(",");
+const exportMemberCSV = o.input(z.object({})).handler(async ({ context }) => {
+  const { db } = context;
+  const allMembers = await db.select().from(members).all();
+  const allQuarters = await db
+    .select()
+    .from(quarters)
+    .orderBy(quarters.year, quarters.quarter)
+    .all();
+  const allFeatures = await db.select().from(features).all();
+  const maRows = await db.select().from(memberAllocations).all();
 
-    const rows: string[] = [];
-    for (const m of allMembers) {
-      for (const f of allFeatures) {
-        const cells = allQuarters.map((q) => {
-          const alloc = maRows.find(
-            (r) => r.memberId === m.id && r.featureId === f.id && r.quarterId === q.id,
-          );
-          return alloc?.personMonths ?? 0;
-        });
-        if (cells.some((c) => c > 0)) {
-          rows.push([m.name, f.name, ...cells].join(","));
-        }
+  // Header: 担当者, 機能, Q1, Q2, ...
+  const qHeaders = allQuarters.map((q) => `${q.year}-Q${q.quarter}`);
+  const header = ["担当者", "機能", ...qHeaders].join(",");
+
+  const rows: string[] = [];
+  for (const m of allMembers) {
+    for (const f of allFeatures) {
+      const cells = allQuarters.map((q) => {
+        const alloc = maRows.find(
+          (r) =>
+            r.memberId === m.id && r.featureId === f.id && r.quarterId === q.id,
+        );
+        return alloc?.personMonths ?? 0;
+      });
+      if (cells.some((c) => c > 0)) {
+        rows.push([m.name, f.name, ...cells].join(","));
       }
     }
+  }
 
-    return [header, ...rows].join("\n");
-  });
+  return [header, ...rows].join("\n");
+});
 
 // ---------------------------------------------------------------------------
 // Router

@@ -1,41 +1,26 @@
 import { serve } from "bun";
+import { RPCHandler } from "@orpc/server/fetch";
 import index from "./index.html";
+import { router } from "./router";
+
+const rpcHandler = new RPCHandler(router);
 
 const server = serve({
   routes: {
-    // Serve index.html for all unmatched routes.
-    "/*": index,
-
-    "/api/hello": {
-      async GET(req) {
-        return Response.json({
-          message: "Hello, world!",
-          method: "GET",
-        });
-      },
-      async PUT(req) {
-        return Response.json({
-          message: "Hello, world!",
-          method: "PUT",
-        });
-      },
-    },
-
-    "/api/hello/:name": async req => {
-      const name = req.params.name;
-      return Response.json({
-        message: `Hello, ${name}!`,
+    "/orpc/*": async (req) => {
+      const result = await rpcHandler.handle(req, {
+        prefix: "/orpc",
+        context: {},
       });
+      if (result.matched) return result.response;
+      return new Response("Not found", { status: 404 });
     },
+    "/*": index,
   },
-
   development: process.env.NODE_ENV !== "production" && {
-    // Enable browser hot reloading in development
     hmr: true,
-
-    // Echo console logs from the browser to the server
     console: true,
   },
 });
 
-console.log(`🚀 Server running at ${server.url}`);
+console.log(`Server running at ${server.url}`);

@@ -17,4 +17,5 @@ const app = (
 );
 
 // https://bun.com/docs/bundler/hot-reloading#import-meta-hot-data
+// biome-ignore lint/suspicious/noAssignInExpressions: Bun HMR pattern
 (import.meta.hot.data.root ??= createRoot(elem)).render(app);

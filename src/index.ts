@@ -1,5 +1,5 @@
-import { serve } from "bun";
 import { RPCHandler } from "@orpc/server/fetch";
+import { serve } from "bun";
 import index from "./index.html";
 import { router } from "./router";
 

@@ -1,9 +1,15 @@
+import { type FormEvent, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { useRef, type FormEvent } from "react";
 import { orpc } from "./orpc-client";
 
 type ProcedureName = "hello.get" | "hello.put" | "hello.helloName";
@@ -35,7 +41,10 @@ export function APITester() {
 
   return (
     <div className="flex flex-col gap-6">
-      <form onSubmit={testEndpoint} className="flex items-center gap-2 flex-wrap">
+      <form
+        onSubmit={testEndpoint}
+        className="flex items-center gap-2 flex-wrap"
+      >
         <Label htmlFor="procedure" className="sr-only">
           Procedure
         </Label>
@@ -52,7 +61,12 @@ export function APITester() {
         <Label htmlFor="name" className="sr-only">
           Name
         </Label>
-        <Input id="name" type="text" name="name" placeholder="name (helloName用)" />
+        <Input
+          id="name"
+          type="text"
+          name="name"
+          placeholder="name (helloName用)"
+        />
         <Button type="submit" variant="secondary">
           Send
         </Button>

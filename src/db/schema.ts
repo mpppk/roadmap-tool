@@ -1,24 +1,60 @@
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, real, sqliteTable, text, unique } from "drizzle-orm/sqlite-core";
 
-export const roadmaps = sqliteTable("roadmaps", {
+export const features = sqliteTable("features", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  title: text("title").notNull(),
-  description: text("description"),
+  name: text("name").notNull().unique(),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
 });
 
-export const items = sqliteTable("items", {
+export const members = sqliteTable("members", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  roadmapId: integer("roadmap_id")
-    .notNull()
-    .references(() => roadmaps.id),
-  title: text("title").notNull(),
-  status: text("status", { enum: ["planned", "in-progress", "done"] })
-    .notNull()
-    .default("planned"),
+  name: text("name").notNull().unique(),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
 });
+
+export const quarters = sqliteTable(
+  "quarters",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    year: integer("year").notNull(),
+    quarter: integer("quarter").notNull(), // 1-4
+  },
+  (t) => [unique().on(t.year, t.quarter)],
+);
+
+export const featureQuarters = sqliteTable(
+  "feature_quarters",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    featureId: integer("feature_id")
+      .notNull()
+      .references(() => features.id, { onDelete: "cascade" }),
+    quarterId: integer("quarter_id")
+      .notNull()
+      .references(() => quarters.id, { onDelete: "cascade" }),
+    totalPersonMonths: real("total_person_months").notNull().default(0),
+  },
+  (t) => [unique().on(t.featureId, t.quarterId)],
+);
+
+export const memberAllocations = sqliteTable(
+  "member_allocations",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    featureId: integer("feature_id")
+      .notNull()
+      .references(() => features.id, { onDelete: "cascade" }),
+    quarterId: integer("quarter_id")
+      .notNull()
+      .references(() => quarters.id, { onDelete: "cascade" }),
+    memberId: integer("member_id")
+      .notNull()
+      .references(() => members.id, { onDelete: "cascade" }),
+    personMonths: real("person_months").notNull().default(0),
+  },
+  (t) => [unique().on(t.featureId, t.quarterId, t.memberId)],
+);

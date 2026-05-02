@@ -12,7 +12,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { orpc } from "./orpc-client";
 
-type ProcedureName = "hello.get" | "hello.put" | "hello.helloName";
+type ProcedureName = "features.list" | "members.list" | "quarters.list";
 
 export function APITester() {
   const responseInputRef = useRef<HTMLTextAreaElement>(null);
@@ -22,15 +22,14 @@ export function APITester() {
     try {
       const formData = new FormData(e.currentTarget);
       const procedure = formData.get("procedure") as ProcedureName;
-      const name = (formData.get("name") as string) || "";
 
       let result: unknown;
-      if (procedure === "hello.get") {
-        result = await orpc.hello.get({});
-      } else if (procedure === "hello.put") {
-        result = await orpc.hello.put({});
+      if (procedure === "features.list") {
+        result = await orpc.features.list({});
+      } else if (procedure === "members.list") {
+        result = await orpc.members.list({});
       } else {
-        result = await orpc.hello.helloName({ name });
+        result = await orpc.quarters.list({});
       }
 
       responseInputRef.current!.value = JSON.stringify(result, null, 2);
@@ -48,14 +47,14 @@ export function APITester() {
         <Label htmlFor="procedure" className="sr-only">
           Procedure
         </Label>
-        <Select name="procedure" defaultValue="hello.get">
+        <Select name="procedure" defaultValue="features.list">
           <SelectTrigger className="w-[180px]" id="procedure">
             <SelectValue placeholder="Procedure" />
           </SelectTrigger>
           <SelectContent align="start">
-            <SelectItem value="hello.get">hello.get</SelectItem>
-            <SelectItem value="hello.put">hello.put</SelectItem>
-            <SelectItem value="hello.helloName">hello.helloName</SelectItem>
+            <SelectItem value="features.list">features.list</SelectItem>
+            <SelectItem value="members.list">members.list</SelectItem>
+            <SelectItem value="quarters.list">quarters.list</SelectItem>
           </SelectContent>
         </Select>
         <Label htmlFor="name" className="sr-only">
@@ -65,7 +64,7 @@ export function APITester() {
           id="name"
           type="text"
           name="name"
-          placeholder="name (helloName用)"
+          placeholder="(unused)"
         />
         <Button type="submit" variant="secondary">
           Send

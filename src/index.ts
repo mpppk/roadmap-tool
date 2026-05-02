@@ -1,6 +1,7 @@
 import { RPCHandler } from "@orpc/server/fetch";
 import { serve } from "bun";
 import index from "./index.html";
+import { db } from "./db/index";
 import { router } from "./router";
 
 const rpcHandler = new RPCHandler(router);
@@ -10,7 +11,7 @@ const server = serve({
     "/orpc/*": async (req) => {
       const result = await rpcHandler.handle(req, {
         prefix: "/orpc",
-        context: {},
+        context: { db },
       });
       if (result.matched) return result.response;
       return new Response("Not found", { status: 404 });

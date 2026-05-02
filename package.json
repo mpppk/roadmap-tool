@@ -11,7 +11,12 @@
     "lint": "biome lint ./src",
     "format": "biome format --write ./src",
     "format:check": "biome format ./src",
-    "check": "biome check ./src"
+    "check": "biome check ./src",
+    "test": "bun test",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
     "@orpc/client": "^1.14.0",
@@ -22,6 +27,7 @@
     "bun-plugin-tailwind": "^0.1.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "drizzle-orm": "^0.45.2",
     "lucide-react": "^1",
     "react": "^19",
     "react-dom": "^19",
@@ -34,6 +40,7 @@
     "@types/bun": "latest",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "drizzle-kit": "^0.31.10",
     "playwright": "^1.59.1",
     "tailwindcss": "^4.1.11"
   }

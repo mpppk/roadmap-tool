@@ -1,11 +1,11 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "50b95032-4317-4f86-9327-c4ad8d7644a2",
+  "id": "6d57d340-d3e5-4037-947b-52b9f5bc3e77",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
-    "items": {
-      "name": "items",
+    "feature_quarters": {
+      "name": "feature_quarters",
       "columns": {
         "id": {
           "name": "id",
@@ -14,49 +14,64 @@
           "notNull": true,
           "autoincrement": true
         },
-        "roadmap_id": {
-          "name": "roadmap_id",
+        "feature_id": {
+          "name": "feature_id",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "title": {
-          "name": "title",
-          "type": "text",
+        "quarter_id": {
+          "name": "quarter_id",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "status": {
-          "name": "status",
-          "type": "text",
+        "total_person_months": {
+          "name": "total_person_months",
+          "type": "real",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'planned'"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
+          "default": 0
         }
       },
-      "indexes": {},
+      "indexes": {
+        "feature_quarters_feature_id_quarter_id_unique": {
+          "name": "feature_quarters_feature_id_quarter_id_unique",
+          "columns": [
+            "feature_id",
+            "quarter_id"
+          ],
+          "isUnique": true
+        }
+      },
       "foreignKeys": {
-        "items_roadmap_id_roadmaps_id_fk": {
-          "name": "items_roadmap_id_roadmaps_id_fk",
-          "tableFrom": "items",
-          "tableTo": "roadmaps",
+        "feature_quarters_feature_id_features_id_fk": {
+          "name": "feature_quarters_feature_id_features_id_fk",
+          "tableFrom": "feature_quarters",
+          "tableTo": "features",
           "columnsFrom": [
-            "roadmap_id"
+            "feature_id"
           ],
           "columnsTo": [
             "id"
           ],
-          "onDelete": "no action",
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "feature_quarters_quarter_id_quarters_id_fk": {
+          "name": "feature_quarters_quarter_id_quarters_id_fk",
+          "tableFrom": "feature_quarters",
+          "tableTo": "quarters",
+          "columnsFrom": [
+            "quarter_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -64,8 +79,8 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "roadmaps": {
-      "name": "roadmaps",
+    "features": {
+      "name": "features",
       "columns": {
         "id": {
           "name": "id",
@@ -74,18 +89,11 @@
           "notNull": true,
           "autoincrement": true
         },
-        "title": {
-          "name": "title",
+        "name": {
+          "name": "name",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "description": {
-          "name": "description",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         },
         "created_at": {
@@ -96,7 +104,190 @@
           "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "features_name_unique": {
+          "name": "features_name_unique",
+          "columns": [
+            "name"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "member_allocations": {
+      "name": "member_allocations",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "feature_id": {
+          "name": "feature_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "quarter_id": {
+          "name": "quarter_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "member_id": {
+          "name": "member_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "person_months": {
+          "name": "person_months",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        }
+      },
+      "indexes": {
+        "member_allocations_feature_id_quarter_id_member_id_unique": {
+          "name": "member_allocations_feature_id_quarter_id_member_id_unique",
+          "columns": [
+            "feature_id",
+            "quarter_id",
+            "member_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "member_allocations_feature_id_features_id_fk": {
+          "name": "member_allocations_feature_id_features_id_fk",
+          "tableFrom": "member_allocations",
+          "tableTo": "features",
+          "columnsFrom": [
+            "feature_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "member_allocations_quarter_id_quarters_id_fk": {
+          "name": "member_allocations_quarter_id_quarters_id_fk",
+          "tableFrom": "member_allocations",
+          "tableTo": "quarters",
+          "columnsFrom": [
+            "quarter_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "member_allocations_member_id_members_id_fk": {
+          "name": "member_allocations_member_id_members_id_fk",
+          "tableFrom": "member_allocations",
+          "tableTo": "members",
+          "columnsFrom": [
+            "member_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "members": {
+      "name": "members",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "members_name_unique": {
+          "name": "members_name_unique",
+          "columns": [
+            "name"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "quarters": {
+      "name": "quarters",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "year": {
+          "name": "year",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "quarter": {
+          "name": "quarter",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "quarters_year_quarter_unique": {
+          "name": "quarters_year_quarter_unique",
+          "columns": [
+            "year",
+            "quarter"
+          ],
+          "isUnique": true
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

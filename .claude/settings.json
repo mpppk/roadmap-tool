@@ -5,9 +5,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd /home/user/roadmap-tool && ts_out=$(bun run typecheck 2>&1); ts_exit=$?; bunx biome format --write ./src >/dev/null 2>&1; lint_out=$(bunx biome lint ./src 2>&1); lint_exit=$?; [ $ts_exit -ne 0 ] && ts_status=\"FAILED\" || ts_status=\"OK\"; [ $lint_exit -ne 0 ] && lint_status=\"FAILED\" || lint_status=\"OK\"; { [ $ts_exit -ne 0 ] || [ $lint_exit -ne 0 ]; } && prefix=\"⚠️ Checks completed with errors\" || prefix=\"✅ All checks passed\"; jq -n --arg p \"$prefix\" --arg ts \"$ts_status\" --arg lint \"$lint_status\" '{\"systemMessage\": ($p + \":\\n[TypeScript] \" + $ts + \"\\n[Lint] \" + $lint)}'",
+            "command": "bun run typecheck && bun run lint && bun run format",
             "timeout": 60,
-            "statusMessage": "Running TypeScript check, formatter, and linter..."
+            "statusMessage": "Running TypeScript check, linter, and formatter..."
           }
         ]
       }

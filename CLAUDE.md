@@ -1,3 +1,6 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 Default to using Bun instead of Node.js.
 
@@ -19,88 +22,96 @@ Default to using Bun instead of Node.js.
 - Prefer `Bun.file` over `node:fs`'s readFile/writeFile
 - Bun.$`ls` instead of execa.
 
-## Testing
+## Development Commands
 
-Use `bun test` to run tests.
-
-```ts#index.test.ts
-import { test, expect } from "bun:test";
-
-test("hello world", () => {
-  expect(1).toBe(1);
-});
+```sh
+bun dev              # start dev server with HMR
+bun run typecheck    # TypeScript type check (no emit)
+bun run lint         # Biome lint src/
+bun run check        # Biome lint + format check
+bun run format       # Biome format src/ (writes)
+bun test             # run all tests
+bun test src/db/schema.test.ts  # run a single test file
+bun run build        # production build via build.ts
 ```
 
-## Frontend
+Database management (uses Drizzle Kit):
+
+```sh
+bun run db:generate  # generate migration from schema changes
+bun run db:migrate   # apply pending migrations
+bun run db:push      # push schema directly (dev only)
+bun run db:studio    # open Drizzle Studio UI
+```
+
+CI runs: `typecheck` → `lint` → `format:check` → `build`. All must pass before merging.
+
+## Architecture
+
+This is a **team resource allocation / roadmap planning tool**. Users create features (work items), team members, and quarters, then allocate person-months of each member's time to features per quarter.
+
+### Stack
+
+- **Runtime**: Bun with `Bun.serve()` — no Express, no Vite
+- **Frontend**: React 19 SPA, mounted from `src/index.html` → `src/frontend.tsx`
+- **Styling**: Tailwind CSS 4 via `bun-plugin-tailwind`; UI components from shadcn/ui (`src/components/ui/`)
+- **API layer**: [oRPC](https://orpc.unnoq.com/) for end-to-end type-safe RPC over HTTP (`/orpc/*`)
+- **Database**: SQLite via `bun:sqlite` + Drizzle ORM; schema in `src/db/schema.ts`
+- **Validation**: Zod 4
+
+### Request Flow
+
+```
+Browser → React (src/App.tsx)
+       → orpc client (src/orpc-client.ts) → POST /orpc/<procedure>
+       → Bun.serve (src/index.ts) → RPCHandler
+       → router procedure (src/router.ts) — Zod-validated input
+       → Drizzle ORM → SQLite (local file)
+```
+
+All API procedures live in a single file: `src/router.ts`. Procedures are grouped under `features`, `members`, `quarters`, `allocations`, and `export`. The exported `AppRouter` type is imported by the client for full type inference.
+
+### Database Schema
+
+Five tables, all with integer PKs and cascade-on-delete foreign keys:
+
+- `features` — work items (unique name)
+- `members` — team members (unique name)
+- `quarters` — planning periods: `(year, quarter 1-4)` unique pair
+- `feature_quarters` — total person-months budgeted for a feature in a quarter
+- `member_allocations` — individual member's allocation to a feature in a quarter
+
+**Key constraint**: a member's total `personMonths` across all features in a single quarter cannot exceed `1.0`. This is enforced in the `allocations.*` procedures in `router.ts`, not at the DB level.
+
+### Allocation Business Logic
+
+`allocations.updateTotal` — when a feature-quarter's total changes, existing member allocations are **proportionally redistributed** (scaled by `newTotal / oldTotal`), then each is individually capped at the member's remaining quarter capacity.
+
+`allocations.updateMemberAllocation` — silently caps the requested value at `1.0 - usedElsewhere` for that member×quarter.
+
+`allocations.moveQuarter` — merges all feature-quarter data (total + member allocations) from one quarter into another, respecting member caps.
+
+### Path Alias
+
+`@/*` resolves to `src/*` (configured in `tsconfig.json` and used throughout the codebase).
+
+### CLI
+
+`src/cli.ts` provides a thin oRPC client CLI for features and members. It connects to `ROADMAP_URL` (default `http://localhost:3000`) and requires the server to be running.
+
+```sh
+bun src/cli.ts features list
+bun src/cli.ts members add "Alice"
+```
+
+### Testing
+
+Tests use `bun:test`. The only test file is `src/db/schema.test.ts`, which spins up an in-memory SQLite database via Drizzle to verify schema constraints.
+
+### Frontend
 
 Use HTML imports with `Bun.serve()`. Don't use `vite`. HTML imports fully support React, CSS, Tailwind.
 
-Server:
-
-```ts#index.ts
-import index from "./index.html"
-
-Bun.serve({
-  routes: {
-    "/": index,
-    "/api/users/:id": {
-      GET: (req) => {
-        return new Response(JSON.stringify({ id: req.params.id }));
-      },
-    },
-  },
-  // optional websocket support
-  websocket: {
-    open: (ws) => {
-      ws.send("Hello, world!");
-    },
-    message: (ws, message) => {
-      ws.send(message);
-    },
-    close: (ws) => {
-      // handle close
-    }
-  },
-  development: {
-    hmr: true,
-    console: true,
-  }
-})
-```
-
-HTML files can import .tsx, .jsx or .js files directly and Bun's bundler will transpile & bundle automatically. `<link>` tags can point to stylesheets and Bun's CSS bundler will bundle.
-
-```html#index.html
-<html>
-  <body>
-    <h1>Hello, world!</h1>
-    <script type="module" src="./frontend.tsx"></script>
-  </body>
-</html>
-```
-
-With the following `frontend.tsx`:
-
-```tsx#frontend.tsx
-import React from "react";
-import { createRoot } from "react-dom/client";
-
-// import .css files directly and it works
-import './index.css';
-
-const root = createRoot(document.body);
-
-export default function Frontend() {
-  return <h1>Hello, world!</h1>;
-}
-
-root.render(<Frontend />);
-```
-
-Then, run index.ts
-
-```sh
-bun --hot ./index.ts
-```
+`src/index.html` is imported directly into `src/index.ts` as a route handler — Bun's bundler transpiles and bundles `src/frontend.tsx` and CSS automatically. HMR is enabled in development via `import.meta.hot`.
 
 For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.

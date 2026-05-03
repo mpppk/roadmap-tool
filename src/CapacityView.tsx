@@ -1,9 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import "./capacity.css";
 import { orpc } from "./orpc-client";
 
@@ -300,7 +295,13 @@ function MemberLabelCell({
       <button
         type="button"
         className="member-name"
-        style={{ cursor: "text", background: "none", border: "none", padding: 0, font: "inherit" }}
+        style={{
+          cursor: "text",
+          background: "none",
+          border: "none",
+          padding: 0,
+          font: "inherit",
+        }}
         onClick={startEdit}
         title="クリックで名前を編集"
       >
@@ -496,33 +497,30 @@ export function CapacityView() {
     await orpc.members.rename({ id, name });
   }, []);
 
-  const deleteMember = useCallback(
-    async (id: number) => {
-      setBusy(true);
-      try {
-        await orpc.members.delete({ id });
-        setMembers((ms) => ms.filter((m) => m.id !== id));
-        // Remove the member's allocations from local state
-        setFeatureRows((rows) =>
-          rows.map((r) => {
-            const newMap = new Map(r.quarters);
-            for (const [qId, qd] of newMap) {
-              newMap.set(qId, {
-                ...qd,
-                memberAllocations: qd.memberAllocations.filter(
-                  (a) => a.memberId !== id,
-                ),
-              });
-            }
-            return { ...r, quarters: newMap };
-          }),
-        );
-      } finally {
-        setBusy(false);
-      }
-    },
-    [],
-  );
+  const deleteMember = useCallback(async (id: number) => {
+    setBusy(true);
+    try {
+      await orpc.members.delete({ id });
+      setMembers((ms) => ms.filter((m) => m.id !== id));
+      // Remove the member's allocations from local state
+      setFeatureRows((rows) =>
+        rows.map((r) => {
+          const newMap = new Map(r.quarters);
+          for (const [qId, qd] of newMap) {
+            newMap.set(qId, {
+              ...qd,
+              memberAllocations: qd.memberAllocations.filter(
+                (a) => a.memberId !== id,
+              ),
+            });
+          }
+          return { ...r, quarters: newMap };
+        }),
+      );
+    } finally {
+      setBusy(false);
+    }
+  }, []);
 
   const addQuarter = async () => {
     setBusy(true);
@@ -560,7 +558,9 @@ export function CapacityView() {
         <span className="sep">›</span>
         <span>Feature キャパシティ</span>
         {busy && (
-          <span style={{ marginLeft: 8, fontSize: 11, color: "var(--cv-text-3)" }}>
+          <span
+            style={{ marginLeft: 8, fontSize: 11, color: "var(--cv-text-3)" }}
+          >
             保存中…
           </span>
         )}
@@ -617,7 +617,10 @@ export function CapacityView() {
                           onRename={(name) => renameFeature(feature.id, name)}
                         />
                         {hasOverflow && (
-                          <span className="overflow-dot" title="未アサインあり" />
+                          <span
+                            className="overflow-dot"
+                            title="未アサインあり"
+                          />
                         )}
                       </div>
                     </td>
@@ -633,9 +636,7 @@ export function CapacityView() {
                             value={qd.totalCapacity}
                             unassigned={qd.unassignedCapacity}
                             maxVal={MAX_VAL}
-                            onCommit={(v) =>
-                              updateTotal(feature.id, q.id, v)
-                            }
+                            onCommit={(v) => updateTotal(feature.id, q.id, v)}
                             rowHeight={42}
                           />
                         </td>
@@ -764,9 +765,7 @@ export function CapacityView() {
           >
             + Quarter
           </button>
-          <span className="hint-text">
-            クリックで数値編集 · + で担当者展開
-          </span>
+          <span className="hint-text">クリックで数値編集 · + で担当者展開</span>
         </div>
       </div>
     </div>

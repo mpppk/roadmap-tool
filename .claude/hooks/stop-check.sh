@@ -9,7 +9,7 @@ fi
 
 TMP="$(mktemp)"
 
-if bun run typecheck >"$TMP" 2>&1 && bun run lint >>"$TMP" 2>&1; then
+if bun run typecheck >"$TMP" 2>&1 && bun run lint >>"$TMP" 2>&1 && bun run format:check >>"$TMP" 2>&1; then
   rm -f "$TMP"
   exit 0
 fi

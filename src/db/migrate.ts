@@ -1,5 +1,7 @@
 import type { Database } from "bun:sqlite";
-import migration0000 from "../../drizzle/0000_needy_shocker.sql" with { type: "text" };
+import migration0000 from "../../drizzle/0000_needy_shocker.sql" with {
+  type: "text",
+};
 
 const MIGRATIONS: Array<{ name: string; sql: string }> = [
   { name: "0000_needy_shocker", sql: migration0000 },

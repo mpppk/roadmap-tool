@@ -5,6 +5,7 @@ node_modules
 out
 dist
 *.tgz
+roadmap-tool
 
 # code coverage
 coverage

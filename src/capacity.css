@@ -47,6 +47,36 @@
   color: var(--border-strong);
 }
 
+/* Navigation tabs */
+.cv-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.cv-nav-link {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--cv-text-2);
+  transition:
+    background 0.1s,
+    color 0.1s;
+}
+.cv-nav-link:hover {
+  background: var(--bg);
+  color: var(--cv-text);
+}
+.cv-nav-link.active {
+  background: var(--bg);
+  color: var(--cv-text);
+  font-weight: 500;
+}
+
 .cv-body {
   flex: 1;
   overflow: hidden;

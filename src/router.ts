@@ -387,6 +387,34 @@ const allocationsUpdateMemberAllocation = o
         .values({ featureId, quarterId, memberId, capacity: capped });
     }
 
+    const updatedAllocs = await db
+      .select()
+      .from(memberAllocations)
+      .where(
+        and(
+          eq(memberAllocations.featureId, featureId),
+          eq(memberAllocations.quarterId, quarterId),
+        ),
+      );
+    const newTotal = updatedAllocs.reduce((s, a) => s + a.capacity, 0);
+
+    const existingFq = await getFeatureQuarterRow(db, featureId, quarterId);
+    if (existingFq) {
+      await db
+        .update(featureQuarters)
+        .set({ totalCapacity: newTotal })
+        .where(
+          and(
+            eq(featureQuarters.featureId, featureId),
+            eq(featureQuarters.quarterId, quarterId),
+          ),
+        );
+    } else if (newTotal > 0) {
+      await db
+        .insert(featureQuarters)
+        .values({ featureId, quarterId, totalCapacity: newTotal });
+    }
+
     return buildFeatureQuarterResult(db, featureId, quarterId);
   });
 

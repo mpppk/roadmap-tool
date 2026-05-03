@@ -1,0 +1,413 @@
+/* Capacity view CSS */
+.cv-root {
+  --bg: #f7f7f6;
+  --surface: #ffffff;
+  --border: #e2e2df;
+  --border-strong: #c8c8c4;
+  --cv-text: #1a1a18;
+  --cv-text-2: #6b6b68;
+  --cv-text-3: #9e9e9a;
+  --cv-accent: #2563eb;
+  --cv-red: #dc2626;
+  --cv-red-bg: #fef2f2;
+  --row-h: 42px;
+  --member-h: 34px;
+  --header-h: 44px;
+  --col-label: 220px;
+  --col-q: 148px;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--cv-text);
+}
+
+/* Header */
+.cv-header {
+  height: 52px;
+  min-height: 52px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--cv-text-2);
+  flex-shrink: 0;
+}
+.cv-header h1 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--cv-text);
+}
+.cv-header .sep {
+  color: var(--border-strong);
+}
+
+.cv-body {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Table wrapper */
+.cv-table-wrapper {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+}
+.cv-table-wrapper::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.cv-table-wrapper::-webkit-scrollbar-track {
+  background: transparent;
+}
+.cv-table-wrapper::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+
+.cv-table {
+  border-collapse: collapse;
+  min-width: 100%;
+  font-size: 13px;
+}
+
+/* Sticky header */
+.cv-table thead th {
+  height: var(--header-h);
+  background: var(--surface);
+  border-bottom: 2px solid var(--border-strong);
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--cv-text-2);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.th-label {
+  width: var(--col-label);
+  min-width: var(--col-label);
+  text-align: left;
+  padding: 0 14px;
+  position: sticky;
+  left: 0;
+  z-index: 11;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+}
+.th-quarter {
+  text-align: center;
+  padding: 0 8px;
+  border-right: 1px solid var(--border);
+}
+
+/* Feature row */
+.tr-feature td {
+  background: var(--surface);
+}
+.cv-section-sep td {
+  height: 6px;
+  background: var(--bg);
+  border-bottom: 2px solid var(--border-strong);
+}
+.td-label {
+  height: var(--row-h);
+  padding: 0 14px;
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  background: inherit;
+  border-right: 1px solid var(--border);
+  white-space: nowrap;
+  user-select: none;
+}
+.td-label-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+}
+.toggle-btn {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--cv-text-2);
+  line-height: 1;
+  transition: background 0.1s;
+}
+.toggle-btn:hover {
+  background: var(--bg);
+}
+.feature-name {
+  font-weight: 500;
+  color: var(--cv-text);
+  font-size: 13px;
+  cursor: text;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  text-align: left;
+}
+.feature-name-input {
+  font-weight: 500;
+  font-size: 13px;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  border: none;
+  border-bottom: 1.5px solid var(--cv-accent);
+  outline: none;
+  background: transparent;
+  color: var(--cv-text);
+  padding: 0;
+  min-width: 80px;
+  width: 160px;
+}
+.overflow-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cv-red);
+  flex-shrink: 0;
+}
+
+/* Quarter cells */
+.td-quarter {
+  height: var(--row-h);
+  padding: 0;
+  border-right: 1px solid var(--border);
+  position: relative;
+  vertical-align: middle;
+}
+
+/* Heatmap cell */
+.hm-cell {
+  position: relative;
+  width: 100%;
+  height: var(--row-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: filter 0.1s;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+}
+.hm-cell:hover {
+  filter: brightness(0.93);
+}
+.hm-val {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  position: relative;
+  z-index: 1;
+  transition: color 0.15s;
+  user-select: none;
+}
+.hm-input {
+  width: 52px;
+  padding: 2px 6px;
+  text-align: center;
+  border: none;
+  border-radius: 3px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  outline: none;
+  background: rgba(255, 255, 255, 0.55);
+  position: relative;
+  z-index: 1;
+}
+
+/* Heatmap member sub-row */
+.hm-member-cell {
+  position: relative;
+  width: 100%;
+  height: var(--member-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: filter 0.1s;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+}
+.hm-member-cell:hover {
+  filter: brightness(0.93);
+}
+.hm-member-val {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  position: relative;
+  z-index: 1;
+  user-select: none;
+}
+
+/* Member rows */
+.tr-member td {
+  background: var(--bg);
+  height: var(--member-h);
+  border-bottom: 1px solid var(--border);
+}
+.tr-member.is-overflow td {
+  background: var(--cv-red-bg);
+}
+.td-member-label {
+  padding: 0 14px 0 32px;
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  background: inherit;
+  border-right: 1px solid var(--border);
+  white-space: nowrap;
+}
+.member-name {
+  font-size: 12px;
+  color: var(--cv-text-2);
+}
+.tr-member.is-overflow .member-name {
+  color: var(--cv-red);
+  font-weight: 500;
+}
+.member-name-input {
+  font-size: 12px;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  border: none;
+  border-bottom: 1.5px solid var(--cv-accent);
+  outline: none;
+  background: transparent;
+  color: var(--cv-text-2);
+  padding: 0;
+  width: 100px;
+}
+.del-member-btn {
+  margin-left: 4px;
+  width: 16px;
+  height: 16px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--cv-text-3);
+  font-size: 13px;
+  line-height: 1;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.1s;
+  padding: 0;
+}
+.td-member-label:hover .del-member-btn {
+  opacity: 1;
+}
+.del-member-btn:hover {
+  color: var(--cv-red);
+  background: var(--cv-red-bg);
+}
+.td-member-val {
+  text-align: center;
+  font-size: 12px;
+  border-right: 1px solid var(--border);
+  height: var(--member-h);
+  vertical-align: middle;
+}
+
+/* Unassigned member row */
+.tr-unassigned-member td {
+  background: #fff8f8;
+  height: var(--member-h);
+  border-bottom: 1px solid var(--border);
+}
+.td-unassigned-label {
+  padding: 0 14px 0 32px;
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  background: #fff8f8;
+  border-right: 1px solid var(--border);
+  white-space: nowrap;
+}
+.unassigned-name {
+  font-size: 12px;
+  color: var(--cv-red);
+  font-style: italic;
+}
+.unassigned-val {
+  font-size: 12px;
+  color: var(--cv-red);
+  font-weight: 600;
+}
+.mval-dash {
+  font-size: 12px;
+  color: var(--cv-text-3);
+}
+
+/* Toolbar */
+.cv-toolbar {
+  height: 44px;
+  min-height: 44px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 8px;
+}
+.btn-sm {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  font-size: 12px;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--cv-text);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.btn-sm:hover {
+  background: var(--bg);
+}
+.btn-sm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.hint-text {
+  font-size: 11px;
+  color: var(--cv-text-3);
+  margin-left: auto;
+}
+
+/* Loading / error */
+.cv-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--cv-text-2);
+  font-size: 13px;
+}

@@ -320,7 +320,8 @@
   transition: opacity 0.1s;
   padding: 0;
 }
-.td-member-label:hover .del-member-btn {
+.td-member-label:hover .del-member-btn,
+.td-label:hover .del-member-btn {
   opacity: 1;
 }
 .del-member-btn:hover {

@@ -5,9 +5,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun run typecheck && bun run lint && bun run format",
-            "timeout": 60,
-            "statusMessage": "Running TypeScript check, linter, and formatter..."
+            "command": ".claude/hooks/stop-check.sh",
+            "timeout": 60
           }
         ]
       }

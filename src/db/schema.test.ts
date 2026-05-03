@@ -8,7 +8,6 @@ import {
   featureQuarters,
   memberAllocations,
 } from "./schema";
-import { eq, and } from "drizzle-orm";
 
 describe("DB schema", () => {
   const sqlite = new Database(":memory:");

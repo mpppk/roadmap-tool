@@ -1,7 +1,7 @@
 import { RPCHandler } from "@orpc/server/fetch";
 import { serve } from "bun";
-import index from "./index.html";
 import { db } from "./db/index";
+import index from "./index.html";
 import { router } from "./router";
 
 const rpcHandler = new RPCHandler(router);

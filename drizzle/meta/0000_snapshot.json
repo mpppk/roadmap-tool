@@ -28,8 +28,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "total_person_months": {
-          "name": "total_person_months",
+        "total_capacity": {
+          "name": "total_capacity",
           "type": "real",
           "primaryKey": false,
           "notNull": true,
@@ -149,8 +149,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "person_months": {
-          "name": "person_months",
+        "capacity": {
+          "name": "capacity",
           "type": "real",
           "primaryKey": false,
           "notNull": true,

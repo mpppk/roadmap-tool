@@ -1,12 +1,12 @@
 import { Database } from "bun:sqlite";
-import { drizzle } from "drizzle-orm/bun-sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { drizzle } from "drizzle-orm/bun-sqlite";
 import {
+  featureQuarters,
   features,
+  memberAllocations,
   members,
   quarters,
-  featureQuarters,
-  memberAllocations,
 } from "./schema";
 
 describe("DB schema", () => {

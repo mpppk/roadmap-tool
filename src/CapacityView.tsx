@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import "./capacity.css";
+import { navigate } from "./navigate";
 import { orpc } from "./orpc-client";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -569,7 +570,10 @@ export function CapacityView() {
         <header className="cv-header">
           <h1>Roadmap</h1>
           <span className="sep">›</span>
-          <span>Feature キャパシティ</span>
+          <nav className="cv-nav">
+            <button type="button" className="cv-nav-link active" onClick={() => navigate("/features")}>Features</button>
+            <button type="button" className="cv-nav-link" onClick={() => navigate("/members")}>Members</button>
+          </nav>
         </header>
         <div className="cv-loading">読み込み中…</div>
       </div>
@@ -581,7 +585,10 @@ export function CapacityView() {
       <header className="cv-header">
         <h1>Roadmap</h1>
         <span className="sep">›</span>
-        <span>Feature キャパシティ</span>
+        <nav className="cv-nav">
+          <button type="button" className="cv-nav-link active" onClick={() => navigate("/features")}>Features</button>
+          <button type="button" className="cv-nav-link" onClick={() => navigate("/members")}>Members</button>
+        </nav>
         {busy && (
           <span
             style={{ marginLeft: 8, fontSize: 11, color: "var(--cv-text-3)" }}

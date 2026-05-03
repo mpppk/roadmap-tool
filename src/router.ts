@@ -220,8 +220,7 @@ const allocationsGetFeatureView = o
         memberAllocations: allMembers
           .map((m) => ({
             member: m,
-            capacity:
-              qAllocs.find((a) => a.memberId === m.id)?.capacity ?? 0,
+            capacity: qAllocs.find((a) => a.memberId === m.id)?.capacity ?? 0,
           }))
           .filter((a) => a.capacity > 0),
       };
@@ -256,8 +255,7 @@ const allocationsGetMemberView = o
         featureAllocations: allFeatures
           .map((f) => ({
             feature: f,
-            capacity:
-              qAllocs.find((a) => a.featureId === f.id)?.capacity ?? 0,
+            capacity: qAllocs.find((a) => a.featureId === f.id)?.capacity ?? 0,
           }))
           .filter((a) => a.capacity > 0),
       };

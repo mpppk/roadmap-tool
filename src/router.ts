@@ -123,7 +123,7 @@ async function getMemberUsageInQuarter(
   excludeFeatureId: number,
 ): Promise<number> {
   const rows = await db
-    .select({ total: sql<number>`sum(${memberAllocations.personMonths})` })
+    .select({ total: sql<number>`sum(${memberAllocations.capacity})` })
     .from(memberAllocations)
     .where(
       and(
@@ -158,7 +158,7 @@ async function buildFeatureQuarterResult(
   quarterId: number,
 ) {
   const fq = await getFeatureQuarterRow(db, featureId, quarterId);
-  const totalPersonMonths = fq?.totalPersonMonths ?? 0;
+  const totalCapacity = fq?.totalCapacity ?? 0;
 
   const allocs = await db
     .select()
@@ -170,15 +170,15 @@ async function buildFeatureQuarterResult(
       ),
     );
 
-  const assignedTotal = allocs.reduce((s, a) => s + a.personMonths, 0);
+  const assignedTotal = allocs.reduce((s, a) => s + a.capacity, 0);
   return {
     featureId,
     quarterId,
-    totalPersonMonths,
-    unassignedPersonMonths: Math.max(0, totalPersonMonths - assignedTotal),
+    totalCapacity,
+    unassignedCapacity: Math.max(0, totalCapacity - assignedTotal),
     memberAllocations: allocs.map((a) => ({
       memberId: a.memberId,
-      personMonths: a.personMonths,
+      capacity: a.capacity,
     })),
   };
 }
@@ -210,20 +210,20 @@ const allocationsGetFeatureView = o
 
     const quarterData = allQuarters.map((q) => {
       const fq = fqRows.find((r) => r.quarterId === q.id);
-      const total = fq?.totalPersonMonths ?? 0;
+      const total = fq?.totalCapacity ?? 0;
       const qAllocs = maRows.filter((r) => r.quarterId === q.id);
-      const assignedTotal = qAllocs.reduce((s, a) => s + a.personMonths, 0);
+      const assignedTotal = qAllocs.reduce((s, a) => s + a.capacity, 0);
       return {
         quarter: q,
-        totalPersonMonths: total,
-        unassignedPersonMonths: Math.max(0, total - assignedTotal),
+        totalCapacity: total,
+        unassignedCapacity: Math.max(0, total - assignedTotal),
         memberAllocations: allMembers
           .map((m) => ({
             member: m,
-            personMonths:
-              qAllocs.find((a) => a.memberId === m.id)?.personMonths ?? 0,
+            capacity:
+              qAllocs.find((a) => a.memberId === m.id)?.capacity ?? 0,
           }))
-          .filter((a) => a.personMonths > 0),
+          .filter((a) => a.capacity > 0),
       };
     });
 
@@ -249,17 +249,17 @@ const allocationsGetMemberView = o
 
     const quarterData = allQuarters.map((q) => {
       const qAllocs = maRows.filter((r) => r.quarterId === q.id);
-      const qTotal = qAllocs.reduce((s, a) => s + a.personMonths, 0);
+      const qTotal = qAllocs.reduce((s, a) => s + a.capacity, 0);
       return {
         quarter: q,
-        totalPersonMonths: qTotal,
+        totalCapacity: qTotal,
         featureAllocations: allFeatures
           .map((f) => ({
             feature: f,
-            personMonths:
-              qAllocs.find((a) => a.featureId === f.id)?.personMonths ?? 0,
+            capacity:
+              qAllocs.find((a) => a.featureId === f.id)?.capacity ?? 0,
           }))
-          .filter((a) => a.personMonths > 0),
+          .filter((a) => a.capacity > 0),
       };
     });
 
@@ -271,21 +271,21 @@ const allocationsUpdateTotal = o
     z.object({
       featureId: z.number().int(),
       quarterId: z.number().int(),
-      totalPersonMonths: z.number().min(0),
+      totalCapacity: z.number().min(0),
     }),
   )
   .handler(async ({ input, context }) => {
     const { db } = context;
-    const { featureId, quarterId, totalPersonMonths: newTotal } = input;
+    const { featureId, quarterId, totalCapacity: newTotal } = input;
 
     // Upsert feature_quarters
     const existing = await getFeatureQuarterRow(db, featureId, quarterId);
-    const oldTotal = existing?.totalPersonMonths ?? 0;
+    const oldTotal = existing?.totalCapacity ?? 0;
 
     if (existing) {
       await db
         .update(featureQuarters)
-        .set({ totalPersonMonths: newTotal })
+        .set({ totalCapacity: newTotal })
         .where(
           and(
             eq(featureQuarters.featureId, featureId),
@@ -295,7 +295,7 @@ const allocationsUpdateTotal = o
     } else {
       await db
         .insert(featureQuarters)
-        .values({ featureId, quarterId, totalPersonMonths: newTotal });
+        .values({ featureId, quarterId, totalCapacity: newTotal });
     }
 
     // Proportionally redistribute member allocations
@@ -310,7 +310,7 @@ const allocationsUpdateTotal = o
       );
 
     for (const alloc of currentAllocs) {
-      const ratio = oldTotal > 0 ? alloc.personMonths / oldTotal : 0;
+      const ratio = oldTotal > 0 ? alloc.capacity / oldTotal : 0;
       const candidate = ratio * newTotal;
 
       // Cap by member×quarter limit (1.0 across all features)
@@ -330,7 +330,7 @@ const allocationsUpdateTotal = o
       } else {
         await db
           .update(memberAllocations)
-          .set({ personMonths: newValue })
+          .set({ capacity: newValue })
           .where(eq(memberAllocations.id, alloc.id));
       }
     }
@@ -344,12 +344,12 @@ const allocationsUpdateMemberAllocation = o
       featureId: z.number().int(),
       quarterId: z.number().int(),
       memberId: z.number().int(),
-      personMonths: z.number().min(0),
+      capacity: z.number().min(0),
     }),
   )
   .handler(async ({ input, context }) => {
     const { db } = context;
-    const { featureId, quarterId, memberId, personMonths } = input;
+    const { featureId, quarterId, memberId, capacity } = input;
 
     // Check member×quarter cap
     const usedElsewhere = await getMemberUsageInQuarter(
@@ -359,7 +359,7 @@ const allocationsUpdateMemberAllocation = o
       featureId,
     );
     const cap = Math.max(0, 1.0 - usedElsewhere);
-    const capped = Math.min(personMonths, cap);
+    const capped = Math.min(capacity, cap);
 
     const existing = await db
       .select()
@@ -381,12 +381,12 @@ const allocationsUpdateMemberAllocation = o
     } else if (existing.length > 0) {
       await db
         .update(memberAllocations)
-        .set({ personMonths: capped })
+        .set({ capacity: capped })
         .where(eq(memberAllocations.id, existing[0]!.id));
     } else {
       await db
         .insert(memberAllocations)
-        .values({ featureId, quarterId, memberId, personMonths: capped });
+        .values({ featureId, quarterId, memberId, capacity: capped });
     }
 
     return buildFeatureQuarterResult(db, featureId, quarterId);
@@ -409,12 +409,12 @@ const allocationsMoveQuarter = o
 
     // Upsert destination feature_quarters
     const toFq = await getFeatureQuarterRow(db, featureId, toQuarterId);
-    const newTotal = (toFq?.totalPersonMonths ?? 0) + fromFq.totalPersonMonths;
+    const newTotal = (toFq?.totalCapacity ?? 0) + fromFq.totalCapacity;
 
     if (toFq) {
       await db
         .update(featureQuarters)
-        .set({ totalPersonMonths: newTotal })
+        .set({ totalCapacity: newTotal })
         .where(
           and(
             eq(featureQuarters.featureId, featureId),
@@ -425,7 +425,7 @@ const allocationsMoveQuarter = o
       await db.insert(featureQuarters).values({
         featureId,
         quarterId: toQuarterId,
-        totalPersonMonths: newTotal,
+        totalCapacity: newTotal,
       });
     }
 
@@ -460,21 +460,21 @@ const allocationsMoveQuarter = o
       );
       const cap = Math.max(0, 1.0 - usedElsewhere);
       const merged = Math.min(
-        (toExisting[0]?.personMonths ?? 0) + alloc.personMonths,
+        (toExisting[0]?.capacity ?? 0) + alloc.capacity,
         cap,
       );
 
       if (toExisting.length > 0) {
         await db
           .update(memberAllocations)
-          .set({ personMonths: merged })
+          .set({ capacity: merged })
           .where(eq(memberAllocations.id, toExisting[0]!.id));
       } else {
         await db.insert(memberAllocations).values({
           featureId,
           quarterId: toQuarterId,
           memberId: alloc.memberId,
-          personMonths: merged,
+          capacity: merged,
         });
       }
     }
@@ -521,7 +521,7 @@ const exportFeatureCSV = o.input(z.object({})).handler(async ({ context }) => {
       const fq = fqRows.find(
         (r) => r.featureId === f.id && r.quarterId === q.id,
       );
-      return fq?.totalPersonMonths ?? 0;
+      return fq?.totalCapacity ?? 0;
     });
     return [f.name, ...cells].join(",");
   });
@@ -552,7 +552,7 @@ const exportMemberCSV = o.input(z.object({})).handler(async ({ context }) => {
           (r) =>
             r.memberId === m.id && r.featureId === f.id && r.quarterId === q.id,
         );
-        return alloc?.personMonths ?? 0;
+        return alloc?.capacity ?? 0;
       });
       if (cells.some((c) => c > 0)) {
         rows.push([m.name, f.name, ...cells].join(","));

@@ -2,7 +2,7 @@ CREATE TABLE `feature_quarters` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`feature_id` integer NOT NULL,
 	`quarter_id` integer NOT NULL,
-	`total_person_months` real DEFAULT 0 NOT NULL,
+	`total_capacity` real DEFAULT 0 NOT NULL,
 	FOREIGN KEY (`feature_id`) REFERENCES `features`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`quarter_id`) REFERENCES `quarters`(`id`) ON UPDATE no action ON DELETE cascade
 );
@@ -20,7 +20,7 @@ CREATE TABLE `member_allocations` (
 	`feature_id` integer NOT NULL,
 	`quarter_id` integer NOT NULL,
 	`member_id` integer NOT NULL,
-	`person_months` real DEFAULT 0 NOT NULL,
+	`capacity` real DEFAULT 0 NOT NULL,
 	FOREIGN KEY (`feature_id`) REFERENCES `features`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`quarter_id`) REFERENCES `quarters`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`member_id`) REFERENCES `members`(`id`) ON UPDATE no action ON DELETE cascade

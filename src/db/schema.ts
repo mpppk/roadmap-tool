@@ -42,7 +42,7 @@ export const featureQuarters = sqliteTable(
     quarterId: integer("quarter_id")
       .notNull()
       .references(() => quarters.id, { onDelete: "cascade" }),
-    totalPersonMonths: real("total_person_months").notNull().default(0),
+    totalCapacity: real("total_capacity").notNull().default(0),
   },
   (t) => [unique().on(t.featureId, t.quarterId)],
 );
@@ -60,7 +60,7 @@ export const memberAllocations = sqliteTable(
     memberId: integer("member_id")
       .notNull()
       .references(() => members.id, { onDelete: "cascade" }),
-    personMonths: real("person_months").notNull().default(0),
+    capacity: real("capacity").notNull().default(0),
   },
   (t) => [unique().on(t.featureId, t.quarterId, t.memberId)],
 );

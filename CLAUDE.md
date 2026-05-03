@@ -48,7 +48,7 @@ CI runs: `typecheck` → `lint` → `format:check` → `build`. All must pass be
 
 ## Architecture
 
-This is a **team resource allocation / roadmap planning tool**. Users create features (work items), team members, and quarters, then allocate person-months of each member's time to features per quarter.
+This is a **team resource allocation / roadmap planning tool**. Users create features (work items), team members, and quarters, then allocate capacity (monthly, 0–1) of each member's time to features per quarter.
 
 ### Stack
 
@@ -78,18 +78,20 @@ Five tables, all with integer PKs and cascade-on-delete foreign keys:
 - `features` — work items (unique name)
 - `members` — team members (unique name)
 - `quarters` — planning periods: `(year, quarter 1-4)` unique pair
-- `feature_quarters` — total person-months budgeted for a feature in a quarter
-- `member_allocations` — individual member's allocation to a feature in a quarter
+- `feature_quarters` — total monthly capacity (`totalCapacity`) budgeted for a feature in a quarter
+- `member_allocations` — individual member's monthly capacity (`capacity`, 0–1) allocated to a feature in a quarter
 
-**Key constraint**: a member's total `personMonths` across all features in a single quarter cannot exceed `1.0`. This is enforced in the `allocations.*` procedures in `router.ts`, not at the DB level.
+**Capacity unit**: capacity is always monthly (0 = idle, 1 = full). Quarter display aggregates 3 months (max 3.0).
+
+**Key constraint**: a member's total `capacity` across all features in a single month cannot exceed `1.0`. This is enforced in the `allocations.*` procedures in `router.ts`, not at the DB level.
 
 ### Allocation Business Logic
 
-`allocations.updateTotal` — when a feature-quarter's total changes, existing member allocations are **proportionally redistributed** (scaled by `newTotal / oldTotal`), then each is individually capped at the member's remaining quarter capacity.
+`allocations.updateTotal` — when a feature-quarter's total capacity changes, existing member allocations are **proportionally redistributed** (scaled by `newTotal / oldTotal`), then each is individually capped at the member's remaining monthly capacity.
 
-`allocations.updateMemberAllocation` — silently caps the requested value at `1.0 - usedElsewhere` for that member×quarter.
+`allocations.updateMemberAllocation` — silently caps the requested value at `1.0 - usedElsewhere` for that member×month.
 
-`allocations.moveQuarter` — merges all feature-quarter data (total + member allocations) from one quarter into another, respecting member caps.
+`allocations.moveQuarter` — merges all feature-quarter data (total + member allocations) from one quarter into another, respecting member monthly caps.
 
 ### Path Alias
 

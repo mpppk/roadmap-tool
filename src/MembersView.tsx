@@ -10,7 +10,11 @@ type Member = { id: number; name: string };
 
 type MemberQuarterData = {
   totalCapacity: number;
-  featureAllocations: Array<{ featureId: number; featureName: string; capacity: number }>;
+  featureAllocations: Array<{
+    featureId: number;
+    featureName: string;
+    capacity: number;
+  }>;
 };
 
 type MemberRow = {
@@ -270,8 +274,20 @@ export function MembersView() {
           <h1>Roadmap</h1>
           <span className="sep">›</span>
           <nav className="cv-nav">
-            <button type="button" className="cv-nav-link" onClick={() => navigate("/features")}>Features</button>
-            <button type="button" className="cv-nav-link active" onClick={() => navigate("/members")}>Members</button>
+            <button
+              type="button"
+              className="cv-nav-link"
+              onClick={() => navigate("/features")}
+            >
+              Features
+            </button>
+            <button
+              type="button"
+              className="cv-nav-link active"
+              onClick={() => navigate("/members")}
+            >
+              Members
+            </button>
           </nav>
         </header>
         <div className="cv-loading">読み込み中…</div>
@@ -285,8 +301,20 @@ export function MembersView() {
         <h1>Roadmap</h1>
         <span className="sep">›</span>
         <nav className="cv-nav">
-          <button type="button" className="cv-nav-link" onClick={() => navigate("/features")}>Features</button>
-          <button type="button" className="cv-nav-link active" onClick={() => navigate("/members")}>Members</button>
+          <button
+            type="button"
+            className="cv-nav-link"
+            onClick={() => navigate("/features")}
+          >
+            Features
+          </button>
+          <button
+            type="button"
+            className="cv-nav-link active"
+            onClick={() => navigate("/members")}
+          >
+            Members
+          </button>
         </nav>
         {busy && (
           <span
@@ -381,7 +409,11 @@ export function MembersView() {
                         <td
                           className="td-label td-member-label"
                           colSpan={quarters.length + 1}
-                          style={{ color: "var(--cv-text-3)", fontStyle: "italic", fontSize: 12 }}
+                          style={{
+                            color: "var(--cv-text-3)",
+                            fontStyle: "italic",
+                            fontSize: 12,
+                          }}
                         >
                           アサインなし
                         </td>
@@ -390,7 +422,10 @@ export function MembersView() {
                   } else {
                     for (const [featureId, featureName] of featureMap) {
                       rows.push(
-                        <tr key={`${member.id}-${featureId}`} className="tr-member">
+                        <tr
+                          key={`${member.id}-${featureId}`}
+                          className="tr-member"
+                        >
                           <td className="td-label td-member-label">
                             <span className="member-name">{featureName}</span>
                           </td>
@@ -416,7 +451,10 @@ export function MembersView() {
                                   <span
                                     className="hm-member-val"
                                     style={{
-                                      color: value === 0 ? "transparent" : heatBg(value, 1).fg,
+                                      color:
+                                        value === 0
+                                          ? "transparent"
+                                          : heatBg(value, 1).fg,
                                     }}
                                   >
                                     {fmt(value)}

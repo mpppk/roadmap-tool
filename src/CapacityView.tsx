@@ -199,9 +199,11 @@ function HeatmapMemberCell({
 function FeatureNameCell({
   name,
   onRename,
+  onDelete,
 }: {
   name: string;
   onRename: (name: string) => void;
+  onDelete: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(name);
@@ -237,14 +239,27 @@ function FeatureNameCell({
     );
   }
   return (
-    <button
-      type="button"
-      className="feature-name"
-      onClick={startEdit}
-      title="クリックで名前を編集"
-    >
-      {name}
-    </button>
+    <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+      <button
+        type="button"
+        className="feature-name"
+        onClick={startEdit}
+        title="クリックで名前を編集"
+      >
+        {name}
+      </button>
+      <button
+        type="button"
+        className="del-member-btn"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
+        title="Featureを削除"
+      >
+        ×
+      </button>
+    </div>
   );
 }
 
@@ -479,6 +494,16 @@ export function CapacityView() {
     await orpc.features.rename({ id, name });
   }, []);
 
+  const deleteFeature = useCallback(async (id: number) => {
+    setBusy(true);
+    try {
+      await orpc.features.delete({ id });
+      setFeatureRows((rows) => rows.filter((r) => r.id !== id));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
   const addMember = async () => {
     setBusy(true);
     try {
@@ -615,6 +640,7 @@ export function CapacityView() {
                         <FeatureNameCell
                           name={feature.name}
                           onRename={(name) => renameFeature(feature.id, name)}
+                          onDelete={() => deleteFeature(feature.id)}
                         />
                         {hasOverflow && (
                           <span

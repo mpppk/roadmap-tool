@@ -43,6 +43,7 @@
     "@types/react-dom": "^19",
     "drizzle-kit": "^0.31.10",
     "playwright": "^1.59.1",
-    "tailwindcss": "^4.1.11"
+    "tailwindcss": "^4.1.11",
+    "typescript": "^6.0.3"
   }
 }

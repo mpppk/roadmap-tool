@@ -442,3 +442,94 @@
   color: var(--cv-text-2);
   font-size: 13px;
 }
+
+/* Member label in feature expansion */
+.member-label-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Assign member row */
+.tr-assign-member td {
+  height: var(--member-h);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.td-assign {
+  padding: 0 14px 0 32px;
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+}
+.btn-assign {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--cv-accent);
+  cursor: pointer;
+  opacity: 0.8;
+}
+.btn-assign:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+.btn-assign:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  text-decoration: none;
+}
+.assign-select {
+  font-size: 12px;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  color: var(--cv-text);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 2px 6px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+/* Confirmation dialog */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.confirm-dialog {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 20px 24px;
+  min-width: 300px;
+  max-width: 420px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+.confirm-msg {
+  font-size: 13px;
+  color: var(--cv-text);
+  margin: 0 0 16px;
+  line-height: 1.5;
+}
+.confirm-btns {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.btn-danger {
+  background: var(--cv-red);
+  color: #fff;
+  border-color: var(--cv-red);
+}
+.btn-danger:hover {
+  background: #b91c1c;
+  border-color: #b91c1c;
+}

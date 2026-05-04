@@ -222,7 +222,7 @@ const allocationsGetFeatureView = o
             member: m,
             capacity: qAllocs.find((a) => a.memberId === m.id)?.capacity ?? 0,
           }))
-          .filter((a) => a.capacity > 0),
+          .filter((a) => qAllocs.some((rec) => rec.memberId === a.member.id)),
       };
     });
 
@@ -262,6 +262,95 @@ const allocationsGetMemberView = o
     });
 
     return { member, quarters: quarterData };
+  });
+
+const allocationsAssignMember = o
+  .input(
+    z.object({
+      featureId: z.number().int(),
+      memberId: z.number().int(),
+    }),
+  )
+  .handler(async ({ input, context }) => {
+    const { db } = context;
+    const { featureId, memberId } = input;
+    const allQuarters = await db.select().from(quarters).all();
+    for (const q of allQuarters) {
+      const existing = await db
+        .select()
+        .from(memberAllocations)
+        .where(
+          and(
+            eq(memberAllocations.featureId, featureId),
+            eq(memberAllocations.quarterId, q.id),
+            eq(memberAllocations.memberId, memberId),
+          ),
+        );
+      if (existing.length === 0) {
+        await db
+          .insert(memberAllocations)
+          .values({ featureId, quarterId: q.id, memberId, capacity: 0 });
+      }
+    }
+  });
+
+const allocationsRemoveMemberFromFeature = o
+  .input(
+    z.object({
+      featureId: z.number().int(),
+      memberId: z.number().int(),
+    }),
+  )
+  .handler(async ({ input, context }) => {
+    const { db } = context;
+    const { featureId, memberId } = input;
+
+    const toRemove = await db
+      .select()
+      .from(memberAllocations)
+      .where(
+        and(
+          eq(memberAllocations.featureId, featureId),
+          eq(memberAllocations.memberId, memberId),
+        ),
+      );
+
+    if (toRemove.length === 0) return;
+
+    await db
+      .delete(memberAllocations)
+      .where(
+        and(
+          eq(memberAllocations.featureId, featureId),
+          eq(memberAllocations.memberId, memberId),
+        ),
+      );
+
+    const affectedQuarterIds = [...new Set(toRemove.map((r) => r.quarterId))];
+    for (const quarterId of affectedQuarterIds) {
+      const remaining = await db
+        .select()
+        .from(memberAllocations)
+        .where(
+          and(
+            eq(memberAllocations.featureId, featureId),
+            eq(memberAllocations.quarterId, quarterId),
+          ),
+        );
+      const newTotal = remaining.reduce((s, a) => s + a.capacity, 0);
+      const existingFq = await getFeatureQuarterRow(db, featureId, quarterId);
+      if (existingFq) {
+        await db
+          .update(featureQuarters)
+          .set({ totalCapacity: newTotal })
+          .where(
+            and(
+              eq(featureQuarters.featureId, featureId),
+              eq(featureQuarters.quarterId, quarterId),
+            ),
+          );
+      }
+    }
   });
 
 const allocationsUpdateTotal = o
@@ -614,6 +703,8 @@ export const router = {
   allocations: {
     getFeatureView: allocationsGetFeatureView,
     getMemberView: allocationsGetMemberView,
+    assignMember: allocationsAssignMember,
+    removeMemberFromFeature: allocationsRemoveMemberFromFeature,
     updateTotal: allocationsUpdateTotal,
     updateMemberAllocation: allocationsUpdateMemberAllocation,
     moveQuarter: allocationsMoveQuarter,

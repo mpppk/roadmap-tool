@@ -346,6 +346,15 @@ export function CapacityView() {
   const [featureRows, setFeatureRows] = useState<FeatureRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [assigningFeatureId, setAssigningFeatureId] = useState<number | null>(
+    null,
+  );
+  const [removeConfirm, setRemoveConfirm] = useState<{
+    featureId: number;
+    memberId: number;
+    memberName: string;
+    featureName: string;
+  } | null>(null);
 
   // ── Initial load ────────────────────────────────────────────────────────
 
@@ -562,6 +571,50 @@ export function CapacityView() {
     }
   };
 
+  const refreshFeatureRow = async (featureId: number) => {
+    const fv = await orpc.allocations.getFeatureView({ featureId });
+    const qMap = new Map<number, QuarterData>();
+    for (const qd of fv.quarters) {
+      qMap.set(qd.quarter.id, {
+        totalCapacity: qd.totalCapacity,
+        unassignedCapacity: qd.unassignedCapacity,
+        memberAllocations: qd.memberAllocations.map((a) => ({
+          memberId: a.member.id,
+          capacity: a.capacity,
+        })),
+      });
+    }
+    setFeatureRows((rows) =>
+      rows.map((r) => (r.id === featureId ? { ...r, quarters: qMap } : r)),
+    );
+  };
+
+  const assignMemberToFeature = useCallback(
+    async (featureId: number, memberId: number) => {
+      setBusy(true);
+      try {
+        await orpc.allocations.assignMember({ featureId, memberId });
+        await refreshFeatureRow(featureId);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [],
+  );
+
+  const removeMemberFromFeature = useCallback(
+    async (featureId: number, memberId: number) => {
+      setBusy(true);
+      try {
+        await orpc.allocations.removeMemberFromFeature({ featureId, memberId });
+        await refreshFeatureRow(featureId);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [],
+  );
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   if (loading) {
@@ -704,7 +757,18 @@ export function CapacityView() {
 
                 // member rows (expanded)
                 if (feature.expanded) {
-                  for (const member of members) {
+                  // Only show members explicitly assigned to this feature
+                  const assignedMemberIds = new Set<number>();
+                  for (const q of quarters) {
+                    for (const a of getQData(feature, q.id).memberAllocations) {
+                      assignedMemberIds.add(a.memberId);
+                    }
+                  }
+                  const assignedMembers = members.filter((m) =>
+                    assignedMemberIds.has(m.id),
+                  );
+
+                  for (const member of assignedMembers) {
                     // Check if member has overflow in any quarter for this feature
                     const isOverflow = quarters.some((q) => {
                       const qd = getQData(feature, q.id);
@@ -720,11 +784,24 @@ export function CapacityView() {
                         className={`tr-member${isOverflow ? " is-overflow" : ""}`}
                       >
                         <td className="td-label td-member-label">
-                          <MemberLabelCell
-                            member={member}
-                            onRename={renameMember}
-                            onDelete={deleteMember}
-                          />
+                          <div className="member-label-row">
+                            <span className="member-name">{member.name}</span>
+                            <button
+                              type="button"
+                              className="del-member-btn"
+                              onClick={() =>
+                                setRemoveConfirm({
+                                  featureId: feature.id,
+                                  memberId: member.id,
+                                  memberName: member.name,
+                                  featureName: feature.name,
+                                })
+                              }
+                              title="このFeatureから削除"
+                            >
+                              ×
+                            </button>
+                          </div>
                         </td>
                         {quarters.map((q) => {
                           const qd = getQData(feature, q.id);
@@ -757,6 +834,56 @@ export function CapacityView() {
                       </tr>,
                     );
                   }
+
+                  // assign member row
+                  const unassignedMembers = members.filter(
+                    (m) => !assignedMemberIds.has(m.id),
+                  );
+                  rows.push(
+                    <tr key={`${feature.id}-assign`} className="tr-assign-member">
+                      <td
+                        colSpan={1 + quarters.length}
+                        className="td-assign"
+                      >
+                        {assigningFeatureId === feature.id ? (
+                          <select
+                            className="assign-select"
+                            // biome-ignore lint/a11y/noAutofocus: intentional focus for inline dropdown
+                            autoFocus
+                            defaultValue=""
+                            onChange={(e) => {
+                              const id = Number(e.target.value);
+                              if (id) assignMemberToFeature(feature.id, id);
+                              setAssigningFeatureId(null);
+                            }}
+                            onBlur={() => setAssigningFeatureId(null)}
+                          >
+                            <option value="" disabled>
+                              -- メンバーを選択 --
+                            </option>
+                            {unassignedMembers.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.name}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn-assign"
+                            disabled={
+                              busy || unassignedMembers.length === 0
+                            }
+                            onClick={() =>
+                              setAssigningFeatureId(feature.id)
+                            }
+                          >
+                            + メンバーを割り当て
+                          </button>
+                        )}
+                      </td>
+                    </tr>,
+                  );
 
                   // unassigned row (only if any quarter has overflow)
                   if (hasOverflow) {
@@ -825,6 +952,45 @@ export function CapacityView() {
           <span className="hint-text">クリックで数値編集 · + で担当者展開</span>
         </div>
       </div>
+
+      {removeConfirm && (
+        <div
+          className="confirm-overlay"
+          onClick={() => setRemoveConfirm(null)}
+        >
+          <div
+            className="confirm-dialog"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="confirm-msg">
+              「{removeConfirm.memberName}」を「{removeConfirm.featureName}
+              」から削除しますか？
+            </p>
+            <div className="confirm-btns">
+              <button
+                type="button"
+                className="btn-sm"
+                onClick={() => setRemoveConfirm(null)}
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                className="btn-sm btn-danger"
+                onClick={() => {
+                  removeMemberFromFeature(
+                    removeConfirm.featureId,
+                    removeConfirm.memberId,
+                  );
+                  setRemoveConfirm(null);
+                }}
+              >
+                削除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

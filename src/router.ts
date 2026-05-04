@@ -57,21 +57,32 @@ const membersList = o
   .handler(async ({ context }) => context.db.select().from(members).all());
 
 const membersCreate = o
-  .input(z.object({ name: z.string().min(1) }))
+  .input(
+    z.object({
+      name: z.string().min(1),
+      icon: z.string().trim().max(64).optional(),
+    }),
+  )
   .handler(async ({ input, context }) => {
     const [row] = await context.db
       .insert(members)
-      .values({ name: input.name })
+      .values({ name: input.name, icon: input.icon || null })
       .returning();
     return row;
   });
 
 const membersRename = o
-  .input(z.object({ id: z.number().int(), name: z.string().min(1) }))
+  .input(
+    z.object({
+      id: z.number().int(),
+      name: z.string().min(1),
+      icon: z.string().trim().max(64).optional(),
+    }),
+  )
   .handler(async ({ input, context }) => {
     const [row] = await context.db
       .update(members)
-      .set({ name: input.name })
+      .set({ name: input.name, icon: input.icon || null })
       .where(eq(members.id, input.id))
       .returning();
     return row;

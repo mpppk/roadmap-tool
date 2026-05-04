@@ -97,3 +97,30 @@ test("/features shows feature rows with expand toggle", async ({ page }) => {
   await toggleBtn.click();
   await expect(toggleBtn).toHaveText("−");
 });
+
+
+test("member icon can be edited and persists after reload", async ({ page }) => {
+  await page.goto(`${BASE}/members`);
+  await page.waitForLoadState("networkidle");
+
+  const memberName = `Icon E2E ${Date.now()}`;
+
+  await page.locator(".cv-toolbar .btn-sm", { hasText: "+ Member" }).click();
+
+  const newRow = page.locator("tbody .tr-feature").last();
+  await newRow.locator(".feature-name").click();
+
+  const editScope = newRow.locator(".td-label");
+  await editScope.locator(".feature-name-input").fill(memberName);
+  await editScope.locator(".member-icon-input").fill("🧪");
+  await editScope.locator(".feature-name-input").press("Enter");
+
+  const targetRow = page.locator("tbody .tr-feature", { hasText: memberName }).first();
+  await expect(targetRow.locator(".member-icon")).toHaveText("🧪");
+
+  await page.reload();
+  await page.waitForLoadState("networkidle");
+
+  const persistedRow = page.locator("tbody .tr-feature", { hasText: memberName }).first();
+  await expect(persistedRow.locator(".member-icon")).toHaveText("🧪");
+});

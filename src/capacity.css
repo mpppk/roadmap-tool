@@ -533,3 +533,18 @@
   background: #b91c1c;
   border-color: #b91c1c;
 }
+
+.member-icon {
+  width: 20px;
+  text-align: center;
+  font-size: 14px;
+}
+.member-icon-input {
+  width: 40px;
+  font-size: 14px;
+  border: none;
+  border-bottom: 1.5px solid var(--cv-accent);
+  outline: none;
+  background: transparent;
+  text-align: center;
+}

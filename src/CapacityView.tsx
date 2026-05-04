@@ -38,9 +38,16 @@ type PendingCapacityConflict = {
   featureId: number;
   quarterId: number;
   memberId: number;
+  memberName: string;
   requestedCapacity: number;
   usedElsewhere: number;
   assignableCapacity: number;
+};
+
+type RebalancePreview = {
+  featureName: string;
+  currentCapacity: number;
+  nextCapacity: number;
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -291,43 +298,68 @@ function FeatureNameCell({
 }
 
 function CapacityConflictPopover({
+  memberName,
   usedElsewhere,
   assignableCapacity,
+  requestedCapacity,
+  rebalancePreview,
   onResolve,
   onCancel,
 }: {
+  memberName: string;
   usedElsewhere: number;
   assignableCapacity: number;
+  requestedCapacity: number;
+  rebalancePreview: RebalancePreview[];
   onResolve: (resolution: CapacityConflictResolution) => void;
   onCancel: () => void;
 }) {
+  const overflowTotal = usedElsewhere + requestedCapacity;
+
   return (
     <div className="capacity-conflict-popover" role="dialog" aria-modal="false">
       <div className="capacity-conflict-lines">
-        <div>現在の他Feature: {fmt2(usedElsewhere)}</div>
-        <div>割り当て可能: {fmt2(assignableCapacity)}</div>
+        <div>{memberName}の合計キャパシティが1を超えています。</div>
+        <div>割り当て済み: {fmt2(usedElsewhere)}</div>
+        <div>残りキャパシティ: {fmt2(assignableCapacity)}</div>
+        <div>今回の割り当てキャパシティ: {fmt2(requestedCapacity)}</div>
       </div>
       <div className="capacity-conflict-actions">
         <button
           type="button"
           className="btn-sm capacity-conflict-action-btn"
-          onClick={() => onResolve("fitWithinLimit")}
+          onClick={() => onResolve("allowOverflow")}
         >
-          {fmt2(assignableCapacity)}で割り当て
+          {`そのまま割り当て(${fmt2(usedElsewhere)}+${fmt2(
+            requestedCapacity,
+          )}=${fmt2(overflowTotal)})`}
         </button>
         <button
           type="button"
           className="btn-sm capacity-conflict-action-btn"
-          onClick={() => onResolve("allowOverflow")}
+          onClick={() => onResolve("fitWithinLimit")}
         >
-          1を超えて割り当て
+          超過しない最大値({fmt2(assignableCapacity)})を割り当て
         </button>
         <button
           type="button"
           className="btn-sm capacity-conflict-action-btn"
           onClick={() => onResolve("rebalanceOthersProportionally")}
         >
-          他Featureを比例減少
+          <span>超過しないように他機能のキャパシティを削減</span>
+          {rebalancePreview.length > 0 && (
+            <span className="capacity-conflict-preview-list">
+              {rebalancePreview.map((change) => (
+                <span
+                  key={change.featureName}
+                  className="capacity-conflict-preview-item"
+                >
+                  {change.featureName}: {fmt(change.currentCapacity)}→
+                  {fmt(change.nextCapacity)}
+                </span>
+              ))}
+            </span>
+          )}
         </button>
         <button
           type="button"
@@ -429,6 +461,39 @@ export function CapacityView() {
     quarterId: number,
   ): boolean => getMemberQuarterTotal(memberId, quarterId) > 1.000001;
 
+  const getRebalancePreview = (
+    memberId: number,
+    quarterId: number,
+    excludeFeatureId: number,
+    requestedCapacity: number,
+  ): RebalancePreview[] => {
+    const otherAllocations = featureRows
+      .filter((row) => row.id !== excludeFeatureId)
+      .map((row) => {
+        const alloc = getQData(row, quarterId).memberAllocations.find(
+          (a) => a.memberId === memberId,
+        );
+        return {
+          featureName: row.name,
+          currentCapacity: alloc?.capacity ?? 0,
+        };
+      })
+      .filter((change) => change.currentCapacity > 0);
+    const usedElsewhere = otherAllocations.reduce(
+      (sum, change) => sum + change.currentCapacity,
+      0,
+    );
+    const scale =
+      requestedCapacity <= 1 && usedElsewhere > 0
+        ? Math.max(0, (1 - requestedCapacity) / usedElsewhere)
+        : 1;
+
+    return otherAllocations.map((change) => ({
+      ...change,
+      nextCapacity: r2(change.currentCapacity * scale),
+    }));
+  };
+
   const toggleExpand = (featureId: number) => {
     setFeatureRows((rows) =>
       rows.map((r) =>
@@ -504,6 +569,9 @@ export function CapacityView() {
               featureId,
               quarterId,
               memberId,
+              memberName:
+                members.find((member) => member.id === memberId)?.name ??
+                "メンバー",
               requestedCapacity: capacity,
               usedElsewhere: preview.usedElsewhere,
               assignableCapacity: preview.assignableCapacity,
@@ -525,7 +593,7 @@ export function CapacityView() {
         setBusy(false);
       }
     },
-    [applyQuarterUpdates],
+    [applyQuarterUpdates, members],
   );
 
   const resolveCapacityConflict = useCallback(
@@ -848,11 +916,6 @@ export function CapacityView() {
                           const alloc = qd.memberAllocations.find(
                             (a) => a.memberId === member.id,
                           );
-                          const value = alloc?.capacity ?? 0;
-                          const cellOv = isMemberQuarterOverflow(
-                            member.id,
-                            q.id,
-                          );
                           const matchingCapacityConflict =
                             capacityConflict &&
                             capacityConflict.featureId === feature.id &&
@@ -860,6 +923,13 @@ export function CapacityView() {
                             capacityConflict.memberId === member.id
                               ? capacityConflict
                               : null;
+                          const value =
+                            matchingCapacityConflict?.requestedCapacity ??
+                            alloc?.capacity ??
+                            0;
+                          const cellOv =
+                            !!matchingCapacityConflict ||
+                            isMemberQuarterOverflow(member.id, q.id);
                           return (
                             <td
                               key={q.id}
@@ -880,12 +950,24 @@ export function CapacityView() {
                               />
                               {matchingCapacityConflict && (
                                 <CapacityConflictPopover
+                                  memberName={
+                                    matchingCapacityConflict.memberName
+                                  }
                                   usedElsewhere={
                                     matchingCapacityConflict.usedElsewhere
                                   }
                                   assignableCapacity={
                                     matchingCapacityConflict.assignableCapacity
                                   }
+                                  requestedCapacity={
+                                    matchingCapacityConflict.requestedCapacity
+                                  }
+                                  rebalancePreview={getRebalancePreview(
+                                    matchingCapacityConflict.memberId,
+                                    matchingCapacityConflict.quarterId,
+                                    matchingCapacityConflict.featureId,
+                                    matchingCapacityConflict.requestedCapacity,
+                                  )}
                                   onResolve={resolveCapacityConflict}
                                   onCancel={() => setCapacityConflict(null)}
                                 />

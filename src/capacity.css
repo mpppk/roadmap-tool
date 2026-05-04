@@ -373,7 +373,7 @@
   left: 50%;
   transform: translateX(-50%);
   z-index: 70;
-  width: 224px;
+  width: min(360px, calc(100vw - 32px));
   padding: 10px;
   border: 1px solid var(--border-strong);
   border-radius: 6px;
@@ -471,6 +471,23 @@
 }
 .capacity-conflict-action-btn {
   width: 100%;
+  height: auto;
+  min-height: 28px;
+  justify-content: flex-start;
+  padding: 6px 8px;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  display: block;
+}
+.capacity-conflict-preview-list {
+  display: block;
+  margin-top: 4px;
+  color: var(--cv-text-2);
+  font-size: 11px;
+}
+.capacity-conflict-preview-item {
+  display: block;
 }
 .hint-text {
   font-size: 11px;

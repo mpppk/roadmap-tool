@@ -264,77 +264,6 @@ function FeatureNameCell({
   );
 }
 
-function MemberLabelCell({
-  member,
-  onRename,
-  onDelete,
-}: {
-  member: Member;
-  onRename: (id: number, name: string) => void;
-  onDelete: (id: number) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [val, setVal] = useState(member.name);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const startEdit = () => {
-    setVal(member.name);
-    setEditing(true);
-    setTimeout(() => inputRef.current?.select(), 20);
-  };
-
-  const commit = () => {
-    const trimmed = val.trim();
-    if (trimmed && trimmed !== member.name) onRename(member.id, trimmed);
-    setEditing(false);
-  };
-
-  if (editing) {
-    return (
-      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-        <input
-          ref={inputRef}
-          className="member-name-input"
-          value={val}
-          onChange={(e) => setVal(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") commit();
-            if (e.key === "Escape") setEditing(false);
-          }}
-        />
-      </div>
-    );
-  }
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-      <button
-        type="button"
-        className="member-name"
-        style={{
-          cursor: "text",
-          background: "none",
-          border: "none",
-          padding: 0,
-          font: "inherit",
-        }}
-        onClick={startEdit}
-        title="クリックで名前を編集"
-      >
-        {member.name}
-      </button>
-      <button
-        type="button"
-        className="del-member-btn"
-        onClick={() => onDelete(member.id)}
-        title="メンバーを削除"
-      >
-        ×
-      </button>
-    </div>
-  );
-}
-
 // ── Main component ──────────────────────────────────────────────────────────
 
 const MAX_VAL = 3;
@@ -346,6 +275,15 @@ export function CapacityView() {
   const [featureRows, setFeatureRows] = useState<FeatureRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [assigningFeatureId, setAssigningFeatureId] = useState<number | null>(
+    null,
+  );
+  const [removeConfirm, setRemoveConfirm] = useState<{
+    featureId: number;
+    memberId: number;
+    memberName: string;
+    featureName: string;
+  } | null>(null);
 
   // ── Initial load ────────────────────────────────────────────────────────
 
@@ -518,36 +456,6 @@ export function CapacityView() {
     }
   };
 
-  const renameMember = useCallback(async (id: number, name: string) => {
-    setMembers((ms) => ms.map((m) => (m.id === id ? { ...m, name } : m)));
-    await orpc.members.rename({ id, name });
-  }, []);
-
-  const deleteMember = useCallback(async (id: number) => {
-    setBusy(true);
-    try {
-      await orpc.members.delete({ id });
-      setMembers((ms) => ms.filter((m) => m.id !== id));
-      // Remove the member's allocations from local state
-      setFeatureRows((rows) =>
-        rows.map((r) => {
-          const newMap = new Map(r.quarters);
-          for (const [qId, qd] of newMap) {
-            newMap.set(qId, {
-              ...qd,
-              memberAllocations: qd.memberAllocations.filter(
-                (a) => a.memberId !== id,
-              ),
-            });
-          }
-          return { ...r, quarters: newMap };
-        }),
-      );
-    } finally {
-      setBusy(false);
-    }
-  }, []);
-
   const addQuarter = async () => {
     setBusy(true);
     try {
@@ -561,6 +469,50 @@ export function CapacityView() {
       setBusy(false);
     }
   };
+
+  const refreshFeatureRow = useCallback(async (featureId: number) => {
+    const fv = await orpc.allocations.getFeatureView({ featureId });
+    const qMap = new Map<number, QuarterData>();
+    for (const qd of fv.quarters) {
+      qMap.set(qd.quarter.id, {
+        totalCapacity: qd.totalCapacity,
+        unassignedCapacity: qd.unassignedCapacity,
+        memberAllocations: qd.memberAllocations.map((a) => ({
+          memberId: a.member.id,
+          capacity: a.capacity,
+        })),
+      });
+    }
+    setFeatureRows((rows) =>
+      rows.map((r) => (r.id === featureId ? { ...r, quarters: qMap } : r)),
+    );
+  }, []);
+
+  const assignMemberToFeature = useCallback(
+    async (featureId: number, memberId: number) => {
+      setBusy(true);
+      try {
+        await orpc.allocations.assignMember({ featureId, memberId });
+        await refreshFeatureRow(featureId);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refreshFeatureRow],
+  );
+
+  const removeMemberFromFeature = useCallback(
+    async (featureId: number, memberId: number) => {
+      setBusy(true);
+      try {
+        await orpc.allocations.removeMemberFromFeature({ featureId, memberId });
+        await refreshFeatureRow(featureId);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refreshFeatureRow],
+  );
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -704,7 +656,18 @@ export function CapacityView() {
 
                 // member rows (expanded)
                 if (feature.expanded) {
-                  for (const member of members) {
+                  // Only show members explicitly assigned to this feature
+                  const assignedMemberIds = new Set<number>();
+                  for (const q of quarters) {
+                    for (const a of getQData(feature, q.id).memberAllocations) {
+                      assignedMemberIds.add(a.memberId);
+                    }
+                  }
+                  const assignedMembers = members.filter((m) =>
+                    assignedMemberIds.has(m.id),
+                  );
+
+                  for (const member of assignedMembers) {
                     // Check if member has overflow in any quarter for this feature
                     const isOverflow = quarters.some((q) => {
                       const qd = getQData(feature, q.id);
@@ -720,11 +683,24 @@ export function CapacityView() {
                         className={`tr-member${isOverflow ? " is-overflow" : ""}`}
                       >
                         <td className="td-label td-member-label">
-                          <MemberLabelCell
-                            member={member}
-                            onRename={renameMember}
-                            onDelete={deleteMember}
-                          />
+                          <div className="member-label-row">
+                            <span className="member-name">{member.name}</span>
+                            <button
+                              type="button"
+                              className="del-member-btn"
+                              onClick={() =>
+                                setRemoveConfirm({
+                                  featureId: feature.id,
+                                  memberId: member.id,
+                                  memberName: member.name,
+                                  featureName: feature.name,
+                                })
+                              }
+                              title="このFeatureから削除"
+                            >
+                              ×
+                            </button>
+                          </div>
                         </td>
                         {quarters.map((q) => {
                           const qd = getQData(feature, q.id);
@@ -757,6 +733,52 @@ export function CapacityView() {
                       </tr>,
                     );
                   }
+
+                  // assign member row
+                  const unassignedMembers = members.filter(
+                    (m) => !assignedMemberIds.has(m.id),
+                  );
+                  rows.push(
+                    <tr
+                      key={`${feature.id}-assign`}
+                      className="tr-assign-member"
+                    >
+                      <td colSpan={1 + quarters.length} className="td-assign">
+                        {assigningFeatureId === feature.id ? (
+                          <select
+                            className="assign-select"
+                            // biome-ignore lint/a11y/noAutofocus: intentional focus for inline dropdown
+                            autoFocus
+                            defaultValue=""
+                            onChange={(e) => {
+                              const id = Number(e.target.value);
+                              if (id) assignMemberToFeature(feature.id, id);
+                              setAssigningFeatureId(null);
+                            }}
+                            onBlur={() => setAssigningFeatureId(null)}
+                          >
+                            <option value="" disabled>
+                              -- メンバーを選択 --
+                            </option>
+                            {unassignedMembers.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.name}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn-assign"
+                            disabled={busy || unassignedMembers.length === 0}
+                            onClick={() => setAssigningFeatureId(feature.id)}
+                          >
+                            + メンバーを割り当て
+                          </button>
+                        )}
+                      </td>
+                    </tr>,
+                  );
 
                   // unassigned row (only if any quarter has overflow)
                   if (hasOverflow) {
@@ -825,6 +847,46 @@ export function CapacityView() {
           <span className="hint-text">クリックで数値編集 · + で担当者展開</span>
         </div>
       </div>
+
+      {removeConfirm && (
+        <div className="confirm-overlay">
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="confirm-dialog"
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setRemoveConfirm(null);
+            }}
+          >
+            <p className="confirm-msg">
+              「{removeConfirm.memberName}」を「{removeConfirm.featureName}
+              」から削除しますか？
+            </p>
+            <div className="confirm-btns">
+              <button
+                type="button"
+                className="btn-sm"
+                onClick={() => setRemoveConfirm(null)}
+              >
+                キャンセル
+              </button>
+              <button
+                type="button"
+                className="btn-sm btn-danger"
+                onClick={() => {
+                  removeMemberFromFeature(
+                    removeConfirm.featureId,
+                    removeConfirm.memberId,
+                  );
+                  setRemoveConfirm(null);
+                }}
+              >
+                削除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

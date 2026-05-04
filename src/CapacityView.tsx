@@ -514,6 +514,11 @@ export function CapacityView() {
     [refreshFeatureRow],
   );
 
+  const copyAllocationCSV = useCallback(async () => {
+    const csv = await orpc.export.allocationCSV({});
+    await navigator.clipboard.writeText(csv);
+  }, []);
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   if (loading) {
@@ -843,6 +848,15 @@ export function CapacityView() {
             disabled={busy}
           >
             + Quarter
+          </button>
+          <button
+            type="button"
+            className="btn-sm"
+            onClick={copyAllocationCSV}
+            disabled={busy}
+            title="機能・担当者・キャパシティ・月次形式のCSVをコピー"
+          >
+            CSVをコピー
           </button>
           <span className="hint-text">クリックで数値編集 · + で担当者展開</span>
         </div>

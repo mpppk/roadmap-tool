@@ -62,20 +62,24 @@ function ReadonlyHeatmapCell({
   value,
   maxVal,
   rowHeight,
+  isOverflow = false,
 }: {
   value: number;
   maxVal: number;
   rowHeight: number;
+  isOverflow?: boolean;
 }) {
   const { bg, fg } = heatBg(value, maxVal);
+  const ovBg = isOverflow ? "oklch(72% 0.18 25)" : bg;
+  const ovFg = isOverflow ? "#fff" : fg;
   return (
     <div
       className="hm-cell"
-      style={{ background: bg, height: rowHeight, cursor: "default" }}
+      style={{ background: ovBg, height: rowHeight, cursor: "default" }}
     >
       <span
         className="hm-val"
-        style={{ color: value === 0 ? "transparent" : fg }}
+        style={{ color: value === 0 ? "transparent" : ovFg }}
       >
         {fmt(value)}
       </span>
@@ -405,6 +409,7 @@ export function MembersView() {
                     </td>
                     {quarters.map((q) => {
                       const qd = getQData(member, q.id);
+                      const cellOv = qd.totalCapacity > 1.000001;
                       return (
                         <td
                           key={q.id}
@@ -415,6 +420,7 @@ export function MembersView() {
                             value={qd.totalCapacity}
                             maxVal={1}
                             rowHeight={42}
+                            isOverflow={cellOv}
                           />
                         </td>
                       );
@@ -464,6 +470,8 @@ export function MembersView() {
                               (a) => a.featureId === featureId,
                             );
                             const value = fa?.capacity ?? 0;
+                            const cellOv = qd.totalCapacity > 1.000001;
+                            const { bg, fg } = heatBg(value, 1);
                             return (
                               <td
                                 key={q.id}
@@ -473,7 +481,9 @@ export function MembersView() {
                                 <div
                                   className="hm-member-cell"
                                   style={{
-                                    background: heatBg(value, 1).bg,
+                                    background: cellOv
+                                      ? "oklch(72% 0.18 25)"
+                                      : bg,
                                     cursor: "default",
                                   }}
                                 >
@@ -483,7 +493,9 @@ export function MembersView() {
                                       color:
                                         value === 0
                                           ? "transparent"
-                                          : heatBg(value, 1).fg,
+                                          : cellOv
+                                            ? "#fff"
+                                            : fg,
                                     }}
                                   >
                                     {fmt(value)}

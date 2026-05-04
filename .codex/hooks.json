@@ -2,8 +2,14 @@
   "hooks": {
     "Stop": [
       {
-        "type": "command",
-        "command": "bun run typecheck && bun run lint && bun run format:check"
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && bash .codex/hooks/stop-check.sh",
+            "timeout": 120,
+            "statusMessage": "Running typecheck/lint/format"
+          }
+        ]
       }
     ]
   }

@@ -58,7 +58,10 @@ const membersList = o
 
 const membersCreate = o
   .input(
-    z.object({ name: z.string().min(1), icon: z.string().trim().max(64).optional() }),
+    z.object({
+      name: z.string().min(1),
+      icon: z.string().trim().max(64).optional(),
+    }),
   )
   .handler(async ({ input, context }) => {
     const [row] = await context.db

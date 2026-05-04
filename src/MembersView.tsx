@@ -107,7 +107,10 @@ function MemberNameCell({
   const commit = () => {
     const trimmed = val.trim();
     const normalizedIcon = icon.trim();
-    if (trimmed && (trimmed !== member.name || normalizedIcon !== (member.icon ?? "")))
+    if (
+      trimmed &&
+      (trimmed !== member.name || normalizedIcon !== (member.icon ?? ""))
+    )
       onRename(member.id, trimmed, normalizedIcon || null);
     setEditing(false);
   };
@@ -126,7 +129,7 @@ function MemberNameCell({
             if (e.key === "Escape") setEditing(false);
           }}
         />
-              <input
+        <input
           className="member-icon-input"
           value={icon}
           onChange={(e) => setIcon(e.target.value)}
@@ -138,7 +141,9 @@ function MemberNameCell({
   }
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-      <span className="member-icon" title="メンバーアイコン">{member.icon || "👤"}</span>
+      <span className="member-icon" title="メンバーアイコン">
+        {member.icon || "👤"}
+      </span>
       <button
         type="button"
         className="feature-name"
@@ -242,19 +247,28 @@ export function MembersView() {
       if (!m) return;
       setMemberRows((rows) => [
         ...rows,
-        { id: m.id, name: m.name, icon: m.icon ?? null, expanded: false, quarters: new Map() },
+        {
+          id: m.id,
+          name: m.name,
+          icon: m.icon ?? null,
+          expanded: false,
+          quarters: new Map(),
+        },
       ]);
     } finally {
       setBusy(false);
     }
   };
 
-  const renameMember = useCallback(async (id: number, name: string, icon: string | null) => {
-    setMemberRows((rows) =>
-      rows.map((r) => (r.id === id ? { ...r, name, icon } : r)),
-    );
-    await orpc.members.rename({ id, name, icon: icon ?? undefined });
-  }, []);
+  const renameMember = useCallback(
+    async (id: number, name: string, icon: string | null) => {
+      setMemberRows((rows) =>
+        rows.map((r) => (r.id === id ? { ...r, name, icon } : r)),
+      );
+      await orpc.members.rename({ id, name, icon: icon ?? undefined });
+    },
+    [],
+  );
 
   const deleteMember = useCallback(async (id: number) => {
     setBusy(true);

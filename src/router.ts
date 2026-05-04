@@ -678,45 +678,47 @@ const exportMemberCSV = o.input(z.object({})).handler(async ({ context }) => {
   return [header, ...rows].join("\n");
 });
 
-const exportAllocationCSV = o.input(z.object({})).handler(async ({ context }) => {
-  const { db } = context;
-  const allQuarters = await db
-    .select()
-    .from(quarters)
-    .orderBy(quarters.year, quarters.quarter)
-    .all();
-  const allFeatures = await db.select().from(features).all();
-  const allMembers = await db.select().from(members).all();
-  const maRows = await db.select().from(memberAllocations).all();
+const exportAllocationCSV = o
+  .input(z.object({}))
+  .handler(async ({ context }) => {
+    const { db } = context;
+    const allQuarters = await db
+      .select()
+      .from(quarters)
+      .orderBy(quarters.year, quarters.quarter)
+      .all();
+    const allFeatures = await db.select().from(features).all();
+    const allMembers = await db.select().from(members).all();
+    const maRows = await db.select().from(memberAllocations).all();
 
-  const featureById = new Map(allFeatures.map((f) => [f.id, f.name]));
-  const memberById = new Map(allMembers.map((m) => [m.id, m.name]));
-  const quarterById = new Map(allQuarters.map((q) => [q.id, q]));
+    const featureById = new Map(allFeatures.map((f) => [f.id, f.name]));
+    const memberById = new Map(allMembers.map((m) => [m.id, m.name]));
+    const quarterById = new Map(allQuarters.map((q) => [q.id, q]));
 
-  const monthsInQuarter = (year: number, quarter: number): string[] => {
-    const startMonth = (quarter - 1) * 3 + 1;
-    return Array.from({ length: 3 }, (_, i) => {
-      const month = startMonth + i;
-      return `${year}-${String(month).padStart(2, "0")}`;
-    });
-  };
+    const monthsInQuarter = (year: number, quarter: number): string[] => {
+      const startMonth = (quarter - 1) * 3 + 1;
+      return Array.from({ length: 3 }, (_, i) => {
+        const month = startMonth + i;
+        return `${year}-${String(month).padStart(2, "0")}`;
+      });
+    };
 
-  // Header: 機能, 担当者, キャパシティ, 月
-  const header = ["機能", "担当者", "キャパシティ", "月"].join(",");
-  const rows = maRows
-    .filter((r) => r.capacity > 0)
-    .flatMap((r) => {
-      const featureName = featureById.get(r.featureId) ?? "";
-      const memberName = memberById.get(r.memberId) ?? "";
-      const q = quarterById.get(r.quarterId);
-      if (!q) return [];
-      return monthsInQuarter(q.year, q.quarter).map((month) =>
-        [featureName, memberName, r.capacity, month].join(","),
-      );
-    });
+    // Header: 機能, 担当者, キャパシティ, 月
+    const header = ["機能", "担当者", "キャパシティ", "月"].join(",");
+    const rows = maRows
+      .filter((r) => r.capacity > 0)
+      .flatMap((r) => {
+        const featureName = featureById.get(r.featureId) ?? "";
+        const memberName = memberById.get(r.memberId) ?? "";
+        const q = quarterById.get(r.quarterId);
+        if (!q) return [];
+        return monthsInQuarter(q.year, q.quarter).map((month) =>
+          [featureName, memberName, r.capacity, month].join(","),
+        );
+      });
 
-  return [header, ...rows].join("\n");
-});
+    return [header, ...rows].join("\n");
+  });
 
 // ---------------------------------------------------------------------------
 // Router

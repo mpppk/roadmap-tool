@@ -6,7 +6,7 @@ import { orpc } from "./orpc-client";
 // ── Types ──────────────────────────────────────────────────────────────────
 
 type Quarter = { id: number; year: number; quarter: number };
-type Member = { id: number; name: string };
+type Member = { id: number; name: string; icon: string | null };
 
 type MemberQuarterData = {
   totalCapacity: number;
@@ -20,6 +20,7 @@ type MemberQuarterData = {
 type MemberRow = {
   id: number;
   name: string;
+  icon: string | null;
   expanded: boolean;
   quarters: Map<number, MemberQuarterData>;
 };
@@ -88,28 +89,32 @@ function MemberNameCell({
   onDelete,
 }: {
   member: Member;
-  onRename: (id: number, name: string) => void;
+  onRename: (id: number, name: string, icon: string | null) => void;
   onDelete: (id: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(member.name);
+  const [icon, setIcon] = useState(member.icon ?? "");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const startEdit = () => {
     setVal(member.name);
+    setIcon(member.icon ?? "");
     setEditing(true);
     setTimeout(() => inputRef.current?.select(), 20);
   };
 
   const commit = () => {
     const trimmed = val.trim();
-    if (trimmed && trimmed !== member.name) onRename(member.id, trimmed);
+    const normalizedIcon = icon.trim();
+    if (trimmed && (trimmed !== member.name || normalizedIcon !== (member.icon ?? "")))
+      onRename(member.id, trimmed, normalizedIcon || null);
     setEditing(false);
   };
 
   if (editing) {
     return (
-      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <input
           ref={inputRef}
           className="feature-name-input"
@@ -121,11 +126,19 @@ function MemberNameCell({
             if (e.key === "Escape") setEditing(false);
           }}
         />
+              <input
+          className="member-icon-input"
+          value={icon}
+          onChange={(e) => setIcon(e.target.value)}
+          placeholder="🙂"
+          title="アイコン"
+        />
       </div>
     );
   }
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+      <span className="member-icon" title="メンバーアイコン">{member.icon || "👤"}</span>
       <button
         type="button"
         className="feature-name"
@@ -192,6 +205,7 @@ export function MembersView() {
         return {
           id: mv.member.id,
           name: mv.member.name,
+          icon: mv.member.icon ?? null,
           expanded: false,
           quarters: qMap,
         };
@@ -223,22 +237,23 @@ export function MembersView() {
     try {
       const m = await orpc.members.create({
         name: `Member ${memberRows.length + 1}`,
+        icon: "👤",
       });
       if (!m) return;
       setMemberRows((rows) => [
         ...rows,
-        { id: m.id, name: m.name, expanded: false, quarters: new Map() },
+        { id: m.id, name: m.name, icon: m.icon ?? null, expanded: false, quarters: new Map() },
       ]);
     } finally {
       setBusy(false);
     }
   };
 
-  const renameMember = useCallback(async (id: number, name: string) => {
+  const renameMember = useCallback(async (id: number, name: string, icon: string | null) => {
     setMemberRows((rows) =>
-      rows.map((r) => (r.id === id ? { ...r, name } : r)),
+      rows.map((r) => (r.id === id ? { ...r, name, icon } : r)),
     );
-    await orpc.members.rename({ id, name });
+    await orpc.members.rename({ id, name, icon: icon ?? undefined });
   }, []);
 
   const deleteMember = useCallback(async (id: number) => {

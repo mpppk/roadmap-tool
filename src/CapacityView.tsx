@@ -264,77 +264,6 @@ function FeatureNameCell({
   );
 }
 
-function MemberLabelCell({
-  member,
-  onRename,
-  onDelete,
-}: {
-  member: Member;
-  onRename: (id: number, name: string) => void;
-  onDelete: (id: number) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [val, setVal] = useState(member.name);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const startEdit = () => {
-    setVal(member.name);
-    setEditing(true);
-    setTimeout(() => inputRef.current?.select(), 20);
-  };
-
-  const commit = () => {
-    const trimmed = val.trim();
-    if (trimmed && trimmed !== member.name) onRename(member.id, trimmed);
-    setEditing(false);
-  };
-
-  if (editing) {
-    return (
-      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-        <input
-          ref={inputRef}
-          className="member-name-input"
-          value={val}
-          onChange={(e) => setVal(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") commit();
-            if (e.key === "Escape") setEditing(false);
-          }}
-        />
-      </div>
-    );
-  }
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-      <button
-        type="button"
-        className="member-name"
-        style={{
-          cursor: "text",
-          background: "none",
-          border: "none",
-          padding: 0,
-          font: "inherit",
-        }}
-        onClick={startEdit}
-        title="クリックで名前を編集"
-      >
-        {member.name}
-      </button>
-      <button
-        type="button"
-        className="del-member-btn"
-        onClick={() => onDelete(member.id)}
-        title="メンバーを削除"
-      >
-        ×
-      </button>
-    </div>
-  );
-}
-
 // ── Main component ──────────────────────────────────────────────────────────
 
 const MAX_VAL = 3;
@@ -527,36 +456,6 @@ export function CapacityView() {
     }
   };
 
-  const renameMember = useCallback(async (id: number, name: string) => {
-    setMembers((ms) => ms.map((m) => (m.id === id ? { ...m, name } : m)));
-    await orpc.members.rename({ id, name });
-  }, []);
-
-  const deleteMember = useCallback(async (id: number) => {
-    setBusy(true);
-    try {
-      await orpc.members.delete({ id });
-      setMembers((ms) => ms.filter((m) => m.id !== id));
-      // Remove the member's allocations from local state
-      setFeatureRows((rows) =>
-        rows.map((r) => {
-          const newMap = new Map(r.quarters);
-          for (const [qId, qd] of newMap) {
-            newMap.set(qId, {
-              ...qd,
-              memberAllocations: qd.memberAllocations.filter(
-                (a) => a.memberId !== id,
-              ),
-            });
-          }
-          return { ...r, quarters: newMap };
-        }),
-      );
-    } finally {
-      setBusy(false);
-    }
-  }, []);
-
   const addQuarter = async () => {
     setBusy(true);
     try {
@@ -571,7 +470,7 @@ export function CapacityView() {
     }
   };
 
-  const refreshFeatureRow = async (featureId: number) => {
+  const refreshFeatureRow = useCallback(async (featureId: number) => {
     const fv = await orpc.allocations.getFeatureView({ featureId });
     const qMap = new Map<number, QuarterData>();
     for (const qd of fv.quarters) {
@@ -587,7 +486,7 @@ export function CapacityView() {
     setFeatureRows((rows) =>
       rows.map((r) => (r.id === featureId ? { ...r, quarters: qMap } : r)),
     );
-  };
+  }, []);
 
   const assignMemberToFeature = useCallback(
     async (featureId: number, memberId: number) => {
@@ -599,7 +498,7 @@ export function CapacityView() {
         setBusy(false);
       }
     },
-    [],
+    [refreshFeatureRow],
   );
 
   const removeMemberFromFeature = useCallback(
@@ -612,7 +511,7 @@ export function CapacityView() {
         setBusy(false);
       }
     },
-    [],
+    [refreshFeatureRow],
   );
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -954,13 +853,14 @@ export function CapacityView() {
       </div>
 
       {removeConfirm && (
-        <div
-          className="confirm-overlay"
-          onClick={() => setRemoveConfirm(null)}
-        >
+        <div className="confirm-overlay">
           <div
+            role="dialog"
+            aria-modal="true"
             className="confirm-dialog"
-            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setRemoveConfirm(null);
+            }}
           >
             <p className="confirm-msg">
               「{removeConfirm.memberName}」を「{removeConfirm.featureName}

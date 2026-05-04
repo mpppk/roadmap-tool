@@ -739,11 +739,11 @@ export function CapacityView() {
                     (m) => !assignedMemberIds.has(m.id),
                   );
                   rows.push(
-                    <tr key={`${feature.id}-assign`} className="tr-assign-member">
-                      <td
-                        colSpan={1 + quarters.length}
-                        className="td-assign"
-                      >
+                    <tr
+                      key={`${feature.id}-assign`}
+                      className="tr-assign-member"
+                    >
+                      <td colSpan={1 + quarters.length} className="td-assign">
                         {assigningFeatureId === feature.id ? (
                           <select
                             className="assign-select"
@@ -770,12 +770,8 @@ export function CapacityView() {
                           <button
                             type="button"
                             className="btn-assign"
-                            disabled={
-                              busy || unassignedMembers.length === 0
-                            }
-                            onClick={() =>
-                              setAssigningFeatureId(feature.id)
-                            }
+                            disabled={busy || unassignedMembers.length === 0}
+                            onClick={() => setAssigningFeatureId(feature.id)}
                           >
                             + メンバーを割り当て
                           </button>

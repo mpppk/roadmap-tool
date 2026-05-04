@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "bun run typecheck && bun run lint && bun run format:check"
+      }
+    ]
+  }
+}

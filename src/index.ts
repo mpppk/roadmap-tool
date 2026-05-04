@@ -17,10 +17,7 @@ const server = serve({
       if (result.matched) return result.response;
       return new Response("Not found", { status: 404 });
     },
-    "/mcp": async (req) => {
-      if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
-      return handleMcpRequest(req, db);
-    },
+    "/mcp": async (req) => handleMcpRequest(req, db),
     "/*": index,
   },
   development: process.env.NODE_ENV !== "production" && {

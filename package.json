@@ -20,6 +20,8 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@modelcontextprotocol/ext-apps": "^1.7.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@orpc/client": "^1.14.0",
     "@orpc/server": "^1.14.0",
     "@radix-ui/react-label": "^2.1.7",

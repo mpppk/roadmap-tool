@@ -1,20 +1,10 @@
+import { registerAppResource, registerAppTool } from "@modelcontextprotocol/ext-apps/server";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { and, eq, sql } from "drizzle-orm";
+import * as z from "zod";
 import type { db as DbType } from "./db/index";
 import { featureQuarters, features, memberAllocations, quarters } from "./db/schema";
-
-type JsonRpcRequest = {
-  id?: string | number | null;
-  method: string;
-  params?: Record<string, unknown>;
-};
-
-function jsonRpc(id: JsonRpcRequest["id"], result: unknown) {
-  return Response.json({ jsonrpc: "2.0", id: id ?? null, result });
-}
-
-function jsonRpcError(id: JsonRpcRequest["id"], code: number, message: string) {
-  return Response.json({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });
-}
 
 async function getFeatureCapacities(db: typeof DbType) {
   const allFeatures = await db.select().from(features).orderBy(features.id).all();
@@ -60,90 +50,68 @@ async function getFeatureCapacities(db: typeof DbType) {
   };
 }
 
-export async function handleMcpRequest(req: Request, db: typeof DbType) {
-  const body = (await req.json()) as JsonRpcRequest;
-  const id = body.id ?? null;
+function createMcpServer(db: typeof DbType, appOrigin: string) {
+  const server = new McpServer({
+    name: "roadmap-tool-mcp",
+    version: "0.1.0",
+  });
 
-  if (body.method === "initialize") {
-    return jsonRpc(id, {
-      protocolVersion: "2024-11-05",
-      serverInfo: { name: "roadmap-tool-mcp", version: "0.1.0" },
-      capabilities: { tools: {} },
-    });
-  }
-
-  if (body.method === "tools/list") {
-    return jsonRpc(id, {
-      tools: [
+  registerAppResource(
+    server,
+    "capacity-ui",
+    "ui://capacity/view",
+    {
+      title: "Feature Capacity UI",
+      description: "既存のFeatureキャパシティUIを埋め込んで表示します。",
+    },
+    async () => ({
+      contents: [
         {
-          name: "capacity_feature_view",
-          description:
-            "Featureベースのキャパシティ情報を取得し、既存UIをMCP AppsのAI Agent上で開くための情報を返します。",
-          inputSchema: {
-            type: "object",
-            properties: {
-              featureId: { type: "number", description: "対象Feature ID（任意）" },
-            },
-            additionalProperties: false,
-          },
-        },
-        {
-          name: "capacity_update_total",
-          description: "Feature×Quarterの合計キャパシティを更新します。",
-          inputSchema: {
-            type: "object",
-            properties: {
-              featureId: { type: "number" },
-              quarterId: { type: "number" },
-              totalCapacity: { type: "number", minimum: 0 },
-            },
-            required: ["featureId", "quarterId", "totalCapacity"],
-            additionalProperties: false,
-          },
+          uri: "ui://capacity/view",
+          mimeType: "text/html",
+          text: `<!doctype html><html><body style=\"margin:0\"><iframe src=\"${appOrigin}/\" style=\"width:100vw;height:100vh;border:0\"></iframe></body></html>`,
         },
       ],
-    });
-  }
+    }),
+  );
 
-  if (body.method === "tools/call") {
-    const toolName = body.params?.name;
-    const args = (body.params?.arguments ?? {}) as Record<string, unknown>;
-
-    if (toolName === "capacity_feature_view") {
+  registerAppTool(
+    server,
+    "capacity_feature_view",
+    {
+      title: "Feature Capacity View",
+      description: "Featureベースのキャパシティ情報を取得します。",
+      inputSchema: { featureId: z.number().optional() },
+      _meta: { ui: { resourceUri: "ui://capacity/view" } },
+    },
+    async ({ featureId }) => {
       const data = await getFeatureCapacities(db);
-      const featureId = typeof args.featureId === "number" ? args.featureId : undefined;
-      const uiUrl = new URL(req.url);
-      uiUrl.pathname = "/";
-      if (featureId) uiUrl.searchParams.set("featureId", String(featureId));
-
-      return jsonRpc(id, {
-        content: [
-          {
-            type: "text",
-            text: "既存のFeatureキャパシティUIを利用して、表示・編集できます。",
-          },
-        ],
+      return {
+        content: [{ type: "text", text: "Featureキャパシティ情報を取得しました。" }],
         structuredContent: {
           app: "capacity",
-          uiUrl: uiUrl.toString(),
+          featureId: featureId ?? null,
+          uiUrl: `${appOrigin}/`,
           ...data,
         },
-      });
-    }
+      };
+    },
+  );
 
-    if (toolName === "capacity_update_total") {
-      const featureId = Number(args.featureId);
-      const quarterId = Number(args.quarterId);
-      const totalCapacity = Number(args.totalCapacity);
-      if (
-        !Number.isFinite(featureId) ||
-        !Number.isFinite(quarterId) ||
-        !Number.isFinite(totalCapacity) ||
-        totalCapacity < 0
-      ) {
-        return jsonRpcError(id, -32602, "Invalid arguments");
-      }
-
+  registerAppTool(
+    server,
+    "capacity_update_total",
+    {
+      title: "Update Feature Quarter Capacity",
+      description: "Feature×Quarterの合計キャパシティを更新します。",
+      _meta: {},
+      inputSchema: {
+        featureId: z.number(),
+        quarterId: z.number(),
+        totalCapacity: z.number().min(0),
+      },
+    },
+    async ({ featureId, quarterId, totalCapacity }) => {
       const existing = await db
         .select()
         .from(featureQuarters)
@@ -164,20 +132,22 @@ export async function handleMcpRequest(req: Request, db: typeof DbType) {
             ),
           );
       } else {
-        await db.insert(featureQuarters).values({
-          featureId,
-          quarterId,
-          totalCapacity,
-        });
+        await db.insert(featureQuarters).values({ featureId, quarterId, totalCapacity });
       }
 
-      return jsonRpc(id, {
+      return {
         content: [{ type: "text", text: "キャパシティを更新しました。" }],
-      });
-    }
+      };
+    },
+  );
 
-    return jsonRpcError(id, -32601, "Unknown tool");
-  }
+  return server;
+}
 
-  return jsonRpcError(id, -32601, "Method not found");
+export async function handleMcpRequest(req: Request, db: typeof DbType) {
+  const appOrigin = new URL(req.url).origin;
+  const server = createMcpServer(db, appOrigin);
+  const transport = new WebStandardStreamableHTTPServerTransport();
+  await server.connect(transport);
+  return transport.handleRequest(req);
 }

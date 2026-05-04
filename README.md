@@ -203,3 +203,48 @@ PR マージ前に以下が全て通る必要があります:
 ```
 typecheck → lint → format:check → build
 ```
+
+
+## MCP (AI Agent / Codex) 動作確認
+
+`/mcp` エンドポイントを使って、MCP クライアント（例: Codex CLI）から Feature ベースのキャパシティ参照・更新ができます。
+
+### 1. サーバー起動
+
+```sh
+bun install
+bun run db:migrate
+bun dev
+```
+
+### 2. MCP initialize
+
+```sh
+curl -s http://localhost:3000/mcp \
+  -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+```
+
+### 3. MCP tools/list
+
+```sh
+curl -s http://localhost:3000/mcp \
+  -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+```
+
+### 4. Feature キャパシティ参照
+
+```sh
+curl -s http://localhost:3000/mcp \
+  -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"capacity_feature_view","arguments":{}}}'
+```
+
+### 5. Feature×Quarter 合計キャパ更新
+
+```sh
+curl -s http://localhost:3000/mcp \
+  -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"capacity_update_total","arguments":{"featureId":1,"quarterId":1,"totalCapacity":1.5}}}'
+```

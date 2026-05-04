@@ -3,6 +3,7 @@ import { serve } from "bun";
 import { db } from "./db/index";
 import index from "./index.html";
 import { router } from "./router";
+import { handleMcpRequest } from "./mcp";
 
 const rpcHandler = new RPCHandler(router);
 
@@ -15,6 +16,10 @@ const server = serve({
       });
       if (result.matched) return result.response;
       return new Response("Not found", { status: 404 });
+    },
+    "/mcp": async (req) => {
+      if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
+      return handleMcpRequest(req, db);
     },
     "/*": index,
   },

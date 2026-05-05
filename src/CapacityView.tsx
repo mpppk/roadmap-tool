@@ -1,3 +1,12 @@
+import {
+  ArrowDown,
+  ArrowUp,
+  ExternalLink,
+  Info,
+  Link as LinkIcon,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./capacity.css";
 import { parseCapacityTSV } from "./capacity-clipboard";
@@ -17,6 +26,13 @@ type Month = { id: number; year: number; month: number; quarterId: number };
 type Quarter = { id: number; year: number; quarter: number; months: Month[] };
 type Member = { id: number; name: string; maxCapacity: number | null };
 type CellType = "feature" | "member";
+type FeatureLink = {
+  id?: number;
+  title: string;
+  url: string;
+  position?: number;
+  clientKey?: string;
+};
 
 type MonthData = {
   totalCapacity: number;
@@ -27,6 +43,8 @@ type MonthData = {
 type FeatureRow = {
   id: number;
   name: string;
+  description: string | null;
+  links: FeatureLink[];
   expanded: boolean;
   months: Map<number, MonthData>;
 };
@@ -169,6 +187,15 @@ function nextQuarterYQ(quarters: Quarter[]): { year: number; quarter: number } {
 
 function emptyMonthData(): MonthData {
   return { totalCapacity: 0, unassignedCapacity: 0, memberAllocations: [] };
+}
+
+function isOpenableFeatureUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function aggregateMonthData(
@@ -456,12 +483,18 @@ function HeatmapMemberCell({
 
 function FeatureNameCell({
   name,
+  hasDescription,
+  linkCount,
   onRename,
   onDelete,
+  onEditDetails,
 }: {
   name: string;
+  hasDescription: boolean;
+  linkCount: number;
   onRename: (name: string) => Promise<string | undefined>;
   onDelete: () => void;
+  onEditDetails: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(name);
@@ -547,7 +580,7 @@ function FeatureNameCell({
   }
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+    <div className="feature-name-row">
       <button
         type="button"
         className="feature-name"
@@ -556,6 +589,32 @@ function FeatureNameCell({
       >
         {name}
       </button>
+      <button
+        type="button"
+        className={`feature-meta-btn${hasDescription ? " active" : ""}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          onEditDetails();
+        }}
+        title={hasDescription ? "説明あり" : "Feature詳細を編集"}
+        aria-label="Feature詳細を編集"
+      >
+        <Info size={13} />
+      </button>
+      {linkCount > 0 && (
+        <button
+          type="button"
+          className="feature-meta-btn active"
+          onClick={(e) => {
+            e.stopPropagation();
+            onEditDetails();
+          }}
+          title={`${linkCount}件のリンク`}
+          aria-label={`${linkCount}件のリンクを表示`}
+        >
+          <LinkIcon size={13} />
+        </button>
+      )}
       <button
         type="button"
         className="del-member-btn"
@@ -567,6 +626,231 @@ function FeatureNameCell({
       >
         ×
       </button>
+    </div>
+  );
+}
+
+function FeatureDetailsDialog({
+  feature,
+  onSave,
+  onClose,
+}: {
+  feature: FeatureRow;
+  onSave: (input: {
+    name: string;
+    description: string | null;
+    links: Array<{ title: string; url: string }>;
+  }) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(feature.name);
+  const [description, setDescription] = useState(feature.description ?? "");
+  const [links, setLinks] = useState<FeatureLink[]>(
+    feature.links.length > 0
+      ? feature.links.map((link) => ({
+          ...link,
+          clientKey: `saved-${link.id ?? crypto.randomUUID()}`,
+        }))
+      : [{ title: "", url: "", clientKey: crypto.randomUUID() }],
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const updateLink = (index: number, key: "title" | "url", value: string) => {
+    setLinks((current) =>
+      current.map((link, i) =>
+        i === index ? { ...link, [key]: value } : link,
+      ),
+    );
+    setError(null);
+  };
+
+  const moveLink = (index: number, offset: -1 | 1) => {
+    setLinks((current) => {
+      const next = [...current];
+      const target = index + offset;
+      if (target < 0 || target >= next.length) return current;
+      const [item] = next.splice(index, 1);
+      if (!item) return current;
+      next.splice(target, 0, item);
+      return next;
+    });
+  };
+
+  const removeLink = (index: number) => {
+    setLinks((current) => current.filter((_, i) => i !== index));
+  };
+
+  const save = async () => {
+    const trimmedName = trimSqliteSpaces(name);
+    if (trimmedName.length === 0) {
+      setError(NAME_ERROR_MESSAGES.blank);
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave({
+        name: trimmedName,
+        description: description.trim().length > 0 ? description : null,
+        links: links.map((link) => ({ title: link.title, url: link.url })),
+      });
+      onClose();
+    } catch (error) {
+      const message =
+        getNameErrorMessage(error) ??
+        (error instanceof Error ? error.message : null) ??
+        "保存できませんでした。";
+      setError(message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="confirm-overlay">
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="confirm-dialog feature-details-dialog"
+        onKeyDown={(e) => {
+          if (e.key === "Escape" && !saving) onClose();
+        }}
+      >
+        <div className="feature-details-header">
+          <p className="confirm-msg">Feature詳細</p>
+          <button
+            type="button"
+            className="feature-details-icon-btn"
+            onClick={() =>
+              setLinks((current) => [
+                ...current,
+                { title: "", url: "", clientKey: crypto.randomUUID() },
+              ])
+            }
+            disabled={saving || links.length >= 20}
+            title="リンクを追加"
+            aria-label="リンクを追加"
+          >
+            <Plus size={14} />
+          </button>
+        </div>
+
+        <label className="feature-details-label">
+          <span>名前</span>
+          <input
+            className="feature-details-input"
+            value={name}
+            disabled={saving}
+            onChange={(e) => {
+              setName(e.target.value);
+              setError(null);
+            }}
+          />
+        </label>
+
+        <label className="feature-details-label">
+          <span>説明</span>
+          <textarea
+            className="feature-details-textarea"
+            value={description}
+            disabled={saving}
+            maxLength={2000}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </label>
+
+        <div className="feature-details-links">
+          {links.map((link, index) => (
+            <div className="feature-details-link-row" key={link.clientKey}>
+              <input
+                className="feature-details-input"
+                value={link.title}
+                disabled={saving}
+                maxLength={100}
+                placeholder="リンク名"
+                onChange={(e) => updateLink(index, "title", e.target.value)}
+              />
+              <input
+                className="feature-details-input"
+                value={link.url}
+                disabled={saving}
+                maxLength={2048}
+                placeholder="https://example.com"
+                onChange={(e) => updateLink(index, "url", e.target.value)}
+              />
+              {isOpenableFeatureUrl(link.url.trim()) && (
+                <a
+                  className="feature-details-icon-btn"
+                  href={link.url.trim()}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="リンクを開く"
+                  aria-label="リンクを開く"
+                >
+                  <ExternalLink size={14} />
+                </a>
+              )}
+              <button
+                type="button"
+                className="feature-details-icon-btn"
+                onClick={() => moveLink(index, -1)}
+                disabled={saving || index === 0}
+                title="上へ"
+                aria-label="上へ"
+              >
+                <ArrowUp size={14} />
+              </button>
+              <button
+                type="button"
+                className="feature-details-icon-btn"
+                onClick={() => moveLink(index, 1)}
+                disabled={saving || index === links.length - 1}
+                title="下へ"
+                aria-label="下へ"
+              >
+                <ArrowDown size={14} />
+              </button>
+              <button
+                type="button"
+                className="feature-details-icon-btn danger"
+                onClick={() => removeLink(index)}
+                disabled={saving}
+                title="削除"
+                aria-label="削除"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        {error && (
+          <span className="name-warning feature-details-error" role="alert">
+            {error}
+          </span>
+        )}
+
+        <div className="confirm-btns">
+          <button
+            type="button"
+            className="btn-sm"
+            onClick={onClose}
+            disabled={saving}
+          >
+            キャンセル
+          </button>
+          <button
+            type="button"
+            className="btn-sm"
+            onClick={() => void save()}
+            disabled={saving}
+          >
+            {saving ? "保存中…" : "保存"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -783,6 +1067,8 @@ export function CapacityView() {
   const [assigningFeatureId, setAssigningFeatureId] = useState<number | null>(
     null,
   );
+  const [editingFeatureDetails, setEditingFeatureDetails] =
+    useState<FeatureRow | null>(null);
   const [removeConfirm, setRemoveConfirm] = useState<{
     featureId: number;
     memberId: number;
@@ -959,6 +1245,13 @@ export function CapacityView() {
       return {
         id: fv.feature.id,
         name: fv.feature.name,
+        description: fv.feature.description,
+        links: fv.feature.links.map((link) => ({
+          id: link.id,
+          title: link.title,
+          url: link.url,
+          position: link.position,
+        })),
         expanded: false,
         months: monthMap,
       };
@@ -1556,7 +1849,14 @@ export function CapacityView() {
       if (!f) return;
       setFeatureRows((rows) => [
         ...rows,
-        { id: f.id, name: f.name, expanded: false, months: new Map() },
+        {
+          id: f.id,
+          name: f.name,
+          description: f.description,
+          links: f.links,
+          expanded: false,
+          months: new Map(),
+        },
       ]);
     } catch (error) {
       const message = getNameErrorMessage(error);
@@ -1571,10 +1871,46 @@ export function CapacityView() {
     const f = await orpc.features.rename({ id, name });
     if (!f) return name;
     setFeatureRows((rows) =>
-      rows.map((r) => (r.id === id ? { ...r, name: f.name } : r)),
+      rows.map((r) =>
+        r.id === id
+          ? { ...r, name: f.name, description: f.description, links: f.links }
+          : r,
+      ),
     );
     return f.name;
   }, []);
+
+  const saveFeatureDetails = useCallback(
+    async (
+      id: number,
+      input: {
+        name: string;
+        description: string | null;
+        links: Array<{ title: string; url: string }>;
+      },
+    ) => {
+      const f = await orpc.features.rename({ id, ...input });
+      if (!f) return;
+      setFeatureRows((rows) =>
+        rows.map((r) =>
+          r.id === id
+            ? { ...r, name: f.name, description: f.description, links: f.links }
+            : r,
+        ),
+      );
+      setEditingFeatureDetails((current) =>
+        current?.id === id
+          ? {
+              ...current,
+              name: f.name,
+              description: f.description,
+              links: f.links,
+            }
+          : current,
+      );
+    },
+    [],
+  );
 
   const deleteFeature = useCallback(async (id: number) => {
     setBusy(true);
@@ -1640,7 +1976,17 @@ export function CapacityView() {
       }
     }
     setFeatureRows((rows) =>
-      rows.map((r) => (r.id === featureId ? { ...r, months: monthMap } : r)),
+      rows.map((r) =>
+        r.id === featureId
+          ? {
+              ...r,
+              name: fv.feature.name,
+              description: fv.feature.description,
+              links: fv.feature.links,
+              months: monthMap,
+            }
+          : r,
+      ),
     );
   }, []);
 
@@ -1822,8 +2168,15 @@ export function CapacityView() {
                         </button>
                         <FeatureNameCell
                           name={feature.name}
+                          hasDescription={
+                            (feature.description?.trim().length ?? 0) > 0
+                          }
+                          linkCount={feature.links.length}
                           onRename={(name) => renameFeature(feature.id, name)}
                           onDelete={() => deleteFeature(feature.id)}
+                          onEditDetails={() =>
+                            setEditingFeatureDetails(feature)
+                          }
                         />
                         {hasOverflow && (
                           <span
@@ -2271,6 +2624,16 @@ export function CapacityView() {
             </div>
           </div>
         </div>
+      )}
+
+      {editingFeatureDetails && (
+        <FeatureDetailsDialog
+          feature={editingFeatureDetails}
+          onSave={(input) =>
+            saveFeatureDetails(editingFeatureDetails.id, input)
+          }
+          onClose={() => setEditingFeatureDetails(null)}
+        />
       )}
 
       {removeConfirm && (

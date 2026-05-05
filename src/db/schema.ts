@@ -14,6 +14,7 @@ export const features = sqliteTable(
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     name: text("name").notNull(),
+    description: text("description"),
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .$defaultFn(() => new Date()),
@@ -22,6 +23,26 @@ export const features = sqliteTable(
     check("features_name_trimmed_check", sql`${t.name} = trim(${t.name})`),
     check("features_name_not_empty_check", sql`length(${t.name}) > 0`),
     uniqueIndex("features_name_trim_unique").on(sql`trim(${t.name})`),
+  ],
+);
+
+export const featureLinks = sqliteTable(
+  "feature_links",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    featureId: integer("feature_id")
+      .notNull()
+      .references(() => features.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    url: text("url").notNull(),
+    position: integer("position").notNull(),
+  },
+  (t) => [
+    unique().on(t.featureId, t.position),
+    unique().on(t.featureId, t.url),
+    check("feature_links_title_not_empty_check", sql`length(${t.title}) > 0`),
+    check("feature_links_url_not_empty_check", sql`length(${t.url}) > 0`),
+    check("feature_links_position_check", sql`${t.position} >= 0`),
   ],
 );
 

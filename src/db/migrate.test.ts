@@ -4,6 +4,7 @@ import { runMigrations } from "./migrate";
 
 function createOldSchemaDb() {
   const sqlite = new Database(":memory:");
+  sqlite.exec("PRAGMA foreign_keys = ON;");
   sqlite.exec(`
     CREATE TABLE __migrations (
       id     INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -152,5 +153,42 @@ describe("DB migrations", () => {
     sqlite
       .prepare("INSERT INTO members (name, created_at) VALUES (?, ?)")
       .run("Auth", now);
+  });
+
+  test("adds feature metadata columns and links table", () => {
+    const now = Date.now();
+    sqlite
+      .prepare("INSERT INTO features (name, created_at) VALUES (?, ?)")
+      .run("Auth", now);
+
+    runMigrations(sqlite);
+
+    const feature = sqlite
+      .prepare<{ id: number; description: string | null }, []>(
+        "SELECT id, description FROM features WHERE name = 'Auth'",
+      )
+      .get();
+    expect(feature?.description).toBeNull();
+
+    sqlite
+      .prepare(
+        "INSERT INTO feature_links (feature_id, title, url, position) VALUES (?, ?, ?, ?)",
+      )
+      .run(feature!.id, "Spec", "https://example.com/spec", 0);
+
+    const linkCount = sqlite
+      .prepare<{ count: number }, []>(
+        "SELECT count(*) AS count FROM feature_links",
+      )
+      .get();
+    expect(linkCount?.count).toBe(1);
+
+    sqlite.prepare("DELETE FROM features WHERE id = ?").run(feature!.id);
+    const remainingLinks = sqlite
+      .prepare<{ count: number }, []>(
+        "SELECT count(*) AS count FROM feature_links",
+      )
+      .get();
+    expect(remainingLinks?.count).toBe(0);
   });
 });

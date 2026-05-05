@@ -232,6 +232,44 @@
   font-family: inherit;
   text-align: left;
 }
+.feature-name-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.feature-meta-btn,
+.feature-details-icon-btn {
+  width: 22px;
+  height: 22px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--cv-text-3);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0;
+}
+.feature-meta-btn:hover,
+.feature-details-icon-btn:hover {
+  background: var(--bg);
+  color: var(--cv-text);
+  border-color: var(--border);
+}
+.feature-meta-btn.active {
+  color: var(--cv-accent);
+}
+.feature-details-icon-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.feature-details-icon-btn.danger:hover {
+  color: var(--cv-red);
+  background: var(--cv-red-bg);
+}
 .feature-name-input {
   font-weight: 500;
   font-size: 13px;
@@ -747,4 +785,56 @@
   color: var(--cv-red, #dc2626);
   max-height: 160px;
   overflow-y: auto;
+}
+.feature-details-dialog {
+  width: min(760px, calc(100vw - 40px));
+  max-width: 760px;
+}
+.feature-details-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.feature-details-label {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 12px;
+  color: var(--cv-text-2);
+  font-size: 12px;
+}
+.feature-details-input,
+.feature-details-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--cv-text);
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 12px;
+  padding: 6px 8px;
+}
+.feature-details-textarea {
+  min-height: 110px;
+  resize: vertical;
+  line-height: 1.5;
+}
+.feature-details-links {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.feature-details-link-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(180px, 1.5fr) repeat(
+      4,
+      22px
+    );
+  gap: 6px;
+  align-items: center;
+}
+.feature-details-error {
+  display: block;
+  margin: 0 0 12px;
 }

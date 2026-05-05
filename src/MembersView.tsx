@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import "./capacity.css";
+import {
+  getNameErrorMessage,
+  NAME_ERROR_MESSAGES,
+  nextAvailableGeneratedName,
+  trimSqliteSpaces,
+} from "./name-errors";
 import { navigate } from "./navigate";
 import { orpc } from "./orpc-client";
 
@@ -88,39 +94,87 @@ function MemberNameCell({
   onDelete,
 }: {
   member: Member;
-  onRename: (id: number, name: string) => void;
+  onRename: (id: number, name: string) => Promise<string | undefined>;
   onDelete: (id: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(member.name);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const committingRef = useRef(false);
+
+  useEffect(() => {
+    if (!editing) setVal(member.name);
+  }, [editing, member.name]);
 
   const startEdit = () => {
     setVal(member.name);
+    setError(null);
     setEditing(true);
     setTimeout(() => inputRef.current?.select(), 20);
   };
 
-  const commit = () => {
-    const trimmed = val.trim();
-    if (trimmed && trimmed !== member.name) onRename(member.id, trimmed);
+  const cancelEdit = () => {
+    setVal(member.name);
+    setError(null);
     setEditing(false);
+  };
+
+  const commit = async () => {
+    if (committingRef.current) return;
+    const trimmed = trimSqliteSpaces(val);
+    if (trimmed.length === 0) {
+      setError(NAME_ERROR_MESSAGES.blank);
+      return;
+    }
+    if (trimmed === member.name) {
+      cancelEdit();
+      return;
+    }
+
+    committingRef.current = true;
+    setSaving(true);
+    setError(null);
+    try {
+      const savedName = await onRename(member.id, trimmed);
+      setVal(savedName ?? trimmed);
+      setEditing(false);
+    } catch (error) {
+      setError(getNameErrorMessage(error) ?? "保存できませんでした。");
+    } finally {
+      committingRef.current = false;
+      setSaving(false);
+    }
   };
 
   if (editing) {
     return (
-      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+      <div className="name-edit-row">
         <input
           ref={inputRef}
           className="feature-name-input"
           value={val}
-          onChange={(e) => setVal(e.target.value)}
-          onBlur={commit}
+          disabled={saving}
+          aria-invalid={error ? true : undefined}
+          onChange={(e) => {
+            setVal(e.target.value);
+            setError(null);
+          }}
+          onBlur={() => void commit()}
           onKeyDown={(e) => {
-            if (e.key === "Enter") commit();
-            if (e.key === "Escape") setEditing(false);
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void commit();
+            }
+            if (e.key === "Escape") cancelEdit();
           }}
         />
+        {error && (
+          <span className="name-warning" role="alert">
+            {error}
+          </span>
+        )}
       </div>
     );
   }
@@ -158,6 +212,7 @@ export function MembersView() {
   const [memberRows, setMemberRows] = useState<MemberRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [actionWarning, setActionWarning] = useState<string | null>(null);
 
   // ── Initial load ────────────────────────────────────────────────────────
 
@@ -220,25 +275,35 @@ export function MembersView() {
 
   const addMember = async () => {
     setBusy(true);
+    setActionWarning(null);
     try {
       const m = await orpc.members.create({
-        name: `Member ${memberRows.length + 1}`,
+        name: nextAvailableGeneratedName(
+          "Member",
+          memberRows.map((row) => row.name),
+        ),
       });
       if (!m) return;
       setMemberRows((rows) => [
         ...rows,
         { id: m.id, name: m.name, expanded: false, quarters: new Map() },
       ]);
+    } catch (error) {
+      const message = getNameErrorMessage(error);
+      if (message) setActionWarning(message);
+      else throw error;
     } finally {
       setBusy(false);
     }
   };
 
   const renameMember = useCallback(async (id: number, name: string) => {
+    const m = await orpc.members.rename({ id, name });
+    if (!m) return name;
     setMemberRows((rows) =>
-      rows.map((r) => (r.id === id ? { ...r, name } : r)),
+      rows.map((r) => (r.id === id ? { ...r, name: m.name } : r)),
     );
-    await orpc.members.rename({ id, name });
+    return m.name;
   }, []);
 
   const deleteMember = useCallback(async (id: number) => {
@@ -492,6 +557,11 @@ export function MembersView() {
           >
             + Quarter
           </button>
+          {actionWarning && (
+            <span className="name-action-warning" role="alert">
+              {actionWarning}
+            </span>
+          )}
           <span className="hint-text">+ でFeature展開</span>
         </div>
       </div>

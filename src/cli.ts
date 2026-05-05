@@ -1,6 +1,7 @@
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
+import { getNameErrorMessage } from "./name-errors";
 import type { AppRouter } from "./router";
 
 const BASE_URL = process.env.ROADMAP_URL ?? "http://localhost:3000";
@@ -75,6 +76,11 @@ async function run() {
 }
 
 run().catch((err) => {
-  console.error(err instanceof Error ? err.message : err);
+  const nameErrorMessage = getNameErrorMessage(err);
+  if (nameErrorMessage) {
+    console.error(`警告: ${nameErrorMessage}`);
+  } else {
+    console.error(err instanceof Error ? err.message : err);
+  }
   process.exit(1);
 });

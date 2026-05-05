@@ -1,4 +1,4 @@
-import { os } from "@orpc/server";
+import { ORPCError, os } from "@orpc/server";
 import { and, eq, ne, sql } from "drizzle-orm";
 import * as z from "zod";
 import type { db as DbType } from "./db/index";
@@ -9,9 +9,105 @@ import {
   members,
   quarters,
 } from "./db/schema";
+import {
+  NAME_ERROR_MESSAGES,
+  type NameErrorCode,
+  type NameResource,
+  trimSqliteSpaces,
+} from "./name-errors";
 
 type Context = { db: typeof DbType };
 const o = os.$context<Context>();
+
+type SQLiteConstraintError = {
+  code?: string;
+  message?: string;
+};
+
+function normalizeNameInput(name: string, resource: NameResource): string {
+  const normalized = trimSqliteSpaces(name);
+  if (normalized.length === 0) throwNameError(resource, "BLANK_NAME");
+  return normalized;
+}
+
+function throwNameError(resource: NameResource, code: NameErrorCode): never {
+  const message =
+    code === "BLANK_NAME"
+      ? NAME_ERROR_MESSAGES.blank
+      : NAME_ERROR_MESSAGES[resource];
+  throw new ORPCError(code === "BLANK_NAME" ? "BAD_REQUEST" : "CONFLICT", {
+    message,
+    data: { code, resource },
+  });
+}
+
+function asSQLiteConstraintError(error: unknown): SQLiteConstraintError | null {
+  return error !== null && typeof error === "object"
+    ? (error as SQLiteConstraintError)
+    : null;
+}
+
+function rethrowNameMutationError(
+  resource: NameResource,
+  error: unknown,
+): never {
+  const sqliteError = asSQLiteConstraintError(error);
+  const message = sqliteError?.message ?? "";
+  if (
+    sqliteError?.code === "SQLITE_CONSTRAINT_UNIQUE" &&
+    (message.includes(
+      `${resource === "feature" ? "features" : "members"}.name`,
+    ) ||
+      message.includes(
+        `${resource === "feature" ? "features" : "members"}_name_trim_unique`,
+      ))
+  ) {
+    throwNameError(resource, "DUPLICATE_NAME");
+  }
+
+  if (
+    sqliteError?.code === "SQLITE_CONSTRAINT_CHECK" &&
+    message.includes(
+      `${resource === "feature" ? "features" : "members"}_name_not_empty_check`,
+    )
+  ) {
+    throwNameError(resource, "BLANK_NAME");
+  }
+
+  throw error;
+}
+
+async function assertFeatureNameAvailable(
+  db: typeof DbType,
+  name: string,
+  excludeId?: number,
+): Promise<void> {
+  const where =
+    excludeId === undefined
+      ? sql`trim(${features.name}) = ${name}`
+      : and(sql`trim(${features.name}) = ${name}`, ne(features.id, excludeId));
+  const existing = await db
+    .select({ id: features.id })
+    .from(features)
+    .where(where);
+  if (existing.length > 0) throwNameError("feature", "DUPLICATE_NAME");
+}
+
+async function assertMemberNameAvailable(
+  db: typeof DbType,
+  name: string,
+  excludeId?: number,
+): Promise<void> {
+  const where =
+    excludeId === undefined
+      ? sql`trim(${members.name}) = ${name}`
+      : and(sql`trim(${members.name}) = ${name}`, ne(members.id, excludeId));
+  const existing = await db
+    .select({ id: members.id })
+    .from(members)
+    .where(where);
+  if (existing.length > 0) throwNameError("member", "DUPLICATE_NAME");
+}
 
 // ---------------------------------------------------------------------------
 // Features
@@ -22,24 +118,36 @@ const featuresList = o
   .handler(async ({ context }) => context.db.select().from(features).all());
 
 const featuresCreate = o
-  .input(z.object({ name: z.string().min(1) }))
+  .input(z.object({ name: z.string() }))
   .handler(async ({ input, context }) => {
-    const [row] = await context.db
-      .insert(features)
-      .values({ name: input.name })
-      .returning();
-    return row;
+    const name = normalizeNameInput(input.name, "feature");
+    await assertFeatureNameAvailable(context.db, name);
+    try {
+      const [row] = await context.db
+        .insert(features)
+        .values({ name })
+        .returning();
+      return row;
+    } catch (error) {
+      rethrowNameMutationError("feature", error);
+    }
   });
 
 const featuresRename = o
-  .input(z.object({ id: z.number().int(), name: z.string().min(1) }))
+  .input(z.object({ id: z.number().int(), name: z.string() }))
   .handler(async ({ input, context }) => {
-    const [row] = await context.db
-      .update(features)
-      .set({ name: input.name })
-      .where(eq(features.id, input.id))
-      .returning();
-    return row;
+    const name = normalizeNameInput(input.name, "feature");
+    await assertFeatureNameAvailable(context.db, name, input.id);
+    try {
+      const [row] = await context.db
+        .update(features)
+        .set({ name })
+        .where(eq(features.id, input.id))
+        .returning();
+      return row;
+    } catch (error) {
+      rethrowNameMutationError("feature", error);
+    }
   });
 
 const featuresDelete = o
@@ -57,24 +165,36 @@ const membersList = o
   .handler(async ({ context }) => context.db.select().from(members).all());
 
 const membersCreate = o
-  .input(z.object({ name: z.string().min(1) }))
+  .input(z.object({ name: z.string() }))
   .handler(async ({ input, context }) => {
-    const [row] = await context.db
-      .insert(members)
-      .values({ name: input.name })
-      .returning();
-    return row;
+    const name = normalizeNameInput(input.name, "member");
+    await assertMemberNameAvailable(context.db, name);
+    try {
+      const [row] = await context.db
+        .insert(members)
+        .values({ name })
+        .returning();
+      return row;
+    } catch (error) {
+      rethrowNameMutationError("member", error);
+    }
   });
 
 const membersRename = o
-  .input(z.object({ id: z.number().int(), name: z.string().min(1) }))
+  .input(z.object({ id: z.number().int(), name: z.string() }))
   .handler(async ({ input, context }) => {
-    const [row] = await context.db
-      .update(members)
-      .set({ name: input.name })
-      .where(eq(members.id, input.id))
-      .returning();
-    return row;
+    const name = normalizeNameInput(input.name, "member");
+    await assertMemberNameAvailable(context.db, name, input.id);
+    try {
+      const [row] = await context.db
+        .update(members)
+        .set({ name })
+        .where(eq(members.id, input.id))
+        .returning();
+      return row;
+    } catch (error) {
+      rethrowNameMutationError("member", error);
+    }
   });
 
 const membersDelete = o

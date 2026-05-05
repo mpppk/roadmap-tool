@@ -209,6 +209,28 @@
   min-width: 80px;
   width: 160px;
 }
+.name-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.feature-name-input[aria-invalid="true"] {
+  border-bottom-color: var(--cv-red);
+}
+.name-warning,
+.name-action-warning {
+  color: var(--cv-red);
+  font-size: 11px;
+  line-height: 1.2;
+}
+.name-warning {
+  max-width: 260px;
+  white-space: normal;
+}
+.name-action-warning {
+  margin-left: 8px;
+}
 .overflow-dot {
   display: inline-block;
   width: 6px;

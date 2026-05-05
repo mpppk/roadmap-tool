@@ -1040,6 +1040,11 @@ export function CapacityView() {
     (rowIndex: number, colIndex: number, type: CellType) => {
       didDragRef.current = false;
       dragStartRef.current = { row: rowIndex, col: colIndex, type };
+      setSelType(type);
+      setSelStartRow(rowIndex);
+      setSelStartCol(colIndex);
+      setSelEndRow(rowIndex);
+      setSelEndCol(colIndex);
     },
     [],
   );

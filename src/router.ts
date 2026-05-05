@@ -18,6 +18,11 @@ import {
 
 type Context = { db: typeof DbType };
 const o = os.$context<Context>();
+const capacityConflictResolutionSchema = z.enum([
+  "fitWithinLimit",
+  "allowOverflow",
+  "rebalanceOthersProportionally",
+]);
 
 type SQLiteConstraintError = {
   code?: string;
@@ -272,6 +277,98 @@ async function getFeatureQuarterRow(
   return rows[0] ?? null;
 }
 
+function normalizeCapacity(value: number): number {
+  const rounded = Math.round(value * 1_000_000) / 1_000_000;
+  return Math.abs(rounded) < 1e-9 ? 0 : rounded;
+}
+
+async function setMemberAllocationCapacity(
+  db: typeof DbType,
+  {
+    featureId,
+    quarterId,
+    memberId,
+    capacity,
+    keepZero,
+  }: {
+    featureId: number;
+    quarterId: number;
+    memberId: number;
+    capacity: number;
+    keepZero: boolean;
+  },
+) {
+  const nextCapacity = normalizeCapacity(capacity);
+  const existing = await db
+    .select()
+    .from(memberAllocations)
+    .where(
+      and(
+        eq(memberAllocations.featureId, featureId),
+        eq(memberAllocations.quarterId, quarterId),
+        eq(memberAllocations.memberId, memberId),
+      ),
+    );
+
+  if (nextCapacity <= 0 && !keepZero) {
+    if (existing.length > 0) {
+      await db
+        .delete(memberAllocations)
+        .where(eq(memberAllocations.id, existing[0]!.id));
+    }
+    return;
+  }
+
+  if (existing.length > 0) {
+    await db
+      .update(memberAllocations)
+      .set({ capacity: nextCapacity })
+      .where(eq(memberAllocations.id, existing[0]!.id));
+  } else {
+    await db.insert(memberAllocations).values({
+      featureId,
+      quarterId,
+      memberId,
+      capacity: nextCapacity,
+    });
+  }
+}
+
+async function recalculateFeatureQuarterTotal(
+  db: typeof DbType,
+  featureId: number,
+  quarterId: number,
+) {
+  const allocs = await db
+    .select()
+    .from(memberAllocations)
+    .where(
+      and(
+        eq(memberAllocations.featureId, featureId),
+        eq(memberAllocations.quarterId, quarterId),
+      ),
+    );
+  const newTotal = normalizeCapacity(
+    allocs.reduce((s, a) => s + a.capacity, 0),
+  );
+  const existingFq = await getFeatureQuarterRow(db, featureId, quarterId);
+  if (existingFq) {
+    await db
+      .update(featureQuarters)
+      .set({ totalCapacity: newTotal })
+      .where(
+        and(
+          eq(featureQuarters.featureId, featureId),
+          eq(featureQuarters.quarterId, quarterId),
+        ),
+      );
+  } else if (newTotal > 0) {
+    await db
+      .insert(featureQuarters)
+      .values({ featureId, quarterId, totalCapacity: newTotal });
+  }
+}
+
 async function buildFeatureQuarterResult(
   db: typeof DbType,
   featureId: number,
@@ -300,6 +397,28 @@ async function buildFeatureQuarterResult(
       memberId: a.memberId,
       capacity: a.capacity,
     })),
+  };
+}
+
+async function buildMemberAllocationUpdateResult(
+  db: typeof DbType,
+  featureId: number,
+  quarterId: number,
+  affectedFeatureIds: Iterable<number>,
+) {
+  const updatedQuarters = [];
+  for (const affectedFeatureId of [...new Set(affectedFeatureIds)]) {
+    updatedQuarters.push(
+      await buildFeatureQuarterResult(db, affectedFeatureId, quarterId),
+    );
+  }
+  const targetResult =
+    updatedQuarters.find((r) => r.featureId === featureId) ??
+    (await buildFeatureQuarterResult(db, featureId, quarterId));
+
+  return {
+    ...targetResult,
+    updatedQuarters,
   };
 }
 
@@ -377,7 +496,7 @@ const allocationsGetMemberView = o
             feature: f,
             capacity: qAllocs.find((a) => a.featureId === f.id)?.capacity ?? 0,
           }))
-          .filter((a) => a.capacity > 0),
+          .filter((a) => qAllocs.some((rec) => rec.featureId === a.feature.id)),
       };
     });
 
@@ -545,6 +664,28 @@ const allocationsUpdateTotal = o
     return buildFeatureQuarterResult(db, featureId, quarterId);
   });
 
+const allocationsPreviewMemberAllocation = o
+  .input(
+    z.object({
+      featureId: z.number().int(),
+      quarterId: z.number().int(),
+      memberId: z.number().int(),
+    }),
+  )
+  .handler(async ({ input, context }) => {
+    const usedElsewhere = await getMemberUsageInQuarter(
+      context.db,
+      input.memberId,
+      input.quarterId,
+      input.featureId,
+    );
+
+    return {
+      usedElsewhere: normalizeCapacity(usedElsewhere),
+      assignableCapacity: normalizeCapacity(Math.max(0, 1 - usedElsewhere)),
+    };
+  });
+
 const allocationsUpdateMemberAllocation = o
   .input(
     z.object({
@@ -552,13 +693,21 @@ const allocationsUpdateMemberAllocation = o
       quarterId: z.number().int(),
       memberId: z.number().int(),
       capacity: z.number().min(0),
+      capacityConflictResolution: capacityConflictResolutionSchema
+        .optional()
+        .default("fitWithinLimit"),
     }),
   )
   .handler(async ({ input, context }) => {
     const { db } = context;
-    const { featureId, quarterId, memberId, capacity } = input;
+    const {
+      featureId,
+      quarterId,
+      memberId,
+      capacity,
+      capacityConflictResolution,
+    } = input;
 
-    // Check member×quarter cap
     const usedElsewhere = await getMemberUsageInQuarter(
       db,
       memberId,
@@ -566,65 +715,66 @@ const allocationsUpdateMemberAllocation = o
       featureId,
     );
     const cap = Math.max(0, 1.0 - usedElsewhere);
-    const capped = Math.min(capacity, cap);
+    let nextCapacity =
+      capacityConflictResolution === "fitWithinLimit"
+        ? Math.min(capacity, cap)
+        : capacity;
+    const affectedFeatureIds = new Set<number>([featureId]);
 
-    const existing = await db
-      .select()
-      .from(memberAllocations)
-      .where(
-        and(
-          eq(memberAllocations.featureId, featureId),
-          eq(memberAllocations.quarterId, quarterId),
-          eq(memberAllocations.memberId, memberId),
-        ),
-      );
-
-    if (capped <= 0) {
-      if (existing.length > 0) {
-        await db
-          .delete(memberAllocations)
-          .where(eq(memberAllocations.id, existing[0]!.id));
-      }
-    } else if (existing.length > 0) {
-      await db
-        .update(memberAllocations)
-        .set({ capacity: capped })
-        .where(eq(memberAllocations.id, existing[0]!.id));
-    } else {
-      await db
-        .insert(memberAllocations)
-        .values({ featureId, quarterId, memberId, capacity: capped });
-    }
-
-    const updatedAllocs = await db
-      .select()
-      .from(memberAllocations)
-      .where(
-        and(
-          eq(memberAllocations.featureId, featureId),
-          eq(memberAllocations.quarterId, quarterId),
-        ),
-      );
-    const newTotal = updatedAllocs.reduce((s, a) => s + a.capacity, 0);
-
-    const existingFq = await getFeatureQuarterRow(db, featureId, quarterId);
-    if (existingFq) {
-      await db
-        .update(featureQuarters)
-        .set({ totalCapacity: newTotal })
+    if (
+      capacityConflictResolution === "rebalanceOthersProportionally" &&
+      capacity <= 1 &&
+      usedElsewhere > 0
+    ) {
+      const scale = Math.max(0, (1 - capacity) / usedElsewhere);
+      const otherAllocs = await db
+        .select()
+        .from(memberAllocations)
         .where(
           and(
-            eq(featureQuarters.featureId, featureId),
-            eq(featureQuarters.quarterId, quarterId),
+            eq(memberAllocations.memberId, memberId),
+            eq(memberAllocations.quarterId, quarterId),
+            ne(memberAllocations.featureId, featureId),
           ),
         );
-    } else if (newTotal > 0) {
-      await db
-        .insert(featureQuarters)
-        .values({ featureId, quarterId, totalCapacity: newTotal });
+
+      for (const alloc of otherAllocs) {
+        affectedFeatureIds.add(alloc.featureId);
+        await setMemberAllocationCapacity(db, {
+          featureId: alloc.featureId,
+          quarterId,
+          memberId,
+          capacity: alloc.capacity * scale,
+          keepZero: true,
+        });
+      }
     }
 
-    return buildFeatureQuarterResult(db, featureId, quarterId);
+    if (
+      capacityConflictResolution === "rebalanceOthersProportionally" &&
+      capacity > 1
+    ) {
+      nextCapacity = capacity;
+    }
+
+    await setMemberAllocationCapacity(db, {
+      featureId,
+      quarterId,
+      memberId,
+      capacity: nextCapacity,
+      keepZero: false,
+    });
+
+    for (const affectedFeatureId of affectedFeatureIds) {
+      await recalculateFeatureQuarterTotal(db, affectedFeatureId, quarterId);
+    }
+
+    return buildMemberAllocationUpdateResult(
+      db,
+      featureId,
+      quarterId,
+      affectedFeatureIds,
+    );
   });
 
 const allocationsMoveQuarter = o
@@ -867,6 +1017,7 @@ export const router = {
     getMemberView: allocationsGetMemberView,
     assignMember: allocationsAssignMember,
     removeMemberFromFeature: allocationsRemoveMemberFromFeature,
+    previewMemberAllocation: allocationsPreviewMemberAllocation,
     updateTotal: allocationsUpdateTotal,
     updateMemberAllocation: allocationsUpdateMemberAllocation,
     moveQuarter: allocationsMoveQuarter,

@@ -551,7 +551,6 @@ export function CapacityView() {
     errors: { row: number; message: string }[];
   } | null>(null);
   const [importing, setImporting] = useState(false);
-  const [reloadCounter, setReloadCounter] = useState(0);
   const [assigningFeatureId, setAssigningFeatureId] = useState<number | null>(
     null,
   );
@@ -571,54 +570,56 @@ export function CapacityView() {
 
   // ── Initial load ────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      const [qs, fs, ms] = await Promise.all([
-        orpc.quarters.list({}),
-        orpc.features.list({}),
-        orpc.members.list({}),
-      ]);
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    const [qs, fs, ms] = await Promise.all([
+      orpc.quarters.list({}),
+      orpc.features.list({}),
+      orpc.members.list({}),
+    ]);
 
-      const sortedQs = [...qs]
-        .map((q) => ({
-          ...q,
-          months: [...q.months].sort((a, b) => a.month - b.month),
-        }))
-        .sort((a, b) => a.year - b.year || a.quarter - b.quarter);
+    const sortedQs = [...qs]
+      .map((q) => ({
+        ...q,
+        months: [...q.months].sort((a, b) => a.month - b.month),
+      }))
+      .sort((a, b) => a.year - b.year || a.quarter - b.quarter);
 
-      const featureViews = await Promise.all(
-        fs.map((f) => orpc.allocations.getFeatureView({ featureId: f.id })),
-      );
+    const featureViews = await Promise.all(
+      fs.map((f) => orpc.allocations.getFeatureView({ featureId: f.id })),
+    );
 
-      const rows: FeatureRow[] = featureViews.map((fv) => {
-        const monthMap = new Map<number, MonthData>();
-        for (const qd of fv.quarters) {
-          for (const md of qd.months) {
-            monthMap.set(md.month.id, {
-              totalCapacity: md.totalCapacity,
-              unassignedCapacity: md.unassignedCapacity,
-              memberAllocations: md.memberAllocations.map((a) => ({
-                memberId: a.member.id,
-                capacity: a.capacity,
-              })),
-            });
-          }
+    const rows: FeatureRow[] = featureViews.map((fv) => {
+      const monthMap = new Map<number, MonthData>();
+      for (const qd of fv.quarters) {
+        for (const md of qd.months) {
+          monthMap.set(md.month.id, {
+            totalCapacity: md.totalCapacity,
+            unassignedCapacity: md.unassignedCapacity,
+            memberAllocations: md.memberAllocations.map((a) => ({
+              memberId: a.member.id,
+              capacity: a.capacity,
+            })),
+          });
         }
-        return {
-          id: fv.feature.id,
-          name: fv.feature.name,
-          expanded: false,
-          months: monthMap,
-        };
-      });
+      }
+      return {
+        id: fv.feature.id,
+        name: fv.feature.name,
+        expanded: false,
+        months: monthMap,
+      };
+    });
 
-      setQuarters(sortedQs);
-      setMembers(ms);
-      setFeatureRows(rows);
-      setLoading(false);
-    })();
-  }, [reloadCounter]);
+    setQuarters(sortedQs);
+    setMembers(ms);
+    setFeatureRows(rows);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    loadAll();
+  }, [loadAll]);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -949,12 +950,12 @@ export function CapacityView() {
       const result = await orpc.import.csvImport({ csv: importCsv });
       setImportResult(result);
       if (result.success > 0) {
-        setReloadCounter((c) => c + 1);
+        await loadAll();
       }
     } finally {
       setImporting(false);
     }
-  }, [importCsv]);
+  }, [importCsv, loadAll]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 

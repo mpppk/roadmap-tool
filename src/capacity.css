@@ -76,6 +76,42 @@
   color: var(--cv-text);
   font-weight: 500;
 }
+.period-toggle {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  margin-left: 8px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+}
+.period-toggle-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+}
+.period-toggle-btn {
+  height: 22px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--cv-text-2);
+  cursor: pointer;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 11px;
+}
+.period-toggle-btn:hover {
+  color: var(--cv-text);
+}
+.period-toggle-btn.active {
+  background: var(--surface);
+  color: var(--cv-text);
+  font-weight: 500;
+}
 
 .cv-body {
   flex: 1;

@@ -1256,7 +1256,9 @@ async function findOrCreateMonth(
   quarterId = newQ.id;
   const monthRows = await db
     .insert(months)
-    .values(monthsInQuarter(quarterNum).map((m) => ({ year, month: m, quarterId })))
+    .values(
+      monthsInQuarter(quarterNum).map((m) => ({ year, month: m, quarterId })),
+    )
     .returning();
   for (const m of monthRows) {
     cache.set(monthLabel(m.year, m.month), m.id);
@@ -1429,7 +1431,11 @@ const csvImport = o
     // Recalculate feature_months totals for all affected pairs
     for (const pair of affectedPairs) {
       const parts = pair.split(":");
-      await recalculateFeatureMonthTotal(db, Number(parts[0]), Number(parts[1]));
+      await recalculateFeatureMonthTotal(
+        db,
+        Number(parts[0]),
+        Number(parts[1]),
+      );
     }
 
     return { success, skipped, errors };

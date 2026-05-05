@@ -1396,7 +1396,9 @@ export function CapacityView() {
                 className="import-textarea"
                 value={importCsv}
                 onChange={(e) => setImportCsv(e.target.value)}
-                placeholder={"機能,担当者,キャパシティ,月\nFeature A,Alice,0.5,2026-04"}
+                placeholder={
+                  "機能,担当者,キャパシティ,月\nFeature A,Alice,0.5,2026-04"
+                }
                 rows={8}
                 disabled={importing}
               />
@@ -1404,7 +1406,8 @@ export function CapacityView() {
               <div className="import-result">
                 <p>
                   完了: <strong>{importResult.success}件成功</strong>
-                  {importResult.skipped > 0 && `、${importResult.skipped}件スキップ`}
+                  {importResult.skipped > 0 &&
+                    `、${importResult.skipped}件スキップ`}
                 </p>
                 {importResult.errors.length > 0 && (
                   <ul className="import-errors">

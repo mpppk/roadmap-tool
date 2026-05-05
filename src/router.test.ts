@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { type BunSQLiteDatabase, drizzle } from "drizzle-orm/bun-sqlite";
 import {
@@ -26,8 +26,24 @@ type TestDb = BunSQLiteDatabase<typeof testSchema>;
 function createTestDb() {
   const sqlite = new Database(":memory:");
   sqlite.exec(`
-    CREATE TABLE features (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
-    CREATE TABLE members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
+    CREATE TABLE features (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      CONSTRAINT features_name_trimmed_check CHECK (name = trim(name)),
+      CONSTRAINT features_name_not_empty_check CHECK (length(name) > 0)
+    );
+    CREATE UNIQUE INDEX features_name_trim_unique ON features (trim(name));
+
+    CREATE TABLE members (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      CONSTRAINT members_name_trimmed_check CHECK (name = trim(name)),
+      CONSTRAINT members_name_not_empty_check CHECK (length(name) > 0)
+    );
+    CREATE UNIQUE INDEX members_name_trim_unique ON members (trim(name));
+
     CREATE TABLE quarters (id INTEGER PRIMARY KEY AUTOINCREMENT, year INTEGER NOT NULL, quarter INTEGER NOT NULL, UNIQUE(year, quarter));
     CREATE TABLE months (id INTEGER PRIMARY KEY AUTOINCREMENT, year INTEGER NOT NULL, month INTEGER NOT NULL, quarter_id INTEGER NOT NULL REFERENCES quarters(id) ON DELETE CASCADE, UNIQUE(year, month), UNIQUE(quarter_id, month));
     CREATE TABLE feature_months (id INTEGER PRIMARY KEY AUTOINCREMENT, feature_id INTEGER NOT NULL REFERENCES features(id) ON DELETE CASCADE, month_id INTEGER NOT NULL REFERENCES months(id) ON DELETE CASCADE, total_capacity REAL NOT NULL DEFAULT 0, UNIQUE(feature_id, month_id));
@@ -37,6 +53,27 @@ function createTestDb() {
     sqlite,
     db: drizzle(sqlite, { schema: testSchema }),
   };
+}
+
+async function expectNameError(
+  promise: Promise<unknown>,
+  code: "CONFLICT" | "BAD_REQUEST",
+  dataCode: "DUPLICATE_NAME" | "BLANK_NAME",
+) {
+  try {
+    await promise;
+  } catch (error) {
+    const record = error as {
+      code?: string;
+      data?: { code?: string };
+      message?: string;
+    };
+    expect(record.code).toBe(code);
+    expect(record.data?.code).toBe(dataCode);
+    expect(typeof record.message).toBe("string");
+    return;
+  }
+  throw new Error(`Expected ${code} name error`);
 }
 
 async function createQuarterWithMonths(
@@ -147,6 +184,70 @@ async function getFeatureMonth(db: TestDb, featureId: number, monthId: number) {
     );
   return row;
 }
+
+describe("router name validation", () => {
+  let state: ReturnType<typeof createTestDb>;
+
+  beforeEach(() => {
+    state = createTestDb();
+  });
+
+  afterEach(() => {
+    state.sqlite.close();
+  });
+
+  test("trims feature names before create and rename", async () => {
+    const createFeature = router.features.create.callable({
+      context: { db: state.db },
+    });
+    const renameFeature = router.features.rename.callable({
+      context: { db: state.db },
+    });
+
+    const created = await createFeature({ name: " Auth " });
+    expect(created?.name).toBe("Auth");
+
+    const renamed = await renameFeature({ id: created!.id, name: " Auth v2 " });
+    expect(renamed?.name).toBe("Auth v2");
+  });
+
+  test("returns typed API errors for duplicate and blank feature names", async () => {
+    const createFeature = router.features.create.callable({
+      context: { db: state.db },
+    });
+    await createFeature({ name: "Auth" });
+
+    await expectNameError(
+      createFeature({ name: " Auth " }),
+      "CONFLICT",
+      "DUPLICATE_NAME",
+    );
+    await expectNameError(
+      createFeature({ name: " " }),
+      "BAD_REQUEST",
+      "BLANK_NAME",
+    );
+  });
+
+  test("keeps member duplicate checks separate from feature names", async () => {
+    const createFeature = router.features.create.callable({
+      context: { db: state.db },
+    });
+    const createMember = router.members.create.callable({
+      context: { db: state.db },
+    });
+
+    await createFeature({ name: "Auth" });
+    const member = await createMember({ name: " Auth " });
+    expect(member?.name).toBe("Auth");
+
+    await expectNameError(
+      createMember({ name: "Auth" }),
+      "CONFLICT",
+      "DUPLICATE_NAME",
+    );
+  });
+});
 
 describe("allocation capacity conflicts", () => {
   let sqlite: Database | null = null;

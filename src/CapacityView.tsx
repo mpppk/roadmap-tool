@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./capacity.css";
+import {
+  getNameErrorMessage,
+  NAME_ERROR_MESSAGES,
+  nextAvailableGeneratedName,
+  trimSqliteSpaces,
+} from "./name-errors";
 import { navigate } from "./navigate";
 import { orpc } from "./orpc-client";
 
@@ -337,38 +343,89 @@ function FeatureNameCell({
   onDelete,
 }: {
   name: string;
-  onRename: (name: string) => void;
+  onRename: (name: string) => Promise<string | undefined>;
   onDelete: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(name);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const committingRef = useRef(false);
+
+  useEffect(() => {
+    if (!editing) setVal(name);
+  }, [editing, name]);
 
   const startEdit = () => {
     setVal(name);
+    setError(null);
     setEditing(true);
     setTimeout(() => inputRef.current?.select(), 20);
   };
 
-  const commit = () => {
-    const trimmed = val.trim();
-    if (trimmed && trimmed !== name) onRename(trimmed);
+  const cancelEdit = () => {
+    setVal(name);
+    setError(null);
     setEditing(false);
+  };
+
+  const commit = async () => {
+    if (committingRef.current) return;
+    const trimmed = trimSqliteSpaces(val);
+    if (trimmed.length === 0) {
+      setError(NAME_ERROR_MESSAGES.blank);
+      return;
+    }
+    if (trimmed === name) {
+      cancelEdit();
+      return;
+    }
+
+    committingRef.current = true;
+    setSaving(true);
+    setError(null);
+    try {
+      const savedName = await onRename(trimmed);
+      setVal(savedName ?? trimmed);
+      setEditing(false);
+    } catch (error) {
+      setError(getNameErrorMessage(error) ?? "保存できませんでした。");
+    } finally {
+      committingRef.current = false;
+      setSaving(false);
+    }
   };
 
   if (editing) {
     return (
-      <input
-        ref={inputRef}
-        className="feature-name-input"
-        value={val}
-        onChange={(e) => setVal(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") commit();
-          if (e.key === "Escape") setEditing(false);
-        }}
-      />
+      <div className="name-edit-row">
+        <input
+          ref={inputRef}
+          className="feature-name-input"
+          value={val}
+          disabled={saving}
+          aria-invalid={error ? true : undefined}
+          onChange={(e) => {
+            setVal(e.target.value);
+            setError(null);
+          }}
+          onBlur={() => void commit()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void commit();
+            }
+            if (e.key === "Escape") cancelEdit();
+          }}
+          onClick={(e) => e.stopPropagation()}
+        />
+        {error && (
+          <span className="name-warning" role="alert">
+            {error}
+          </span>
+        )}
+      </div>
     );
   }
 
@@ -485,6 +542,7 @@ export function CapacityView() {
   const [featureRows, setFeatureRows] = useState<FeatureRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [actionWarning, setActionWarning] = useState<string | null>(null);
   const [assigningFeatureId, setAssigningFeatureId] = useState<number | null>(
     null,
   );
@@ -746,25 +804,35 @@ export function CapacityView() {
 
   const addFeature = async () => {
     setBusy(true);
+    setActionWarning(null);
     try {
       const f = await orpc.features.create({
-        name: `Feature ${featureRows.length + 1}`,
+        name: nextAvailableGeneratedName(
+          "Feature",
+          featureRows.map((row) => row.name),
+        ),
       });
       if (!f) return;
       setFeatureRows((rows) => [
         ...rows,
         { id: f.id, name: f.name, expanded: false, months: new Map() },
       ]);
+    } catch (error) {
+      const message = getNameErrorMessage(error);
+      if (message) setActionWarning(message);
+      else throw error;
     } finally {
       setBusy(false);
     }
   };
 
   const renameFeature = useCallback(async (id: number, name: string) => {
+    const f = await orpc.features.rename({ id, name });
+    if (!f) return name;
     setFeatureRows((rows) =>
-      rows.map((r) => (r.id === id ? { ...r, name } : r)),
+      rows.map((r) => (r.id === id ? { ...r, name: f.name } : r)),
     );
-    await orpc.features.rename({ id, name });
+    return f.name;
   }, []);
 
   const deleteFeature = useCallback(async (id: number) => {
@@ -779,12 +847,20 @@ export function CapacityView() {
 
   const addMember = async () => {
     setBusy(true);
+    setActionWarning(null);
     try {
       const m = await orpc.members.create({
-        name: `Member ${members.length + 1}`,
+        name: nextAvailableGeneratedName(
+          "Member",
+          members.map((member) => member.name),
+        ),
       });
       if (!m) return;
       setMembers((ms) => [...ms, m]);
+    } catch (error) {
+      const message = getNameErrorMessage(error);
+      if (message) setActionWarning(message);
+      else throw error;
     } finally {
       setBusy(false);
     }
@@ -1255,6 +1331,11 @@ export function CapacityView() {
           >
             CSVをコピー
           </button>
+          {actionWarning && (
+            <span className="name-action-warning" role="alert">
+              {actionWarning}
+            </span>
+          )}
           <span className="hint-text">クリックで数値編集 · + で担当者展開</span>
         </div>
       </div>

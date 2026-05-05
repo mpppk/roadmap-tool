@@ -1330,9 +1330,7 @@ export function CapacityView() {
                                     matchingMaxCapacityOverflow.usedElsewhere
                                   }
                                   onResolve={resolveMaxCapacityOverflow}
-                                  onCancel={() =>
-                                    setMaxCapacityOverflow(null)
-                                  }
+                                  onCancel={() => setMaxCapacityOverflow(null)}
                                 />
                               )}
                               {matchingCapacityConflict && (

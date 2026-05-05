@@ -543,6 +543,15 @@ export function CapacityView() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [actionWarning, setActionWarning] = useState<string | null>(null);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importCsv, setImportCsv] = useState("");
+  const [importResult, setImportResult] = useState<{
+    success: number;
+    skipped: number;
+    errors: { row: number; message: string }[];
+  } | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [reloadCounter, setReloadCounter] = useState(0);
   const [assigningFeatureId, setAssigningFeatureId] = useState<number | null>(
     null,
   );
@@ -609,7 +618,7 @@ export function CapacityView() {
       setFeatureRows(rows);
       setLoading(false);
     })();
-  }, []);
+  }, [reloadCounter]);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -933,6 +942,19 @@ export function CapacityView() {
     const csv = await orpc.export.allocationCSV({});
     await navigator.clipboard.writeText(csv);
   }, []);
+
+  const runImportCSV = useCallback(async () => {
+    setImporting(true);
+    try {
+      const result = await orpc.import.csvImport({ csv: importCsv });
+      setImportResult(result);
+      if (result.success > 0) {
+        setReloadCounter((c) => c + 1);
+      }
+    } finally {
+      setImporting(false);
+    }
+  }, [importCsv]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -1331,6 +1353,19 @@ export function CapacityView() {
           >
             CSVをコピー
           </button>
+          <button
+            type="button"
+            className="btn-sm"
+            onClick={() => {
+              setImportCsv("");
+              setImportResult(null);
+              setImportModalOpen(true);
+            }}
+            disabled={busy}
+            title="CSVをインポート（機能,担当者,キャパシティ,月）"
+          >
+            CSVをインポート
+          </button>
           {actionWarning && (
             <span className="name-action-warning" role="alert">
               {actionWarning}
@@ -1339,6 +1374,71 @@ export function CapacityView() {
           <span className="hint-text">クリックで数値編集 · + で担当者展開</span>
         </div>
       </div>
+
+      {importModalOpen && (
+        <div className="confirm-overlay">
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="confirm-dialog import-dialog"
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && !importing) setImportModalOpen(false);
+            }}
+          >
+            <p className="confirm-msg">CSVをインポート</p>
+            <p className="import-hint">
+              ヘッダー行（機能,担当者,キャパシティ,月）を含むCSVを貼り付けてください。
+              既存のキャパシティに加算されます。
+            </p>
+            {!importResult ? (
+              <textarea
+                className="import-textarea"
+                value={importCsv}
+                onChange={(e) => setImportCsv(e.target.value)}
+                placeholder={"機能,担当者,キャパシティ,月\nFeature A,Alice,0.5,2026-04"}
+                rows={8}
+                disabled={importing}
+              />
+            ) : (
+              <div className="import-result">
+                <p>
+                  完了: <strong>{importResult.success}件成功</strong>
+                  {importResult.skipped > 0 && `、${importResult.skipped}件スキップ`}
+                </p>
+                {importResult.errors.length > 0 && (
+                  <ul className="import-errors">
+                    {importResult.errors.map((e) => (
+                      <li key={e.row}>
+                        行{e.row}: {e.message}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+            <div className="confirm-btns">
+              <button
+                type="button"
+                className="btn-sm"
+                onClick={() => setImportModalOpen(false)}
+                disabled={importing}
+              >
+                {importResult ? "閉じる" : "キャンセル"}
+              </button>
+              {!importResult && (
+                <button
+                  type="button"
+                  className="btn-sm"
+                  onClick={runImportCSV}
+                  disabled={importing || !importCsv.trim()}
+                >
+                  {importing ? "インポート中…" : "インポート"}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {removeConfirm && (
         <div className="confirm-overlay">

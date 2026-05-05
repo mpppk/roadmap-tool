@@ -15,6 +15,7 @@ type ViewMode = "quarter" | "month";
 type Month = { id: number; year: number; month: number; quarterId: number };
 type Quarter = { id: number; year: number; quarter: number; months: Month[] };
 type Member = { id: number; name: string; maxCapacity: number | null };
+type CellType = "feature" | "member";
 
 type MonthData = {
   totalCapacity: number;
@@ -81,6 +82,48 @@ type RebalancePreview = {
   featureName: string;
   currentCapacity: number;
   nextCapacity: number;
+};
+
+type SelectableRow =
+  | { type: "feature"; featureId: number }
+  | { type: "member"; featureId: number; memberId: number };
+
+type SelectionRect = {
+  minRow: number;
+  maxRow: number;
+  minCol: number;
+  maxCol: number;
+  type: CellType;
+};
+
+type CellClipboard = {
+  data: number[][];
+  viewMode: ViewMode;
+  type: CellType;
+  sourceSel: SelectionRect;
+};
+
+type PasteOp =
+  | { kind: "feature"; featureId: number; column: PeriodColumn; value: number }
+  | {
+      kind: "member";
+      featureId: number;
+      memberId: number;
+      column: PeriodColumn;
+      value: number;
+    };
+
+type PasteConflictItem = {
+  rowLabel: string;
+  colLabel: string;
+  sourceValue: number;
+  cappedValue: number;
+};
+
+type PasteConflictState = {
+  conflicts: PasteConflictItem[];
+  opsForCapped: PasteOp[];
+  opsForOverflow: PasteOp[];
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -205,6 +248,25 @@ function updateMonthResults(
   return newMap;
 }
 
+function parseTSV(text: string): number[][] | null {
+  const lines = text.trimEnd().split("\n");
+  const result: number[][] = [];
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const cells = line.split("\t");
+    const nums = cells.map((c) => {
+      const trimmed = c.trim();
+      const v = parseFloat(trimmed);
+      if (!Number.isNaN(v)) return Math.max(0, v);
+      // Try replacing comma as decimal separator (European locale)
+      const v2 = parseFloat(trimmed.replace(",", "."));
+      return Number.isNaN(v2) ? 0 : Math.max(0, v2);
+    });
+    result.push(nums);
+  }
+  return result.length > 0 ? result : null;
+}
+
 // ── Sub-components ──────────────────────────────────────────────────────────
 
 function HeatmapCell({
@@ -213,12 +275,22 @@ function HeatmapCell({
   maxVal,
   onCommit,
   rowHeight,
+  isSelected,
+  isCopied,
+  onCellMouseDown,
+  onCellMouseEnter,
+  onPasteClick,
 }: {
   value: number;
   unassigned: number;
   maxVal: number;
   onCommit: (v: number) => void;
   rowHeight: number;
+  isSelected?: boolean;
+  isCopied?: boolean;
+  onCellMouseDown?: () => void;
+  onCellMouseEnter?: () => void;
+  onPasteClick?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [editVal, setEditVal] = useState("");
@@ -238,12 +310,19 @@ function HeatmapCell({
     setEditing(false);
   };
 
+  const handleClick = onPasteClick ?? startEdit;
+  const cls = ["hm-cell", isSelected && "is-selected", isCopied && "is-copied"]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     <button
       type="button"
-      className="hm-cell"
+      className={cls}
       style={{ background: bg, height: rowHeight }}
-      onClick={startEdit}
+      onClick={handleClick}
+      onMouseDown={onCellMouseDown}
+      onMouseEnter={onCellMouseEnter}
       title={`${fmt(value)} 人月 · クリックで編集`}
     >
       {editing ? (
@@ -292,11 +371,21 @@ function HeatmapMemberCell({
   maxVal,
   isOverflow,
   onCommit,
+  isSelected,
+  isCopied,
+  onCellMouseDown,
+  onCellMouseEnter,
+  onPasteClick,
 }: {
   value: number;
   maxVal: number;
   isOverflow: boolean;
   onCommit: (v: number) => void;
+  isSelected?: boolean;
+  isCopied?: boolean;
+  onCellMouseDown?: () => void;
+  onCellMouseEnter?: () => void;
+  onPasteClick?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [editVal, setEditVal] = useState("");
@@ -317,12 +406,23 @@ function HeatmapMemberCell({
     setEditing(false);
   };
 
+  const handleClick = onPasteClick ?? startEdit;
+  const cls = [
+    "hm-member-cell",
+    isSelected && "is-selected",
+    isCopied && "is-copied",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     <button
       type="button"
-      className="hm-member-cell"
+      className={cls}
       style={{ background: ovBg }}
-      onClick={startEdit}
+      onClick={handleClick}
+      onMouseDown={onCellMouseDown}
+      onMouseEnter={onCellMouseEnter}
     >
       {editing ? (
         <input
@@ -596,6 +696,66 @@ function CapacityConflictPopover({
   );
 }
 
+function PasteConflictDialog({
+  conflicts,
+  opsForCapped,
+  opsForOverflow,
+  onExecute,
+  onCancel,
+}: {
+  conflicts: PasteConflictItem[];
+  opsForCapped: PasteOp[];
+  opsForOverflow: PasteOp[];
+  onExecute: (ops: PasteOp[], allowOverflow: boolean) => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="confirm-overlay">
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="confirm-dialog paste-conflict-dialog"
+      >
+        <p className="confirm-msg">
+          ペースト先でキャパシティの上限を超えるセルがあります。
+        </p>
+        <div className="paste-conflict-list">
+          {conflicts.map((c, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: order is stable
+            <div key={i} className="paste-conflict-item">
+              <span className="paste-conflict-location">
+                {c.rowLabel} · {c.colLabel}
+              </span>
+              <span className="paste-conflict-values">
+                {fmt(c.sourceValue)} → {fmt(c.cappedValue)}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="confirm-btns">
+          <button type="button" className="btn-sm" onClick={onCancel}>
+            キャンセル
+          </button>
+          <button
+            type="button"
+            className="btn-sm"
+            onClick={() => onExecute(opsForCapped, false)}
+          >
+            自動キャップ
+          </button>
+          <button
+            type="button"
+            className="btn-sm"
+            onClick={() => onExecute(opsForOverflow, true)}
+          >
+            上限無視
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ──────────────────────────────────────────────────────────
 
 const FEATURE_MAX_VAL = 3;
@@ -631,10 +791,124 @@ export function CapacityView() {
   const [maxCapacityOverflow, setMaxCapacityOverflow] =
     useState<PendingMaxCapacityOverflow | null>(null);
 
+  // ── Selection / clipboard state ─────────────────────────────────────────
+  const [selStartRow, setSelStartRow] = useState<number | null>(null);
+  const [selEndRow, setSelEndRow] = useState<number | null>(null);
+  const [selStartCol, setSelStartCol] = useState<number | null>(null);
+  const [selEndCol, setSelEndCol] = useState<number | null>(null);
+  const [selType, setSelType] = useState<CellType | null>(null);
+  const [cellClipboard, setCellClipboard] = useState<CellClipboard | null>(
+    null,
+  );
+  const [pasteConflict, setPasteConflict] = useState<PasteConflictState | null>(
+    null,
+  );
+
+  // Refs for drag tracking (not state - no re-render needed)
+  const dragStartRef = useRef<{
+    row: number;
+    col: number;
+    type: CellType;
+  } | null>(null);
+  const didDragRef = useRef(false);
+
   const columns = useMemo(
     () => columnsForMode(quarters, viewMode),
     [quarters, viewMode],
   );
+
+  // Flat list of selectable rows in visual order
+  const selectableRows = useMemo<SelectableRow[]>(() => {
+    const rows: SelectableRow[] = [];
+    for (const feature of featureRows) {
+      rows.push({ type: "feature", featureId: feature.id });
+      if (feature.expanded) {
+        const assignedMemberIds = new Set<number>();
+        for (const monthData of feature.months.values()) {
+          for (const a of monthData.memberAllocations) {
+            assignedMemberIds.add(a.memberId);
+          }
+        }
+        for (const member of members) {
+          if (assignedMemberIds.has(member.id)) {
+            rows.push({
+              type: "member",
+              featureId: feature.id,
+              memberId: member.id,
+            });
+          }
+        }
+      }
+    }
+    return rows;
+  }, [featureRows, members]);
+
+  // Map from row key → index in selectableRows
+  const rowIndexByKey = useMemo(() => {
+    const map = new Map<string, number>();
+    selectableRows.forEach((row, i) => {
+      if (row.type === "feature") {
+        map.set(`f-${row.featureId}`, i);
+      } else {
+        map.set(`m-${row.featureId}-${row.memberId}`, i);
+      }
+    });
+    return map;
+  }, [selectableRows]);
+
+  // Normalized selection rectangle
+  const normalizedSel = useMemo<SelectionRect | null>(() => {
+    if (
+      selStartRow === null ||
+      selEndRow === null ||
+      selStartCol === null ||
+      selEndCol === null ||
+      selType === null
+    )
+      return null;
+    return {
+      minRow: Math.min(selStartRow, selEndRow),
+      maxRow: Math.max(selStartRow, selEndRow),
+      minCol: Math.min(selStartCol, selEndCol),
+      maxCol: Math.max(selStartCol, selEndCol),
+      type: selType,
+    };
+  }, [selStartRow, selEndRow, selStartCol, selEndCol, selType]);
+
+  const isCellInSel = useCallback(
+    (rowIndex: number, colIndex: number, cellType: CellType): boolean => {
+      if (!normalizedSel || normalizedSel.type !== cellType) return false;
+      return (
+        rowIndex >= normalizedSel.minRow &&
+        rowIndex <= normalizedSel.maxRow &&
+        colIndex >= normalizedSel.minCol &&
+        colIndex <= normalizedSel.maxCol
+      );
+    },
+    [normalizedSel],
+  );
+
+  const isCellInClipSrc = useCallback(
+    (rowIndex: number, colIndex: number, cellType: CellType): boolean => {
+      if (!cellClipboard || cellClipboard.type !== cellType) return false;
+      const s = cellClipboard.sourceSel;
+      return (
+        rowIndex >= s.minRow &&
+        rowIndex <= s.maxRow &&
+        colIndex >= s.minCol &&
+        colIndex <= s.maxCol
+      );
+    },
+    [cellClipboard],
+  );
+
+  const clearSelection = useCallback(() => {
+    setSelStartRow(null);
+    setSelEndRow(null);
+    setSelStartCol(null);
+    setSelEndCol(null);
+    setSelType(null);
+  }, []);
 
   // ── Initial load ────────────────────────────────────────────────────────
 
@@ -760,14 +1034,39 @@ export function CapacityView() {
     );
   };
 
+  // ── Drag selection handlers ──────────────────────────────────────────────
+
+  const handleCellMouseDown = useCallback(
+    (rowIndex: number, colIndex: number, type: CellType) => {
+      didDragRef.current = false;
+      dragStartRef.current = { row: rowIndex, col: colIndex, type };
+    },
+    [],
+  );
+
+  const handleCellMouseEnter = useCallback(
+    (rowIndex: number, colIndex: number, type: CellType) => {
+      const ds = dragStartRef.current;
+      if (!ds || ds.type !== type) return;
+      // Once we enter any cell while mousedown is held, it's a drag
+      didDragRef.current = true;
+      setSelType(type);
+      setSelStartRow(ds.row);
+      setSelStartCol(ds.col);
+      setSelEndRow(rowIndex);
+      setSelEndCol(colIndex);
+    },
+    [],
+  );
+
+  // Global mouseup clears drag tracking
   useEffect(() => {
-    if (!capacityConflict) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setCapacityConflict(null);
+    const onMouseUp = () => {
+      dragStartRef.current = null;
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [capacityConflict]);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => window.removeEventListener("mouseup", onMouseUp);
+  }, []);
 
   // ── API actions ───────────────────────────────────────────────────────────
 
@@ -934,6 +1233,266 @@ export function CapacityView() {
     [applyFeatureMonthUpdates, maxCapacityOverflow],
   );
 
+  // ── Copy / Paste logic ────────────────────────────────────────────────────
+
+  const handleCopy = useCallback(() => {
+    if (!normalizedSel) return;
+    const { minRow, maxRow, minCol, maxCol, type } = normalizedSel;
+    const data: number[][] = [];
+
+    for (let ri = minRow; ri <= maxRow; ri++) {
+      const selRow = selectableRows[ri];
+      if (!selRow || selRow.type !== type) continue;
+      const rowData: number[] = [];
+      const feature = featureRows.find((f) => f.id === selRow.featureId);
+      if (!feature) continue;
+
+      for (let ci = minCol; ci <= maxCol; ci++) {
+        const column = columns[ci];
+        if (!column) continue;
+        if (type === "feature") {
+          rowData.push(aggregateMonthData(feature.months, column.monthIds).totalCapacity);
+        } else {
+          const memberId = (selRow as { type: "member"; memberId: number })
+            .memberId;
+          const alloc = aggregateMonthData(
+            feature.months,
+            column.monthIds,
+          ).memberAllocations.find((a) => a.memberId === memberId);
+          rowData.push(alloc?.capacity ?? 0);
+        }
+      }
+      if (rowData.length > 0) data.push(rowData);
+    }
+
+    if (data.length === 0) return;
+
+    setCellClipboard({ data, viewMode, type, sourceSel: normalizedSel });
+
+    // Write TSV to system clipboard for Excel interop
+    const tsv = data.map((row) => row.map((v) => fmt(v)).join("\t")).join("\n");
+    navigator.clipboard.writeText(tsv).catch(() => {});
+  }, [normalizedSel, selectableRows, featureRows, columns, viewMode]);
+
+  const getMemberUsedElsewhere = useCallback(
+    (memberId: number, featureId: number, monthIds: number[]): number => {
+      let used = 0;
+      for (const feature of featureRows) {
+        if (feature.id === featureId) continue;
+        for (const monthId of monthIds) {
+          const monthData = feature.months.get(monthId);
+          if (!monthData) continue;
+          const alloc = monthData.memberAllocations.find(
+            (a) => a.memberId === memberId,
+          );
+          if (alloc) used += alloc.capacity;
+        }
+      }
+      return used;
+    },
+    [featureRows],
+  );
+
+  const buildPasteOps = useCallback(
+    (
+      data: number[][],
+      anchorRow: number,
+      anchorCol: number,
+      type: CellType,
+    ): PasteOp[] => {
+      const ops: PasteOp[] = [];
+      let dataRowIdx = 0;
+      for (let ri = anchorRow; ri < selectableRows.length && dataRowIdx < data.length; ri++) {
+        const selRow = selectableRows[ri];
+        if (!selRow || selRow.type !== type) continue;
+        const rowData = data[dataRowIdx++];
+        for (let ci = 0; ci < rowData.length; ci++) {
+          const column = columns[anchorCol + ci];
+          if (!column) break; // range clip
+          const value = rowData[ci];
+          if (type === "feature") {
+            ops.push({ kind: "feature", featureId: selRow.featureId, column, value });
+          } else {
+            const memberId = (selRow as { type: "member"; memberId: number })
+              .memberId;
+            ops.push({ kind: "member", featureId: selRow.featureId, memberId, column, value });
+          }
+        }
+      }
+      return ops;
+    },
+    [selectableRows, columns],
+  );
+
+  const detectPasteConflicts = useCallback(
+    (ops: PasteOp[]): PasteConflictItem[] => {
+      const conflicts: PasteConflictItem[] = [];
+      for (const op of ops) {
+        if (op.kind !== "member") continue;
+        const member = members.find((m) => m.id === op.memberId);
+        const maxCap = columnMemberLimit(op.column, member?.maxCapacity ?? 1);
+        const usedElsewhere = getMemberUsedElsewhere(
+          op.memberId,
+          op.featureId,
+          op.column.monthIds,
+        );
+        const available = Math.max(0, maxCap - usedElsewhere);
+        if (op.value > available + 0.000001) {
+          const feature = featureRows.find((f) => f.id === op.featureId);
+          conflicts.push({
+            rowLabel: `${member?.name ?? "?"} @ ${feature?.name ?? "?"}`,
+            colLabel: op.column.label,
+            sourceValue: op.value,
+            cappedValue: r2(available),
+          });
+        }
+      }
+      return conflicts;
+    },
+    [members, featureRows, getMemberUsedElsewhere],
+  );
+
+  const executePaste = useCallback(
+    async (ops: PasteOp[], allowOverflow: boolean) => {
+      setBusy(true);
+      try {
+        for (const op of ops) {
+          if (op.kind === "feature") {
+            const result = await orpc.allocations.updateTotal({
+              featureId: op.featureId,
+              totalCapacity: op.value,
+              periodType: op.column.type,
+              monthId: op.column.monthId,
+              quarterId: op.column.quarterId,
+            });
+            applyFeatureMonthUpdates([
+              { featureId: op.featureId, months: result.months },
+            ]);
+          } else {
+            const result = await orpc.allocations.updateMemberAllocation({
+              featureId: op.featureId,
+              memberId: op.memberId,
+              capacity: op.value,
+              periodType: op.column.type,
+              monthId: op.column.monthId,
+              quarterId: op.column.quarterId,
+              capacityConflictResolution: allowOverflow
+                ? "allowOverflow"
+                : "fitWithinLimit",
+            });
+            applyFeatureMonthUpdates(result.updatedFeatures);
+          }
+        }
+      } finally {
+        setBusy(false);
+        setPasteConflict(null);
+        setCellClipboard(null);
+        clearSelection();
+      }
+    },
+    [applyFeatureMonthUpdates, clearSelection],
+  );
+
+  const handlePaste = useCallback(
+    async (anchorRow?: number, anchorCol?: number) => {
+      // Determine anchor position
+      const aRow = anchorRow ?? normalizedSel?.minRow;
+      const aCol = anchorCol ?? normalizedSel?.minCol;
+      if (aRow === undefined || aCol === undefined) return;
+
+      // Determine clip data and type
+      let clipData: number[][] | null = null;
+      let clipType: CellType | null = null;
+
+      if (cellClipboard && cellClipboard.viewMode === viewMode) {
+        clipData = cellClipboard.data;
+        clipType = cellClipboard.type;
+      } else {
+        // Try reading from system clipboard (e.g., paste from Excel)
+        try {
+          const text = await navigator.clipboard.readText();
+          const parsed = parseTSV(text);
+          if (parsed) {
+            clipData = parsed;
+            // Infer type from anchor row
+            clipType = selectableRows[aRow]?.type ?? null;
+          }
+        } catch {
+          return;
+        }
+      }
+
+      if (!clipData || !clipType) return;
+
+      const ops = buildPasteOps(clipData, aRow, aCol, clipType);
+      if (ops.length === 0) return;
+
+      const conflicts = detectPasteConflicts(ops);
+      if (conflicts.length > 0) {
+        const opsForCapped = ops.map((op) => {
+          if (op.kind !== "member") return op;
+          const member = members.find((m) => m.id === op.memberId);
+          const maxCap = columnMemberLimit(op.column, member?.maxCapacity ?? 1);
+          const usedElsewhere = getMemberUsedElsewhere(
+            op.memberId,
+            op.featureId,
+            op.column.monthIds,
+          );
+          const available = Math.max(0, maxCap - usedElsewhere);
+          return { ...op, value: Math.min(op.value, r2(available)) };
+        });
+        setPasteConflict({ conflicts, opsForCapped, opsForOverflow: ops });
+      } else {
+        await executePaste(ops, false);
+      }
+    },
+    [
+      normalizedSel,
+      cellClipboard,
+      viewMode,
+      selectableRows,
+      buildPasteOps,
+      detectPasteConflicts,
+      executePaste,
+      members,
+      getMemberUsedElsewhere,
+    ],
+  );
+
+  // ── Keyboard shortcuts ────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!capacityConflict) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCapacityConflict(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [capacityConflict]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setCellClipboard(null);
+        clearSelection();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "c" && normalizedSel) {
+        e.preventDefault();
+        handleCopy();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "v") {
+        e.preventDefault();
+        void handlePaste();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleCopy, handlePaste, normalizedSel, clearSelection]);
+
+  // ── Feature actions ────────────────────────────────────────────────────────
+
   const addFeature = async () => {
     setBusy(true);
     setActionWarning(null);
@@ -1079,6 +1638,24 @@ export function CapacityView() {
     }
   }, [importCsv, loadAll]);
 
+  // ── Paste mode (clipboard active and same view mode) ──────────────────────
+
+  const pasteMode =
+    cellClipboard !== null && cellClipboard.viewMode === viewMode;
+
+  const makePasteClickHandler = useCallback(
+    (rowIndex: number, colIndex: number) => {
+      return () => {
+        if (didDragRef.current) {
+          didDragRef.current = false;
+          return;
+        }
+        void handlePaste(rowIndex, colIndex);
+      };
+    },
+    [handlePaste],
+  );
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   if (loading) {
@@ -1154,6 +1731,13 @@ export function CapacityView() {
             保存中…
           </span>
         )}
+        {pasteMode && (
+          <span
+            style={{ marginLeft: 8, fontSize: 11, color: "var(--cv-accent)" }}
+          >
+            コピー中 · クリックでペースト / Ctrl+V / Esc でキャンセル
+          </span>
+        )}
       </header>
 
       <div className="cv-body">
@@ -1180,6 +1764,8 @@ export function CapacityView() {
                     (getColumnData(feature, column).unassignedCapacity ?? 0) >
                     0,
                 );
+                const featureRowIndex =
+                  rowIndexByKey.get(`f-${feature.id}`) ?? -1;
                 const rows: React.ReactNode[] = [];
 
                 if (fi > 0) {
@@ -1215,8 +1801,18 @@ export function CapacityView() {
                         )}
                       </div>
                     </td>
-                    {columns.map((column) => {
+                    {columns.map((column, ci) => {
                       const data = getColumnData(feature, column);
+                      const selected = isCellInSel(
+                        featureRowIndex,
+                        ci,
+                        "feature",
+                      );
+                      const copied = isCellInClipSrc(
+                        featureRowIndex,
+                        ci,
+                        "feature",
+                      );
                       return (
                         <td
                           key={column.key}
@@ -1229,6 +1825,27 @@ export function CapacityView() {
                             maxVal={FEATURE_MAX_VAL}
                             onCommit={(v) => updateTotal(feature.id, column, v)}
                             rowHeight={42}
+                            isSelected={selected}
+                            isCopied={copied}
+                            onCellMouseDown={() =>
+                              handleCellMouseDown(
+                                featureRowIndex,
+                                ci,
+                                "feature",
+                              )
+                            }
+                            onCellMouseEnter={() =>
+                              handleCellMouseEnter(
+                                featureRowIndex,
+                                ci,
+                                "feature",
+                              )
+                            }
+                            onPasteClick={
+                              pasteMode
+                                ? makePasteClickHandler(featureRowIndex, ci)
+                                : undefined
+                            }
                           />
                         </td>
                       );
@@ -1248,6 +1865,8 @@ export function CapacityView() {
                   );
 
                   for (const member of assignedMembers) {
+                    const memberRowIndex =
+                      rowIndexByKey.get(`m-${feature.id}-${member.id}`) ?? -1;
                     const isOverflow = columns.some((column) => {
                       return (
                         isMemberColumnOverflow(member.id, column) ||
@@ -1284,7 +1903,7 @@ export function CapacityView() {
                             </button>
                           </div>
                         </td>
-                        {columns.map((column) => {
+                        {columns.map((column, ci) => {
                           const data = getColumnData(feature, column);
                           const alloc = data.memberAllocations.find(
                             (a) => a.memberId === member.id,
@@ -1321,6 +1940,16 @@ export function CapacityView() {
                             !!matchingCapacityConflict ||
                             !!matchingMaxCapacityOverflow ||
                             isMemberColumnOverflow(member.id, column);
+                          const selected = isCellInSel(
+                            memberRowIndex,
+                            ci,
+                            "member",
+                          );
+                          const copied = isCellInClipSrc(
+                            memberRowIndex,
+                            ci,
+                            "member",
+                          );
                           return (
                             <td
                               key={column.key}
@@ -1338,6 +1967,27 @@ export function CapacityView() {
                                     member.id,
                                     v,
                                   )
+                                }
+                                isSelected={selected}
+                                isCopied={copied}
+                                onCellMouseDown={() =>
+                                  handleCellMouseDown(
+                                    memberRowIndex,
+                                    ci,
+                                    "member",
+                                  )
+                                }
+                                onCellMouseEnter={() =>
+                                  handleCellMouseEnter(
+                                    memberRowIndex,
+                                    ci,
+                                    "member",
+                                  )
+                                }
+                                onPasteClick={
+                                  pasteMode
+                                    ? makePasteClickHandler(memberRowIndex, ci)
+                                    : undefined
                                 }
                               />
                               {matchingMaxCapacityOverflow && (
@@ -1525,7 +2175,9 @@ export function CapacityView() {
               {actionWarning}
             </span>
           )}
-          <span className="hint-text">クリックで数値編集 · + で担当者展開</span>
+          <span className="hint-text">
+            ドラッグで範囲選択 · Ctrl+C コピー · Ctrl+V ペースト
+          </span>
         </div>
       </div>
 
@@ -1635,6 +2287,16 @@ export function CapacityView() {
             </div>
           </div>
         </div>
+      )}
+
+      {pasteConflict && (
+        <PasteConflictDialog
+          conflicts={pasteConflict.conflicts}
+          opsForCapped={pasteConflict.opsForCapped}
+          opsForOverflow={pasteConflict.opsForOverflow}
+          onExecute={(ops, allowOverflow) => void executePaste(ops, allowOverflow)}
+          onCancel={() => setPasteConflict(null)}
+        />
       )}
     </div>
   );

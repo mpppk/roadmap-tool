@@ -32,6 +32,39 @@ type PeriodColumn = {
   quarterId?: number;
 };
 
+type CapacityConflictResolution =
+  | "fitWithinLimit"
+  | "allowOverflow"
+  | "rebalanceOthersProportionally";
+
+type FeatureMonthUpdate = {
+  featureId: number;
+  months: Array<{
+    monthId: number;
+    totalCapacity: number;
+    unassignedCapacity: number;
+    memberAllocations: Array<{ memberId: number; capacity: number }>;
+  }>;
+};
+
+type PendingCapacityConflict = {
+  featureId: number;
+  periodType: ViewMode;
+  monthId?: number;
+  quarterId?: number;
+  memberId: number;
+  memberName: string;
+  requestedCapacity: number;
+  usedElsewhere: number;
+  assignableCapacity: number;
+};
+
+type RebalancePreview = {
+  featureName: string;
+  currentCapacity: number;
+  nextCapacity: number;
+};
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 const r2 = (v: number) => Math.round(v * 100) / 100;
@@ -39,6 +72,10 @@ const r2 = (v: number) => Math.round(v * 100) / 100;
 function fmt(v: number): string {
   if (v === 0) return "0";
   return v % 1 === 0 ? v.toFixed(0) : v.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function fmt2(v: number): string {
+  return v.toFixed(2);
 }
 
 function heatBg(value: number, maxVal: number): { bg: string; fg: string } {
@@ -360,6 +397,82 @@ function FeatureNameCell({
   );
 }
 
+function CapacityConflictPopover({
+  memberName,
+  usedElsewhere,
+  assignableCapacity,
+  requestedCapacity,
+  rebalancePreview,
+  onResolve,
+  onCancel,
+}: {
+  memberName: string;
+  usedElsewhere: number;
+  assignableCapacity: number;
+  requestedCapacity: number;
+  rebalancePreview: RebalancePreview[];
+  onResolve: (resolution: CapacityConflictResolution) => void;
+  onCancel: () => void;
+}) {
+  const overflowTotal = usedElsewhere + requestedCapacity;
+
+  return (
+    <div className="capacity-conflict-popover" role="dialog" aria-modal="false">
+      <div className="capacity-conflict-lines">
+        <div>{memberName}の合計キャパシティが1を超えています。</div>
+        <div>割り当て済み: {fmt2(usedElsewhere)}</div>
+        <div>残りキャパシティ: {fmt2(assignableCapacity)}</div>
+        <div>今回の割り当てキャパシティ: {fmt2(requestedCapacity)}</div>
+      </div>
+      <div className="capacity-conflict-actions">
+        <button
+          type="button"
+          className="btn-sm capacity-conflict-action-btn"
+          onClick={() => onResolve("allowOverflow")}
+        >
+          {`そのまま割り当て(${fmt2(usedElsewhere)}+${fmt2(
+            requestedCapacity,
+          )}=${fmt2(overflowTotal)})`}
+        </button>
+        <button
+          type="button"
+          className="btn-sm capacity-conflict-action-btn"
+          onClick={() => onResolve("fitWithinLimit")}
+        >
+          超過しない最大値({fmt2(assignableCapacity)})を割り当て
+        </button>
+        <button
+          type="button"
+          className="btn-sm capacity-conflict-action-btn"
+          onClick={() => onResolve("rebalanceOthersProportionally")}
+        >
+          <span>超過しないように他機能のキャパシティを削減</span>
+          {rebalancePreview.length > 0 && (
+            <span className="capacity-conflict-preview-list">
+              {rebalancePreview.map((change) => (
+                <span
+                  key={change.featureName}
+                  className="capacity-conflict-preview-item"
+                >
+                  {change.featureName}: {fmt(change.currentCapacity)}→
+                  {fmt(change.nextCapacity)}
+                </span>
+              ))}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
+          className="btn-sm capacity-conflict-action-btn"
+          onClick={onCancel}
+        >
+          キャンセル
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ──────────────────────────────────────────────────────────
 
 const FEATURE_MAX_VAL = 3;
@@ -381,6 +494,8 @@ export function CapacityView() {
     memberName: string;
     featureName: string;
   } | null>(null);
+  const [capacityConflict, setCapacityConflict] =
+    useState<PendingCapacityConflict | null>(null);
 
   const columns = useMemo(
     () => columnsForMode(quarters, viewMode),
@@ -443,6 +558,58 @@ export function CapacityView() {
   const getColumnData = (row: FeatureRow, column: PeriodColumn): MonthData =>
     aggregateMonthData(row.months, column.monthIds);
 
+  const getMemberColumnTotal = (
+    memberId: number,
+    column: PeriodColumn,
+  ): number =>
+    featureRows.reduce((sum, row) => {
+      const alloc = getColumnData(row, column).memberAllocations.find(
+        (a) => a.memberId === memberId,
+      );
+      return sum + (alloc?.capacity ?? 0);
+    }, 0);
+
+  const isMemberColumnOverflow = (
+    memberId: number,
+    column: PeriodColumn,
+  ): boolean =>
+    getMemberColumnTotal(memberId, column) >
+    columnMemberLimit(column) + 0.000001;
+
+  const getRebalancePreview = (
+    memberId: number,
+    column: PeriodColumn,
+    excludeFeatureId: number,
+    requestedCapacity: number,
+  ): RebalancePreview[] => {
+    const otherAllocations = featureRows
+      .filter((row) => row.id !== excludeFeatureId)
+      .map((row) => {
+        const alloc = getColumnData(row, column).memberAllocations.find(
+          (a) => a.memberId === memberId,
+        );
+        return {
+          featureName: row.name,
+          currentCapacity: alloc?.capacity ?? 0,
+        };
+      })
+      .filter((change) => change.currentCapacity > 0);
+    const usedElsewhere = otherAllocations.reduce(
+      (sum, change) => sum + change.currentCapacity,
+      0,
+    );
+    const limit = columnMemberLimit(column);
+    const scale =
+      requestedCapacity <= limit && usedElsewhere > 0
+        ? Math.max(0, (limit - requestedCapacity) / usedElsewhere)
+        : 1;
+
+    return otherAllocations.map((change) => ({
+      ...change,
+      nextCapacity: r2(change.currentCapacity * scale),
+    }));
+  };
+
   const toggleExpand = (featureId: number) => {
     setFeatureRows((rows) =>
       rows.map((r) =>
@@ -451,7 +618,33 @@ export function CapacityView() {
     );
   };
 
+  useEffect(() => {
+    if (!capacityConflict) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCapacityConflict(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [capacityConflict]);
+
   // ── API actions ───────────────────────────────────────────────────────────
+
+  const applyFeatureMonthUpdates = useCallback(
+    (updates: FeatureMonthUpdate[]) => {
+      setFeatureRows((rows) =>
+        rows.map((r) => {
+          const rowUpdates = updates.filter((u) => u.featureId === r.id);
+          if (rowUpdates.length === 0) return r;
+          let newMap = new Map(r.months);
+          for (const update of rowUpdates) {
+            newMap = updateMonthResults(newMap, update.months);
+          }
+          return { ...r, months: newMap };
+        }),
+      );
+    },
+    [],
+  );
 
   const updateTotal = useCallback(
     async (featureId: number, column: PeriodColumn, totalCapacity: number) => {
@@ -464,18 +657,12 @@ export function CapacityView() {
           monthId: column.monthId,
           quarterId: column.quarterId,
         });
-        setFeatureRows((rows) =>
-          rows.map((r) =>
-            r.id === featureId
-              ? { ...r, months: updateMonthResults(r.months, result.months) }
-              : r,
-          ),
-        );
+        applyFeatureMonthUpdates([{ featureId, months: result.months }]);
       } finally {
         setBusy(false);
       }
     },
-    [],
+    [applyFeatureMonthUpdates],
   );
 
   const updateMemberAllocation = useCallback(
@@ -487,6 +674,35 @@ export function CapacityView() {
     ) => {
       setBusy(true);
       try {
+        setCapacityConflict(null);
+        const limit = columnMemberLimit(column);
+        if (capacity <= limit) {
+          const preview = await orpc.allocations.previewMemberAllocation({
+            featureId,
+            memberId,
+            capacity,
+            periodType: column.type,
+            monthId: column.monthId,
+            quarterId: column.quarterId,
+          });
+          if (preview.hasConflict) {
+            setCapacityConflict({
+              featureId,
+              periodType: column.type,
+              monthId: column.monthId,
+              quarterId: column.quarterId,
+              memberId,
+              memberName:
+                members.find((member) => member.id === memberId)?.name ??
+                "メンバー",
+              requestedCapacity: capacity,
+              usedElsewhere: preview.usedElsewhere,
+              assignableCapacity: preview.assignableCapacity,
+            });
+            return;
+          }
+        }
+
         const result = await orpc.allocations.updateMemberAllocation({
           featureId,
           memberId,
@@ -494,19 +710,38 @@ export function CapacityView() {
           periodType: column.type,
           monthId: column.monthId,
           quarterId: column.quarterId,
+          capacityConflictResolution:
+            capacity > limit ? "allowOverflow" : "fitWithinLimit",
         });
-        setFeatureRows((rows) =>
-          rows.map((r) =>
-            r.id === featureId
-              ? { ...r, months: updateMonthResults(r.months, result.months) }
-              : r,
-          ),
-        );
+        applyFeatureMonthUpdates(result.updatedFeatures);
       } finally {
         setBusy(false);
       }
     },
-    [],
+    [applyFeatureMonthUpdates, members],
+  );
+
+  const resolveCapacityConflict = useCallback(
+    async (resolution: CapacityConflictResolution) => {
+      if (!capacityConflict) return;
+      setBusy(true);
+      try {
+        const result = await orpc.allocations.updateMemberAllocation({
+          featureId: capacityConflict.featureId,
+          periodType: capacityConflict.periodType,
+          monthId: capacityConflict.monthId,
+          quarterId: capacityConflict.quarterId,
+          memberId: capacityConflict.memberId,
+          capacity: capacityConflict.requestedCapacity,
+          capacityConflictResolution: resolution,
+        });
+        applyFeatureMonthUpdates(result.updatedFeatures);
+        setCapacityConflict(null);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyFeatureMonthUpdates, capacityConflict],
   );
 
   const addFeature = async () => {
@@ -793,11 +1028,14 @@ export function CapacityView() {
 
                   for (const member of assignedMembers) {
                     const isOverflow = columns.some((column) => {
-                      const data = getColumnData(feature, column);
-                      const alloc = data.memberAllocations.find(
-                        (a) => a.memberId === member.id,
+                      return (
+                        isMemberColumnOverflow(member.id, column) ||
+                        (capacityConflict?.featureId === feature.id &&
+                          capacityConflict.memberId === member.id &&
+                          capacityConflict.periodType === column.type &&
+                          capacityConflict.monthId === column.monthId &&
+                          capacityConflict.quarterId === column.quarterId)
                       );
-                      return (alloc?.capacity ?? 0) > columnMemberLimit(column);
                     });
 
                     rows.push(
@@ -830,8 +1068,23 @@ export function CapacityView() {
                           const alloc = data.memberAllocations.find(
                             (a) => a.memberId === member.id,
                           );
-                          const value = alloc?.capacity ?? 0;
+                          const matchingCapacityConflict =
+                            capacityConflict &&
+                            capacityConflict.featureId === feature.id &&
+                            capacityConflict.periodType === column.type &&
+                            capacityConflict.monthId === column.monthId &&
+                            capacityConflict.quarterId === column.quarterId &&
+                            capacityConflict.memberId === member.id
+                              ? capacityConflict
+                              : null;
                           const limit = columnMemberLimit(column);
+                          const value =
+                            matchingCapacityConflict?.requestedCapacity ??
+                            alloc?.capacity ??
+                            0;
+                          const cellOv =
+                            !!matchingCapacityConflict ||
+                            isMemberColumnOverflow(member.id, column);
                           return (
                             <td
                               key={column.key}
@@ -841,7 +1094,7 @@ export function CapacityView() {
                               <HeatmapMemberCell
                                 value={value}
                                 maxVal={limit}
-                                isOverflow={value > limit}
+                                isOverflow={cellOv}
                                 onCommit={(v) =>
                                   updateMemberAllocation(
                                     feature.id,
@@ -851,6 +1104,30 @@ export function CapacityView() {
                                   )
                                 }
                               />
+                              {matchingCapacityConflict && (
+                                <CapacityConflictPopover
+                                  memberName={
+                                    matchingCapacityConflict.memberName
+                                  }
+                                  usedElsewhere={
+                                    matchingCapacityConflict.usedElsewhere
+                                  }
+                                  assignableCapacity={
+                                    matchingCapacityConflict.assignableCapacity
+                                  }
+                                  requestedCapacity={
+                                    matchingCapacityConflict.requestedCapacity
+                                  }
+                                  rebalancePreview={getRebalancePreview(
+                                    matchingCapacityConflict.memberId,
+                                    column,
+                                    matchingCapacityConflict.featureId,
+                                    matchingCapacityConflict.requestedCapacity,
+                                  )}
+                                  onResolve={resolveCapacityConflict}
+                                  onCancel={() => setCapacityConflict(null)}
+                                />
+                              )}
                             </td>
                           );
                         })}

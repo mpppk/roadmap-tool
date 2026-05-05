@@ -136,20 +136,24 @@ function ReadonlyHeatmapCell({
   value,
   maxVal,
   rowHeight,
+  isOverflow = false,
 }: {
   value: number;
   maxVal: number;
   rowHeight: number;
+  isOverflow?: boolean;
 }) {
   const { bg, fg } = heatBg(value, maxVal);
+  const ovBg = isOverflow ? "oklch(72% 0.18 25)" : bg;
+  const ovFg = isOverflow ? "#fff" : fg;
   return (
     <div
       className="hm-cell"
-      style={{ background: bg, height: rowHeight, cursor: "default" }}
+      style={{ background: ovBg, height: rowHeight, cursor: "default" }}
     >
       <span
         className="hm-val"
-        style={{ color: value === 0 ? "transparent" : fg }}
+        style={{ color: value === 0 ? "transparent" : ovFg }}
       >
         {fmt(value)}
       </span>
@@ -483,6 +487,9 @@ export function MembersView() {
                     </td>
                     {columns.map((column) => {
                       const data = getColumnData(member, column);
+                      const cellOv =
+                        data.totalCapacity >
+                        columnMemberLimit(column) + 0.000001;
                       return (
                         <td
                           key={column.key}
@@ -493,6 +500,7 @@ export function MembersView() {
                             value={data.totalCapacity}
                             maxVal={columnMemberLimit(column)}
                             rowHeight={42}
+                            isOverflow={cellOv}
                           />
                         </td>
                       );
@@ -540,6 +548,9 @@ export function MembersView() {
                               (a) => a.featureId === featureId,
                             );
                             const value = fa?.capacity ?? 0;
+                            const cellOv =
+                              data.totalCapacity >
+                              columnMemberLimit(column) + 0.000001;
                             const { bg, fg } = heatBg(
                               value,
                               columnMemberLimit(column),
@@ -553,14 +564,21 @@ export function MembersView() {
                                 <div
                                   className="hm-member-cell"
                                   style={{
-                                    background: bg,
+                                    background: cellOv
+                                      ? "oklch(72% 0.18 25)"
+                                      : bg,
                                     cursor: "default",
                                   }}
                                 >
                                   <span
                                     className="hm-member-val"
                                     style={{
-                                      color: value === 0 ? "transparent" : fg,
+                                      color:
+                                        value === 0
+                                          ? "transparent"
+                                          : cellOv
+                                            ? "#fff"
+                                            : fg,
                                     }}
                                   >
                                     {fmt(value)}

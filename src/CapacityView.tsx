@@ -1305,11 +1305,11 @@ export function CapacityView() {
       for (let ri = anchorRow; ri < selectableRows.length && dataRowIdx < data.length; ri++) {
         const selRow = selectableRows[ri];
         if (!selRow || selRow.type !== type) continue;
-        const rowData = data[dataRowIdx++];
+        const rowData = data[dataRowIdx++] ?? [];
         for (let ci = 0; ci < rowData.length; ci++) {
           const column = columns[anchorCol + ci];
           if (!column) break; // range clip
-          const value = rowData[ci];
+          const value = rowData[ci] ?? 0;
           if (type === "feature") {
             ops.push({ kind: "feature", featureId: selRow.featureId, column, value });
           } else {

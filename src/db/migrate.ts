@@ -2,6 +2,9 @@ import type { Database } from "bun:sqlite";
 import migration0000 from "../../drizzle/0000_needy_shocker.sql" with {
   type: "text",
 };
+import migration0001 from "../../drizzle/0001_monthly_capacity.sql" with {
+  type: "text",
+};
 import { trimSqliteSpaces } from "../name-errors";
 
 type Migration = {
@@ -19,8 +22,9 @@ type NameRow = {
 
 const MIGRATIONS: Migration[] = [
   { name: "0000_needy_shocker", sql: migration0000 },
+  { name: "0001_monthly_capacity", sql: migration0001 },
   {
-    name: "0001_enforce_trimmed_unique_names",
+    name: "0002_enforce_trimmed_unique_names",
     up: enforceTrimmedUniqueNames,
     transaction: false,
   },

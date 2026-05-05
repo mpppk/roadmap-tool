@@ -5,8 +5,10 @@ import index from "./index.html";
 import { router } from "./router";
 
 const rpcHandler = new RPCHandler(router);
+const port = Number(process.env.PORT ?? "3000");
 
 const server = serve({
+  port,
   routes: {
     "/orpc/*": async (req) => {
       const result = await rpcHandler.handle(req, {

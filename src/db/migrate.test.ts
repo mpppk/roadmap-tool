@@ -123,7 +123,7 @@ describe("DB migrations", () => {
       "Feature",
     ]);
     expect(memberNames).toEqual(["Alice", "Alice-2", "Member", "Member-2"]);
-    expect(applied).toContain("0001_enforce_trimmed_unique_names");
+    expect(applied).toContain("0002_enforce_trimmed_unique_names");
   });
 
   test("adds trimmed unique and check constraints", () => {

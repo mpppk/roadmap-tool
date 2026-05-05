@@ -1,6 +1,6 @@
 import { expect, test } from "playwright/test";
 
-const BASE = "http://localhost:3000";
+const BASE = process.env.BASE_URL ?? "http://localhost:3000";
 
 test("/ redirects to features view", async ({ page }) => {
   await page.goto(BASE);
@@ -20,6 +20,9 @@ test("/features shows features capacity view", async ({ page }) => {
 
   await expect(page.locator(".cv-nav-link.active")).toHaveText("Features");
   await expect(page.locator("th.th-label")).toHaveText("Feature");
+  await expect(
+    page.locator(".cv-toolbar .btn-sm", { hasText: "+ Member" }),
+  ).toHaveCount(0);
 });
 
 test("/members shows members capacity view", async ({ page }) => {
@@ -63,11 +66,19 @@ test("/members shows member rows with expand toggle", async ({ page }) => {
   const rows = page.locator("tbody .tr-feature");
   const count = await rows.count();
 
-  if (count === 0) {
-    // No members yet — toolbar should have + Member button
-    await expect(page.locator(".cv-toolbar .btn-sm", { hasText: "+ Member" })).toBeVisible();
-    return;
-  }
+  await expect(
+    page.locator("tbody .tr-assign-member .btn-assign", {
+      hasText: "+ Member",
+    }),
+  ).toBeVisible();
+  await expect(
+    page.locator(".cv-toolbar .btn-sm", { hasText: "+ Member" }),
+  ).toHaveCount(0);
+  await expect(page.locator("tbody > tr").last()).toHaveClass(
+    /tr-assign-member/,
+  );
+
+  if (count === 0) return;
 
   // Expand first member row
   const toggleBtn = rows.first().locator(".toggle-btn");
@@ -88,7 +99,9 @@ test("/features shows feature rows with expand toggle", async ({ page }) => {
   const count = await rows.count();
 
   if (count === 0) {
-    await expect(page.locator(".cv-toolbar .btn-sm", { hasText: "+ Feature" })).toBeVisible();
+    await expect(
+      page.locator(".cv-toolbar .btn-sm", { hasText: "+ Feature" }),
+    ).toBeVisible();
     return;
   }
 

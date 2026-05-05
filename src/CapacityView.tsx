@@ -443,19 +443,6 @@ export function CapacityView() {
     }
   }, []);
 
-  const addMember = async () => {
-    setBusy(true);
-    try {
-      const m = await orpc.members.create({
-        name: `Member ${members.length + 1}`,
-      });
-      if (!m) return;
-      setMembers((ms) => [...ms, m]);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const addQuarter = async () => {
     setBusy(true);
     try {
@@ -832,14 +819,6 @@ export function CapacityView() {
             disabled={busy}
           >
             + Feature
-          </button>
-          <button
-            type="button"
-            className="btn-sm"
-            onClick={addMember}
-            disabled={busy}
-          >
-            + Member
           </button>
           <button
             type="button"

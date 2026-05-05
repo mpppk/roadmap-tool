@@ -44,13 +44,6 @@ function quarterLabel(q: Quarter): string {
   return `${q.year} Q${q.quarter}`;
 }
 
-function nextQuarterYQ(quarters: Quarter[]): { year: number; quarter: number } {
-  const last = quarters[quarters.length - 1];
-  if (!last) return { year: new Date().getFullYear(), quarter: 1 };
-  if (last.quarter === 4) return { year: last.year + 1, quarter: 1 };
-  return { year: last.year, quarter: last.quarter + 1 };
-}
-
 function emptyMemberQuarterData(): MemberQuarterData {
   return { totalCapacity: 0, featureAllocations: [] };
 }
@@ -250,20 +243,6 @@ export function MembersView() {
       setBusy(false);
     }
   }, []);
-
-  const addQuarter = async () => {
-    setBusy(true);
-    try {
-      const { year, quarter } = nextQuarterYQ(quarters);
-      const q = await orpc.quarters.create({ year, quarter });
-      if (!q) return;
-      setQuarters((qs) =>
-        [...qs, q].sort((a, b) => a.year - b.year || a.quarter - b.quarter),
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -471,28 +450,20 @@ export function MembersView() {
 
                 return rows;
               })}
+              <tr className="tr-assign-member">
+                <td colSpan={quarters.length + 1} className="td-assign">
+                  <button
+                    type="button"
+                    className="btn-assign"
+                    onClick={addMember}
+                    disabled={busy}
+                  >
+                    + Member
+                  </button>
+                </td>
+              </tr>
             </tbody>
           </table>
-        </div>
-
-        <div className="cv-toolbar">
-          <button
-            type="button"
-            className="btn-sm"
-            onClick={addMember}
-            disabled={busy}
-          >
-            + Member
-          </button>
-          <button
-            type="button"
-            className="btn-sm"
-            onClick={addQuarter}
-            disabled={busy}
-          >
-            + Quarter
-          </button>
-          <span className="hint-text">+ でFeature展開</span>
         </div>
       </div>
     </div>

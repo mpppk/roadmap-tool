@@ -1214,6 +1214,265 @@ const exportAllocationCSV = o
   });
 
 // ---------------------------------------------------------------------------
+// Import
+// ---------------------------------------------------------------------------
+
+function parseCSVLine(line: string): string[] {
+  const result: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === "," && !inQuotes) {
+      result.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  result.push(current);
+  return result;
+}
+
+async function findOrCreateMonth(
+  db: typeof DbType,
+  year: number,
+  month: number,
+  cache: Map<string, number>,
+): Promise<number> {
+  const key = monthLabel(year, month);
+  const cached = cache.get(key);
+  if (cached !== undefined) return cached;
+
+  const quarterNum = Math.ceil(month / 3) as 1 | 2 | 3 | 4;
+  const existingQ = await db
+    .select()
+    .from(quarters)
+    .where(and(eq(quarters.year, year), eq(quarters.quarter, quarterNum)));
+
+  let quarterId: number;
+  if (existingQ[0]) {
+    quarterId = existingQ[0].id;
+    const existingM = await db
+      .select()
+      .from(months)
+      .where(and(eq(months.year, year), eq(months.month, month)));
+    if (existingM[0]) {
+      cache.set(key, existingM[0].id);
+      return existingM[0].id;
+    }
+    // Quarter exists but month record missing — create just this month
+    const [newM] = await db
+      .insert(months)
+      .values({ year, month, quarterId })
+      .returning();
+    if (!newM) throw new Error("Failed to create month record");
+    cache.set(key, newM.id);
+    return newM.id;
+  }
+
+  // Create quarter and all 3 months
+  const [newQ] = await db
+    .insert(quarters)
+    .values({ year, quarter: quarterNum })
+    .returning();
+  if (!newQ) throw new Error("Failed to create quarter record");
+  quarterId = newQ.id;
+  const monthRows = await db
+    .insert(months)
+    .values(
+      monthsInQuarter(quarterNum).map((m) => ({ year, month: m, quarterId })),
+    )
+    .returning();
+  for (const m of monthRows) {
+    cache.set(monthLabel(m.year, m.month), m.id);
+  }
+  return cache.get(key)!;
+}
+
+type ImportRowError = { row: number; message: string };
+
+const csvImport = o
+  .input(z.object({ csv: z.string() }))
+  .handler(async ({ input, context }) => {
+    const { db } = context;
+    const lines = input.csv
+      .split("\n")
+      .map((l) => l.trimEnd())
+      .filter((l) => l.trim().length > 0);
+
+    if (lines.length < 2) {
+      return { success: 0, skipped: 0, errors: [] as ImportRowError[] };
+    }
+
+    const headers = parseCSVLine(lines[0]!).map((h) => h.trim());
+    const colFeature = headers.indexOf("機能");
+    const colMember = headers.indexOf("担当者");
+    const colCapacity = headers.indexOf("キャパシティ");
+    const colMonth = headers.indexOf("月");
+
+    if ([colFeature, colMember, colCapacity, colMonth].includes(-1)) {
+      throw new ORPCError("BAD_REQUEST", {
+        message:
+          "CSVヘッダーに「機能」「担当者」「キャパシティ」「月」のカラムが必要です。",
+      });
+    }
+
+    let success = 0;
+    let skipped = 0;
+    const errors: ImportRowError[] = [];
+
+    // Preload caches
+    const featureCache = new Map<string, number>();
+    const memberCache = new Map<string, number>();
+    const monthCache = new Map<string, number>();
+    for (const f of await db.select().from(features).all())
+      featureCache.set(f.name, f.id);
+    for (const m of await db.select().from(members).all())
+      memberCache.set(m.name, m.id);
+    for (const m of await db.select().from(months).all())
+      monthCache.set(monthLabel(m.year, m.month), m.id);
+
+    const affectedPairs = new Set<string>();
+
+    for (let i = 1; i < lines.length; i++) {
+      const rowNum = i + 1;
+      const cols = parseCSVLine(lines[i]!);
+
+      const featureName = (cols[colFeature] ?? "").trim();
+      const memberName = (cols[colMember] ?? "").trim();
+      const capacityStr = (cols[colCapacity] ?? "").trim();
+      const monthStr = (cols[colMonth] ?? "").trim();
+
+      if (!featureName) {
+        errors.push({ row: rowNum, message: "機能名が空です" });
+        skipped++;
+        continue;
+      }
+      if (!memberName) {
+        errors.push({ row: rowNum, message: "担当者名が空です" });
+        skipped++;
+        continue;
+      }
+
+      const capacity = Number(capacityStr);
+      if (!capacityStr || Number.isNaN(capacity) || capacity < 0) {
+        errors.push({
+          row: rowNum,
+          message: `キャパシティが不正な値です: "${capacityStr}"`,
+        });
+        skipped++;
+        continue;
+      }
+
+      const monthMatch = /^(\d{4})-(\d{2})$/.exec(monthStr);
+      if (!monthMatch) {
+        errors.push({
+          row: rowNum,
+          message: `月のフォーマットが不正です: "${monthStr}"`,
+        });
+        skipped++;
+        continue;
+      }
+      const year = Number(monthMatch[1]);
+      const monthNum = Number(monthMatch[2]);
+      if (monthNum < 1 || monthNum > 12) {
+        errors.push({
+          row: rowNum,
+          message: `月の値が不正です: "${monthStr}"`,
+        });
+        skipped++;
+        continue;
+      }
+
+      // Find or create feature
+      let featureId = featureCache.get(featureName);
+      if (featureId === undefined) {
+        const [newF] = await db
+          .insert(features)
+          .values({ name: featureName })
+          .returning();
+        if (!newF) throw new Error(`Failed to create feature: ${featureName}`);
+        featureId = newF.id;
+        featureCache.set(featureName, featureId);
+      }
+
+      // Find or create member
+      let memberId = memberCache.get(memberName);
+      if (memberId === undefined) {
+        const [newM] = await db
+          .insert(members)
+          .values({ name: memberName })
+          .returning();
+        if (!newM) throw new Error(`Failed to create member: ${memberName}`);
+        memberId = newM.id;
+        memberCache.set(memberName, memberId);
+      }
+
+      // Find or create month (and quarter if needed)
+      const monthId = await findOrCreateMonth(db, year, monthNum, monthCache);
+
+      // Ensure feature_months record exists without overwriting existing total
+      const existingFM = await getFeatureMonthRow(db, featureId, monthId);
+      if (!existingFM) {
+        await db
+          .insert(featureMonths)
+          .values({ featureId, monthId, totalCapacity: 0 });
+      }
+
+      // Additive upsert for member_month_allocations
+      const existingAlloc = await db
+        .select()
+        .from(memberMonthAllocations)
+        .where(
+          and(
+            eq(memberMonthAllocations.featureId, featureId),
+            eq(memberMonthAllocations.monthId, monthId),
+            eq(memberMonthAllocations.memberId, memberId),
+          ),
+        );
+
+      if (existingAlloc[0]) {
+        await db
+          .update(memberMonthAllocations)
+          .set({
+            capacity: normalizeCapacity(existingAlloc[0].capacity + capacity),
+          })
+          .where(eq(memberMonthAllocations.id, existingAlloc[0].id));
+      } else {
+        await db.insert(memberMonthAllocations).values({
+          featureId,
+          monthId,
+          memberId,
+          capacity: normalizeCapacity(capacity),
+        });
+      }
+
+      affectedPairs.add(`${featureId}:${monthId}`);
+      success++;
+    }
+
+    // Recalculate feature_months totals for all affected pairs
+    for (const pair of affectedPairs) {
+      const parts = pair.split(":");
+      await recalculateFeatureMonthTotal(
+        db,
+        Number(parts[0]),
+        Number(parts[1]),
+      );
+    }
+
+    return { success, skipped, errors };
+  });
+
+// ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
@@ -1250,6 +1509,9 @@ export const router = {
     featureCSV: exportFeatureCSV,
     memberCSV: exportMemberCSV,
     allocationCSV: exportAllocationCSV,
+  },
+  import: {
+    csvImport,
   },
 };
 

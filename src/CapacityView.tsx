@@ -545,6 +545,14 @@ export function CapacityView() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [actionWarning, setActionWarning] = useState<string | null>(null);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importCsv, setImportCsv] = useState("");
+  const [importResult, setImportResult] = useState<{
+    success: number;
+    skipped: number;
+    errors: { row: number; message: string }[];
+  } | null>(null);
+  const [importing, setImporting] = useState(false);
   const [assigningFeatureId, setAssigningFeatureId] = useState<number | null>(
     null,
   );
@@ -564,54 +572,56 @@ export function CapacityView() {
 
   // ── Initial load ────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      const [qs, fs, ms] = await Promise.all([
-        orpc.quarters.list({}),
-        orpc.features.list({}),
-        orpc.members.list({}),
-      ]);
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    const [qs, fs, ms] = await Promise.all([
+      orpc.quarters.list({}),
+      orpc.features.list({}),
+      orpc.members.list({}),
+    ]);
 
-      const sortedQs = [...qs]
-        .map((q) => ({
-          ...q,
-          months: [...q.months].sort((a, b) => a.month - b.month),
-        }))
-        .sort((a, b) => a.year - b.year || a.quarter - b.quarter);
+    const sortedQs = [...qs]
+      .map((q) => ({
+        ...q,
+        months: [...q.months].sort((a, b) => a.month - b.month),
+      }))
+      .sort((a, b) => a.year - b.year || a.quarter - b.quarter);
 
-      const featureViews = await Promise.all(
-        fs.map((f) => orpc.allocations.getFeatureView({ featureId: f.id })),
-      );
+    const featureViews = await Promise.all(
+      fs.map((f) => orpc.allocations.getFeatureView({ featureId: f.id })),
+    );
 
-      const rows: FeatureRow[] = featureViews.map((fv) => {
-        const monthMap = new Map<number, MonthData>();
-        for (const qd of fv.quarters) {
-          for (const md of qd.months) {
-            monthMap.set(md.month.id, {
-              totalCapacity: md.totalCapacity,
-              unassignedCapacity: md.unassignedCapacity,
-              memberAllocations: md.memberAllocations.map((a) => ({
-                memberId: a.member.id,
-                capacity: a.capacity,
-              })),
-            });
-          }
+    const rows: FeatureRow[] = featureViews.map((fv) => {
+      const monthMap = new Map<number, MonthData>();
+      for (const qd of fv.quarters) {
+        for (const md of qd.months) {
+          monthMap.set(md.month.id, {
+            totalCapacity: md.totalCapacity,
+            unassignedCapacity: md.unassignedCapacity,
+            memberAllocations: md.memberAllocations.map((a) => ({
+              memberId: a.member.id,
+              capacity: a.capacity,
+            })),
+          });
         }
-        return {
-          id: fv.feature.id,
-          name: fv.feature.name,
-          expanded: false,
-          months: monthMap,
-        };
-      });
+      }
+      return {
+        id: fv.feature.id,
+        name: fv.feature.name,
+        expanded: false,
+        months: monthMap,
+      };
+    });
 
-      setQuarters(sortedQs);
-      setMembers(ms);
-      setFeatureRows(rows);
-      setLoading(false);
-    })();
+    setQuarters(sortedQs);
+    setMembers(ms);
+    setFeatureRows(rows);
+    setLoading(false);
   }, []);
+
+  useEffect(() => {
+    loadAll();
+  }, [loadAll]);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -941,6 +951,19 @@ export function CapacityView() {
     const csv = await orpc.export.allocationCSV({});
     await navigator.clipboard.writeText(csv);
   }, []);
+
+  const runImportCSV = useCallback(async () => {
+    setImporting(true);
+    try {
+      const result = await orpc.import.csvImport({ csv: importCsv });
+      setImportResult(result);
+      if (result.success > 0) {
+        await loadAll();
+      }
+    } finally {
+      setImporting(false);
+    }
+  }, [importCsv, loadAll]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -1342,6 +1365,19 @@ export function CapacityView() {
           >
             CSVをコピー
           </button>
+          <button
+            type="button"
+            className="btn-sm"
+            onClick={() => {
+              setImportCsv("");
+              setImportResult(null);
+              setImportModalOpen(true);
+            }}
+            disabled={busy}
+            title="CSVをインポート（機能,担当者,キャパシティ,月）"
+          >
+            CSVをインポート
+          </button>
           {actionWarning && (
             <span className="name-action-warning" role="alert">
               {actionWarning}
@@ -1350,6 +1386,74 @@ export function CapacityView() {
           <span className="hint-text">クリックで数値編集 · + で担当者展開</span>
         </div>
       </div>
+
+      {importModalOpen && (
+        <div className="confirm-overlay">
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="confirm-dialog import-dialog"
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && !importing) setImportModalOpen(false);
+            }}
+          >
+            <p className="confirm-msg">CSVをインポート</p>
+            <p className="import-hint">
+              ヘッダー行（機能,担当者,キャパシティ,月）を含むCSVを貼り付けてください。
+              既存のキャパシティに加算されます。
+            </p>
+            {!importResult ? (
+              <textarea
+                className="import-textarea"
+                value={importCsv}
+                onChange={(e) => setImportCsv(e.target.value)}
+                placeholder={
+                  "機能,担当者,キャパシティ,月\nFeature A,Alice,0.5,2026-04"
+                }
+                rows={8}
+                disabled={importing}
+              />
+            ) : (
+              <div className="import-result">
+                <p>
+                  完了: <strong>{importResult.success}件成功</strong>
+                  {importResult.skipped > 0 &&
+                    `、${importResult.skipped}件スキップ`}
+                </p>
+                {importResult.errors.length > 0 && (
+                  <ul className="import-errors">
+                    {importResult.errors.map((e) => (
+                      <li key={e.row}>
+                        行{e.row}: {e.message}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+            <div className="confirm-btns">
+              <button
+                type="button"
+                className="btn-sm"
+                onClick={() => setImportModalOpen(false)}
+                disabled={importing}
+              >
+                {importResult ? "閉じる" : "キャンセル"}
+              </button>
+              {!importResult && (
+                <button
+                  type="button"
+                  className="btn-sm"
+                  onClick={runImportCSV}
+                  disabled={importing || !importCsv.trim()}
+                >
+                  {importing ? "インポート中…" : "インポート"}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {removeConfirm && (
         <div className="confirm-overlay">

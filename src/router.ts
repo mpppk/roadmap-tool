@@ -1,8 +1,9 @@
 import { ORPCError, os } from "@orpc/server";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import * as z from "zod";
 import type { db as DbType } from "./db/index";
 import {
+  featureLinks,
   featureMonths,
   features,
   memberMonthAllocations,
@@ -25,6 +26,24 @@ const capacityConflictResolutionSchema = z.enum([
   "rebalanceOthersProportionally",
 ]);
 
+const DESCRIPTION_MAX_LENGTH = 2000;
+const FEATURE_LINK_TITLE_MAX_LENGTH = 100;
+const FEATURE_LINK_URL_MAX_LENGTH = 2048;
+const FEATURE_LINK_MAX_COUNT = 20;
+
+const featureLinkInputSchema = z.object({
+  title: z.string(),
+  url: z.string(),
+});
+
+type NormalizedFeatureLinkInput = {
+  title: string;
+  url: string;
+  position: number;
+};
+
+type FeatureRowRecord = typeof features.$inferSelect;
+
 type SQLiteConstraintError = {
   code?: string;
   message?: string;
@@ -34,6 +53,82 @@ function normalizeNameInput(name: string, resource: NameResource): string {
   const normalized = trimSqliteSpaces(name);
   if (normalized.length === 0) throwNameError(resource, "BLANK_NAME");
   return normalized;
+}
+
+function throwFeatureMetadataError(message: string): never {
+  throw new ORPCError("BAD_REQUEST", { message });
+}
+
+function normalizeFeatureDescriptionInput(
+  description: string | null | undefined,
+): string | null | undefined {
+  if (description === undefined) return undefined;
+  if (description === null) return null;
+  const normalized = description.trim();
+  if (normalized.length === 0) return null;
+  if (normalized.length > DESCRIPTION_MAX_LENGTH) {
+    throwFeatureMetadataError(
+      `説明は${DESCRIPTION_MAX_LENGTH}文字以内で入力してください。`,
+    );
+  }
+  return normalized;
+}
+
+function normalizeFeatureLinksInput(
+  links: Array<{ title: string; url: string }> | undefined,
+): NormalizedFeatureLinkInput[] | undefined {
+  if (links === undefined) return undefined;
+
+  const normalizedLinks: NormalizedFeatureLinkInput[] = [];
+  const seenUrls = new Set<string>();
+
+  for (const link of links) {
+    const title = link.title.trim();
+    const url = link.url.trim();
+    if (title.length === 0 || url.length === 0) continue;
+    if (title.length > FEATURE_LINK_TITLE_MAX_LENGTH) {
+      throwFeatureMetadataError(
+        `リンク名は${FEATURE_LINK_TITLE_MAX_LENGTH}文字以内で入力してください。`,
+      );
+    }
+    if (url.length > FEATURE_LINK_URL_MAX_LENGTH) {
+      throwFeatureMetadataError(
+        `リンクURLは${FEATURE_LINK_URL_MAX_LENGTH}文字以内で入力してください。`,
+      );
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throwFeatureMetadataError(
+        "リンクURLは http:// または https:// で始まるURLを入力してください。",
+      );
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throwFeatureMetadataError(
+        "リンクURLは http:// または https:// で始まるURLを入力してください。",
+      );
+    }
+    if (seenUrls.has(url)) {
+      throwFeatureMetadataError(
+        "同じURLのリンクは1つのFeatureに複数登録できません。",
+      );
+    }
+    seenUrls.add(url);
+    normalizedLinks.push({
+      title,
+      url,
+      position: normalizedLinks.length,
+    });
+  }
+
+  if (normalizedLinks.length > FEATURE_LINK_MAX_COUNT) {
+    throwFeatureMetadataError(
+      `リンクは1つのFeatureにつき${FEATURE_LINK_MAX_COUNT}件まで登録できます。`,
+    );
+  }
+
+  return normalizedLinks;
 }
 
 function throwNameError(resource: NameResource, code: NameErrorCode): never {
@@ -113,6 +208,38 @@ async function assertMemberNameAvailable(
     .from(members)
     .where(where);
   if (existing.length > 0) throwNameError("member", "DUPLICATE_NAME");
+}
+
+async function getFeatureLinks(db: typeof DbType, featureId: number) {
+  return db
+    .select()
+    .from(featureLinks)
+    .where(eq(featureLinks.featureId, featureId))
+    .orderBy(asc(featureLinks.position), asc(featureLinks.id));
+}
+
+async function buildFeatureDto(db: typeof DbType, feature: FeatureRowRecord) {
+  return {
+    ...feature,
+    links: await getFeatureLinks(db, feature.id),
+  };
+}
+
+async function saveFeatureLinks(
+  db: typeof DbType,
+  featureId: number,
+  links: NormalizedFeatureLinkInput[],
+) {
+  await db.delete(featureLinks).where(eq(featureLinks.featureId, featureId));
+  if (links.length === 0) return;
+  await db.insert(featureLinks).values(
+    links.map((link) => ({
+      featureId,
+      title: link.title,
+      url: link.url,
+      position: link.position,
+    })),
+  );
 }
 
 type PeriodTarget = {
@@ -532,38 +659,66 @@ function splitTotalAcrossMonths(
 // Features
 // ---------------------------------------------------------------------------
 
-const featuresList = o
-  .input(z.object({}))
-  .handler(async ({ context }) => context.db.select().from(features).all());
+const featuresList = o.input(z.object({})).handler(async ({ context }) => {
+  const rows = await context.db.select().from(features).all();
+  return Promise.all(
+    rows.map((feature) => buildFeatureDto(context.db, feature)),
+  );
+});
 
 const featuresCreate = o
-  .input(z.object({ name: z.string() }))
+  .input(
+    z.object({
+      name: z.string(),
+      description: z.string().nullable().optional(),
+      links: z.array(featureLinkInputSchema).optional(),
+    }),
+  )
   .handler(async ({ input, context }) => {
     const name = normalizeNameInput(input.name, "feature");
+    const description = normalizeFeatureDescriptionInput(input.description);
+    const links = normalizeFeatureLinksInput(input.links);
     await assertFeatureNameAvailable(context.db, name);
     try {
       const [row] = await context.db
         .insert(features)
-        .values({ name })
+        .values({ name, description: description ?? null })
         .returning();
-      return row;
+      if (!row) return row;
+      if (links !== undefined)
+        await saveFeatureLinks(context.db, row.id, links);
+      return buildFeatureDto(context.db, row);
     } catch (error) {
       rethrowNameMutationError("feature", error);
     }
   });
 
 const featuresRename = o
-  .input(z.object({ id: z.number().int(), name: z.string() }))
+  .input(
+    z.object({
+      id: z.number().int(),
+      name: z.string(),
+      description: z.string().nullable().optional(),
+      links: z.array(featureLinkInputSchema).optional(),
+    }),
+  )
   .handler(async ({ input, context }) => {
     const name = normalizeNameInput(input.name, "feature");
+    const description = normalizeFeatureDescriptionInput(input.description);
+    const links = normalizeFeatureLinksInput(input.links);
     await assertFeatureNameAvailable(context.db, name, input.id);
     try {
+      const values: { name: string; description?: string | null } = { name };
+      if (description !== undefined) values.description = description;
       const [row] = await context.db
         .update(features)
-        .set({ name })
+        .set(values)
         .where(eq(features.id, input.id))
         .returning();
-      return row;
+      if (!row) return row;
+      if (links !== undefined)
+        await saveFeatureLinks(context.db, row.id, links);
+      return buildFeatureDto(context.db, row);
     } catch (error) {
       rethrowNameMutationError("feature", error);
     }
@@ -732,7 +887,10 @@ const allocationsGetFeatureView = o
       }),
     }));
 
-    return { feature, quarters: quarterData };
+    return {
+      feature: await buildFeatureDto(db, feature),
+      quarters: quarterData,
+    };
   });
 
 const allocationsGetMemberView = o
@@ -1213,6 +1371,32 @@ const exportAllocationCSV = o
     return [header, ...rows].join("\n");
   });
 
+function csvCell(value: string): string {
+  if (!/[",\n\r]/.test(value)) return value;
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+const exportFeatureMetadataCSV = o
+  .input(z.object({}))
+  .handler(async ({ context }) => {
+    const allFeatures = await context.db.select().from(features).all();
+    const rows = await Promise.all(
+      allFeatures.map(async (feature) => {
+        const links = await getFeatureLinks(context.db, feature.id);
+        return [
+          csvCell(feature.name),
+          csvCell(feature.description ?? ""),
+          csvCell(
+            JSON.stringify(
+              links.map((link) => ({ title: link.title, url: link.url })),
+            ),
+          ),
+        ].join(",");
+      }),
+    );
+    return [["name", "description", "links"].join(","), ...rows].join("\n");
+  });
+
 // ---------------------------------------------------------------------------
 // Import
 // ---------------------------------------------------------------------------
@@ -1298,6 +1482,44 @@ async function findOrCreateMonth(
 }
 
 type ImportRowError = { row: number; message: string };
+
+type FeatureMetadataImportRow = {
+  row: number;
+  name: string;
+  description: string | null;
+  links: NormalizedFeatureLinkInput[];
+};
+
+function parseFeatureMetadataLinksCell(
+  value: string,
+): Array<{ title: string; url: string }> {
+  if (value.trim().length === 0) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throwFeatureMetadataError("links列はJSON配列で入力してください。");
+  }
+  if (!Array.isArray(parsed)) {
+    throwFeatureMetadataError("links列はJSON配列で入力してください。");
+  }
+  return parsed.map((item) => {
+    if (
+      item === null ||
+      typeof item !== "object" ||
+      typeof (item as { title?: unknown }).title !== "string" ||
+      typeof (item as { url?: unknown }).url !== "string"
+    ) {
+      throwFeatureMetadataError(
+        'links列は [{"title":"...","url":"https://..."}] の形式で入力してください。',
+      );
+    }
+    return {
+      title: (item as { title: string }).title,
+      url: (item as { url: string }).url,
+    };
+  });
+}
 
 const csvImport = o
   .input(z.object({ csv: z.string() }))
@@ -1472,6 +1694,90 @@ const csvImport = o
     return { success, skipped, errors };
   });
 
+const featureMetadataCSVImport = o
+  .input(z.object({ csv: z.string() }))
+  .handler(async ({ input, context }) => {
+    const { db } = context;
+    const lines = input.csv
+      .split("\n")
+      .map((l) => l.trimEnd())
+      .filter((l) => l.trim().length > 0);
+
+    if (lines.length < 2) return { success: 0 };
+
+    const headers = parseCSVLine(lines[0]!).map((h) => h.trim());
+    const colName = headers.indexOf("name");
+    const colDescription = headers.indexOf("description");
+    const colLinks = headers.indexOf("links");
+    if ([colName, colDescription, colLinks].includes(-1)) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: "CSVヘッダーに name,description,links のカラムが必要です。",
+      });
+    }
+
+    const rows: FeatureMetadataImportRow[] = [];
+    const seenNames = new Set<string>();
+    for (let i = 1; i < lines.length; i++) {
+      const rowNum = i + 1;
+      const cols = parseCSVLine(lines[i]!);
+      const name = normalizeNameInput(cols[colName] ?? "", "feature");
+      if (seenNames.has(name)) {
+        throwFeatureMetadataError(
+          `Feature metadata CSV内でFeature名が重複しています: ${name}`,
+        );
+      }
+      seenNames.add(name);
+
+      const description = normalizeFeatureDescriptionInput(
+        cols[colDescription] ?? "",
+      );
+      const links = normalizeFeatureLinksInput(
+        parseFeatureMetadataLinksCell(cols[colLinks] ?? ""),
+      );
+      rows.push({
+        row: rowNum,
+        name,
+        description: description ?? null,
+        links: links ?? [],
+      });
+    }
+
+    const existingFeatures = await db.select().from(features).all();
+    const featureByName = new Map(existingFeatures.map((f) => [f.name, f]));
+
+    for (const row of rows) {
+      const existing = featureByName.get(row.name);
+      if (existing) {
+        const [updated] = await db
+          .update(features)
+          .set({ description: row.description })
+          .where(eq(features.id, existing.id))
+          .returning();
+        if (!updated) {
+          throw new Error(
+            `Failed to update feature metadata at row ${row.row}`,
+          );
+        }
+        await saveFeatureLinks(db, existing.id, row.links);
+        featureByName.set(row.name, updated);
+      } else {
+        const [created] = await db
+          .insert(features)
+          .values({ name: row.name, description: row.description })
+          .returning();
+        if (!created) {
+          throw new Error(
+            `Failed to create feature metadata at row ${row.row}`,
+          );
+        }
+        await saveFeatureLinks(db, created.id, row.links);
+        featureByName.set(row.name, created);
+      }
+    }
+
+    return { success: rows.length };
+  });
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -1509,9 +1815,11 @@ export const router = {
     featureCSV: exportFeatureCSV,
     memberCSV: exportMemberCSV,
     allocationCSV: exportAllocationCSV,
+    featureMetadataCSV: exportFeatureMetadataCSV,
   },
   import: {
     csvImport,
+    featureMetadataCSVImport,
   },
 };
 

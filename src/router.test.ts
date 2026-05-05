@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { type BunSQLiteDatabase, drizzle } from "drizzle-orm/bun-sqlite";
 import {
+  featureLinks,
   featureMonths,
   features,
   memberMonthAllocations,
@@ -14,6 +15,7 @@ import { router } from "./router";
 
 const testSchema = {
   features,
+  featureLinks,
   members,
   quarters,
   months,
@@ -25,15 +27,18 @@ type TestDb = BunSQLiteDatabase<typeof testSchema>;
 
 function createTestDb() {
   const sqlite = new Database(":memory:");
+  sqlite.exec("PRAGMA foreign_keys = ON;");
   sqlite.exec(`
     CREATE TABLE features (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
+      description TEXT,
       created_at INTEGER NOT NULL,
       CONSTRAINT features_name_trimmed_check CHECK (name = trim(name)),
       CONSTRAINT features_name_not_empty_check CHECK (length(name) > 0)
     );
     CREATE UNIQUE INDEX features_name_trim_unique ON features (trim(name));
+    CREATE TABLE feature_links (id INTEGER PRIMARY KEY AUTOINCREMENT, feature_id INTEGER NOT NULL REFERENCES features(id) ON DELETE CASCADE, title TEXT NOT NULL, url TEXT NOT NULL, position INTEGER NOT NULL, CONSTRAINT feature_links_title_not_empty_check CHECK (length(title) > 0), CONSTRAINT feature_links_url_not_empty_check CHECK (length(url) > 0), CONSTRAINT feature_links_position_check CHECK (position >= 0), UNIQUE(feature_id, position), UNIQUE(feature_id, url));
 
     CREATE TABLE members (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,6 +81,16 @@ async function expectNameError(
     return;
   }
   throw new Error(`Expected ${code} name error`);
+}
+
+async function expectBadRequest(promise: Promise<unknown>) {
+  try {
+    await promise;
+  } catch (error) {
+    expect((error as { code?: string }).code).toBe("BAD_REQUEST");
+    return;
+  }
+  throw new Error("Expected BAD_REQUEST error");
 }
 
 async function createQuarterWithMonths(
@@ -248,6 +263,125 @@ describe("router name validation", () => {
       "CONFLICT",
       "DUPLICATE_NAME",
     );
+  });
+});
+
+describe("feature metadata", () => {
+  let state: ReturnType<typeof createTestDb>;
+
+  beforeEach(() => {
+    state = createTestDb();
+  });
+
+  afterEach(() => {
+    state.sqlite.close();
+  });
+
+  test("creates, lists, and updates feature metadata with ordered links", async () => {
+    const createFeature = router.features.create.callable({
+      context: { db: state.db },
+    });
+    const renameFeature = router.features.rename.callable({
+      context: { db: state.db },
+    });
+    const listFeatures = router.features.list.callable({
+      context: { db: state.db },
+    });
+
+    const created = await createFeature({
+      name: "Auth",
+      description: " Login feature ",
+      links: [
+        { title: "Spec", url: "https://example.com/spec" },
+        { title: "Empty", url: "" },
+        { title: "Issue", url: "https://example.com/issue" },
+      ],
+    });
+
+    expect(created?.description).toBe("Login feature");
+    expect(created?.links.map((link) => link.title)).toEqual(["Spec", "Issue"]);
+
+    const renamed = await renameFeature({
+      id: created!.id,
+      name: " Auth v2 ",
+      links: [{ title: "Docs", url: "https://example.com/docs" }],
+    });
+    expect(renamed?.name).toBe("Auth v2");
+    expect(renamed?.description).toBe("Login feature");
+    expect(renamed?.links).toHaveLength(1);
+    expect(renamed?.links[0]?.position).toBe(0);
+
+    const listed = await listFeatures({});
+    expect(listed[0]?.links[0]?.title).toBe("Docs");
+  });
+
+  test("validates feature metadata links and length limits", async () => {
+    const createFeature = router.features.create.callable({
+      context: { db: state.db },
+    });
+
+    await expectBadRequest(
+      createFeature({
+        name: "Auth",
+        links: [{ title: "Bad", url: "ftp://example.com/spec" }],
+      }),
+    );
+    await expectBadRequest(
+      createFeature({
+        name: "Search",
+        links: [
+          { title: "A", url: "https://example.com/dup" },
+          { title: "B", url: "https://example.com/dup" },
+        ],
+      }),
+    );
+    await expectBadRequest(
+      createFeature({
+        name: "Reports",
+        description: "x".repeat(2001),
+      }),
+    );
+    await expectBadRequest(
+      createFeature({
+        name: "Too many",
+        links: Array.from({ length: 21 }, (_, i) => ({
+          title: `Link ${i}`,
+          url: `https://example.com/${i}`,
+        })),
+      }),
+    );
+  });
+
+  test("exports and imports feature metadata csv", async () => {
+    const createFeature = router.features.create.callable({
+      context: { db: state.db },
+    });
+    const exportCsv = router.export.featureMetadataCSV.callable({
+      context: { db: state.db },
+    });
+    const importCsv = router.import.featureMetadataCSVImport.callable({
+      context: { db: state.db },
+    });
+
+    await createFeature({
+      name: "Auth",
+      description: "Old",
+      links: [{ title: "Old link", url: "https://example.com/old" }],
+    });
+
+    await importCsv({
+      csv: [
+        "name,description,links",
+        'Auth,New,"[{""title"":""Spec"",""url"":""https://example.com/spec""}]"',
+        "Search,,[]",
+      ].join("\n"),
+    });
+
+    const csv = await exportCsv({});
+    expect(csv).toContain("Auth");
+    expect(csv).toContain("New");
+    expect(csv).toContain("https://example.com/spec");
+    expect(csv).toContain("Search");
   });
 });
 

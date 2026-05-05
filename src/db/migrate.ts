@@ -8,6 +8,9 @@ import migration0001 from "../../drizzle/0001_monthly_capacity.sql" with {
 import migration0003 from "../../drizzle/0003_member_max_capacity.sql" with {
   type: "text",
 };
+import migration0004 from "../../drizzle/0004_feature_metadata.sql" with {
+  type: "text",
+};
 import { trimSqliteSpaces } from "../name-errors";
 
 type Migration = {
@@ -32,6 +35,7 @@ const MIGRATIONS: Migration[] = [
     transaction: false,
   },
   { name: "0003_member_max_capacity", sql: migration0003 },
+  { name: "0004_feature_metadata", sql: migration0004 },
 ];
 
 function normalizedNameRows(

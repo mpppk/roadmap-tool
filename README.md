@@ -7,12 +7,14 @@
 ```
 features ────┐
              ├── feature_months ──── member_month_allocations ──── members
+             └── feature_links
 quarters ──── months
 ```
 
 | エンティティ | 説明 |
 |---|---|
-| `features` | 機能・作業項目。name はユニーク |
+| `features` | 機能・作業項目。name はユニーク。description を任意で保持 |
+| `feature_links` | Featureに紐づく複数リンク。title / url / position を保持 |
 | `members` | チームメンバー。name はユニーク |
 | `quarters` | 四半期グループ。`(year, quarter)` の組み合わせがユニーク |
 | `months` | 計画の最小単位となる月。`(year, month)` の組み合わせがユニークで、必ず四半期に属する |
@@ -75,6 +77,7 @@ quarters ──── months
 | Enter / フォーカスアウト | 値を確定し `allocations.updateTotal` でサーバーに保存 |
 | Escape | 編集をキャンセル |
 | 機能名をクリック | インライン入力でリネーム（Enter / Blur で確定）|
+| 詳細アイコン | ダイアログで名前・説明・複数リンクを編集 |
 | `[+]` ボタン | メンバー行をインライン展開・折りたたみ |
 | 🔴 赤点（overflow-dot） | いずれかの四半期に未アサイン分がある場合に表示 |
 
@@ -187,8 +190,9 @@ export ROADMAP_URL=http://localhost:3000
 
 # features
 bun src/cli.ts features list
-bun src/cli.ts features add "認証機能"
-bun src/cli.ts features rename <id> "認証機能 v2"
+bun src/cli.ts features add "認証機能" --description "説明" --link "Spec=https://example.com/spec"
+bun src/cli.ts features rename <id> "認証機能 v2" --description "説明" --link "Issue=https://example.com/issue"
+bun src/cli.ts features rename <id> "認証機能 v2" --clear-description --clear-links
 
 # members
 bun src/cli.ts members list
@@ -196,7 +200,9 @@ bun src/cli.ts members add "Alice"
 bun src/cli.ts members rename <id> "Bob"
 ```
 
-出力はタブ区切りの ID と名前です。
+Feature metadata CSV は `name,description,links` の3列です。`links` は `[{"title":"Spec","url":"https://example.com/spec"}]` のJSON文字列で、import時は同名Featureの説明・リンクをCSV内容で置き換えます。
+
+Feature一覧のCLI出力はタブ区切りの ID・名前・説明・リンク件数です。Member一覧のCLI出力はタブ区切りの ID と名前です。
 
 ## テスト方針
 

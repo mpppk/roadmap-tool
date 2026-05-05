@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import {
+  featureLinks,
   featureMonths,
   features,
   memberMonthAllocations,
@@ -12,9 +13,11 @@ import {
 
 function createTestDb() {
   const sqlite = new Database(":memory:");
+  sqlite.exec("PRAGMA foreign_keys = ON;");
   const db = drizzle(sqlite, {
     schema: {
       features,
+      featureLinks,
       members,
       quarters,
       months,
@@ -27,11 +30,25 @@ function createTestDb() {
     CREATE TABLE features (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
+      description TEXT,
       created_at INTEGER NOT NULL,
       CONSTRAINT features_name_trimmed_check CHECK (name = trim(name)),
       CONSTRAINT features_name_not_empty_check CHECK (length(name) > 0)
     );
     CREATE UNIQUE INDEX features_name_trim_unique ON features (trim(name));
+
+    CREATE TABLE feature_links (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      feature_id INTEGER NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      url TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      CONSTRAINT feature_links_title_not_empty_check CHECK (length(title) > 0),
+      CONSTRAINT feature_links_url_not_empty_check CHECK (length(url) > 0),
+      CONSTRAINT feature_links_position_check CHECK (position >= 0),
+      UNIQUE(feature_id, position),
+      UNIQUE(feature_id, url)
+    );
 
     CREATE TABLE members (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,9 +119,39 @@ describe("DB schema", () => {
   test("can insert and query a feature", async () => {
     const [inserted] = await state.db
       .insert(features)
-      .values({ name: "Auth", createdAt: new Date() })
+      .values({
+        name: "Auth",
+        description: "Login and session management",
+        createdAt: new Date(),
+      })
       .returning();
     expect(inserted?.name).toBe("Auth");
+    expect(inserted?.description).toBe("Login and session management");
+  });
+
+  test("can insert ordered feature links and rejects duplicate urls", async () => {
+    const [feature] = await state.db
+      .insert(features)
+      .values({ name: "Auth", createdAt: new Date() })
+      .returning();
+    const [link] = await state.db
+      .insert(featureLinks)
+      .values({
+        featureId: feature!.id,
+        title: "Spec",
+        url: "https://example.com/spec",
+        position: 0,
+      })
+      .returning();
+    expect(link?.title).toBe("Spec");
+
+    expectSqliteError(() => {
+      state.sqlite
+        .prepare(
+          "INSERT INTO feature_links (feature_id, title, url, position) VALUES (?, ?, ?, ?)",
+        )
+        .run(feature!.id, "Spec duplicate", "https://example.com/spec", 1);
+    }, "SQLITE_CONSTRAINT_UNIQUE");
   });
 
   test("can insert a member", async () => {

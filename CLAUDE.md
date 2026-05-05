@@ -118,3 +118,7 @@ Use HTML imports with `Bun.serve()`. Don't use `vite`. HTML imports fully suppor
 `src/index.html` is imported directly into `src/index.ts` as a route handler — Bun's bundler transpiles and bundles `src/frontend.tsx` and CSS automatically. HMR is enabled in development via `import.meta.hot`.
 
 For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+
+## ブラウザでの動作確認
+
+`bun dev` で開発サーバーを起動し、発行されたURL（例: `https://some-branch-name.roadmap-tool.localhost`）にブラウザでアクセスしてください

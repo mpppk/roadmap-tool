@@ -1,10 +1,10 @@
 {
-  "name": "bun-react-template",
+  "name": "roadmap-tool",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun --hot src/index.ts",
+    "dev": "portless run bun --hot src/index.ts",
     "start": "NODE_ENV=production bun src/index.ts",
     "build": "bun run build.ts",
     "build:binary": "bun run build-binary.ts",
@@ -30,6 +30,7 @@
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.2",
     "lucide-react": "^1",
+    "portless": "^0.12.0",
     "react": "^19",
     "react-dom": "^19",
     "tailwind-merge": "^3.3.1",

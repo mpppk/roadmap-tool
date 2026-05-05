@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./capacity.css";
 import { navigate } from "./navigate";
 import { orpc } from "./orpc-client";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type Quarter = { id: number; year: number; quarter: number };
+type ViewMode = "quarter" | "month";
+type Month = { id: number; year: number; month: number; quarterId: number };
+type Quarter = { id: number; year: number; quarter: number; months: Month[] };
 type Member = { id: number; name: string };
 
-type MemberQuarterData = {
+type MemberMonthData = {
   totalCapacity: number;
   featureAllocations: Array<{
     featureId: number;
@@ -21,7 +23,14 @@ type MemberRow = {
   id: number;
   name: string;
   expanded: boolean;
-  quarters: Map<number, MemberQuarterData>;
+  months: Map<number, MemberMonthData>;
+};
+
+type PeriodColumn = {
+  key: string;
+  type: ViewMode;
+  label: string;
+  monthIds: number[];
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -44,6 +53,10 @@ function quarterLabel(q: Quarter): string {
   return `${q.year} Q${q.quarter}`;
 }
 
+function monthLabel(month: Month): string {
+  return `${month.year}-${String(month.month).padStart(2, "0")}`;
+}
+
 function nextQuarterYQ(quarters: Quarter[]): { year: number; quarter: number } {
   const last = quarters[quarters.length - 1];
   if (!last) return { year: new Date().getFullYear(), quarter: 1 };
@@ -51,8 +64,70 @@ function nextQuarterYQ(quarters: Quarter[]): { year: number; quarter: number } {
   return { year: last.year, quarter: last.quarter + 1 };
 }
 
-function emptyMemberQuarterData(): MemberQuarterData {
+function emptyMemberMonthData(): MemberMonthData {
   return { totalCapacity: 0, featureAllocations: [] };
+}
+
+function aggregateMemberMonthData(
+  monthMap: Map<number, MemberMonthData>,
+  monthIds: number[],
+): MemberMonthData {
+  const featureTotals = new Map<
+    number,
+    { featureName: string; capacity: number }
+  >();
+  let totalCapacity = 0;
+
+  for (const monthId of monthIds) {
+    const data = monthMap.get(monthId) ?? emptyMemberMonthData();
+    totalCapacity += data.totalCapacity;
+    for (const allocation of data.featureAllocations) {
+      const current = featureTotals.get(allocation.featureId) ?? {
+        featureName: allocation.featureName,
+        capacity: 0,
+      };
+      featureTotals.set(allocation.featureId, {
+        featureName: allocation.featureName,
+        capacity: current.capacity + allocation.capacity,
+      });
+    }
+  }
+
+  return {
+    totalCapacity,
+    featureAllocations: [...featureTotals].map(([featureId, data]) => ({
+      featureId,
+      featureName: data.featureName,
+      capacity: data.capacity,
+    })),
+  };
+}
+
+function columnsForMode(
+  quarters: Quarter[],
+  viewMode: ViewMode,
+): PeriodColumn[] {
+  if (viewMode === "quarter") {
+    return quarters.map((q) => ({
+      key: `q-${q.id}`,
+      type: "quarter",
+      label: quarterLabel(q),
+      monthIds: q.months.map((m) => m.id),
+    }));
+  }
+
+  return quarters.flatMap((q) =>
+    q.months.map((m) => ({
+      key: `m-${m.id}`,
+      type: "month",
+      label: monthLabel(m),
+      monthIds: [m.id],
+    })),
+  );
+}
+
+function columnMemberLimit(column: PeriodColumn): number {
+  return column.type === "quarter" ? column.monthIds.length : 1;
 }
 
 // ── Sub-components ──────────────────────────────────────────────────────────
@@ -158,10 +233,16 @@ function MemberNameCell({
 const COL_W = 148;
 
 export function MembersView() {
+  const [viewMode, setViewMode] = useState<ViewMode>("quarter");
   const [quarters, setQuarters] = useState<Quarter[]>([]);
   const [memberRows, setMemberRows] = useState<MemberRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+
+  const columns = useMemo(
+    () => columnsForMode(quarters, viewMode),
+    [quarters, viewMode],
+  );
 
   // ── Initial load ────────────────────────────────────────────────────────
 
@@ -173,31 +254,36 @@ export function MembersView() {
         orpc.members.list({}),
       ]);
 
-      const sortedQs = [...qs].sort(
-        (a, b) => a.year - b.year || a.quarter - b.quarter,
-      );
+      const sortedQs = [...qs]
+        .map((q) => ({
+          ...q,
+          months: [...q.months].sort((a, b) => a.month - b.month),
+        }))
+        .sort((a, b) => a.year - b.year || a.quarter - b.quarter);
 
       const memberViews = await Promise.all(
         ms.map((m) => orpc.allocations.getMemberView({ memberId: m.id })),
       );
 
       const rows: MemberRow[] = memberViews.map((mv) => {
-        const qMap = new Map<number, MemberQuarterData>();
+        const monthMap = new Map<number, MemberMonthData>();
         for (const qd of mv.quarters) {
-          qMap.set(qd.quarter.id, {
-            totalCapacity: qd.totalCapacity,
-            featureAllocations: qd.featureAllocations.map((fa) => ({
-              featureId: fa.feature.id,
-              featureName: fa.feature.name,
-              capacity: fa.capacity,
-            })),
-          });
+          for (const md of qd.months) {
+            monthMap.set(md.month.id, {
+              totalCapacity: md.totalCapacity,
+              featureAllocations: md.featureAllocations.map((fa) => ({
+                featureId: fa.feature.id,
+                featureName: fa.feature.name,
+                capacity: fa.capacity,
+              })),
+            });
+          }
         }
         return {
           id: mv.member.id,
           name: mv.member.name,
           expanded: false,
-          quarters: qMap,
+          months: monthMap,
         };
       });
 
@@ -209,8 +295,10 @@ export function MembersView() {
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
-  const getQData = (row: MemberRow, quarterId: number): MemberQuarterData =>
-    row.quarters.get(quarterId) ?? emptyMemberQuarterData();
+  const getColumnData = (
+    row: MemberRow,
+    column: PeriodColumn,
+  ): MemberMonthData => aggregateMemberMonthData(row.months, column.monthIds);
 
   const toggleExpand = (memberId: number) => {
     setMemberRows((rows) =>
@@ -231,7 +319,7 @@ export function MembersView() {
       if (!m) return;
       setMemberRows((rows) => [
         ...rows,
-        { id: m.id, name: m.name, expanded: false, quarters: new Map() },
+        { id: m.id, name: m.name, expanded: false, months: new Map() },
       ]);
     } finally {
       setBusy(false);
@@ -262,7 +350,10 @@ export function MembersView() {
       const q = await orpc.quarters.create({ year, quarter });
       if (!q) return;
       setQuarters((qs) =>
-        [...qs, q].sort((a, b) => a.year - b.year || a.quarter - b.quarter),
+        [
+          ...qs,
+          { ...q, months: [...q.months].sort((a, b) => a.month - b.month) },
+        ].sort((a, b) => a.year - b.year || a.quarter - b.quarter),
       );
     } finally {
       setBusy(false);
@@ -320,6 +411,23 @@ export function MembersView() {
             Members
           </button>
         </nav>
+        <fieldset className="period-toggle">
+          <legend className="period-toggle-label">表示単位</legend>
+          <button
+            type="button"
+            className={`period-toggle-btn${viewMode === "quarter" ? " active" : ""}`}
+            onClick={() => setViewMode("quarter")}
+          >
+            Quarter
+          </button>
+          <button
+            type="button"
+            className={`period-toggle-btn${viewMode === "month" ? " active" : ""}`}
+            onClick={() => setViewMode("month")}
+          >
+            Month
+          </button>
+        </fieldset>
         {busy && (
           <span
             style={{ marginLeft: 8, fontSize: 11, color: "var(--cv-text-3)" }}
@@ -335,13 +443,13 @@ export function MembersView() {
             <thead>
               <tr>
                 <th className="th-label">Member</th>
-                {quarters.map((q) => (
+                {columns.map((column) => (
                   <th
-                    key={q.id}
+                    key={column.key}
                     className="th-quarter"
                     style={{ width: COL_W, minWidth: COL_W }}
                   >
-                    {quarterLabel(q)}
+                    {column.label}
                   </th>
                 ))}
               </tr>
@@ -353,12 +461,11 @@ export function MembersView() {
                 if (mi > 0) {
                   rows.push(
                     <tr key={`sep-${member.id}`} className="cv-section-sep">
-                      <td colSpan={quarters.length + 1} />
+                      <td colSpan={columns.length + 1} />
                     </tr>,
                   );
                 }
 
-                // member row
                 rows.push(
                   <tr key={member.id} className="tr-feature">
                     <td className="td-label">
@@ -378,18 +485,20 @@ export function MembersView() {
                         />
                       </div>
                     </td>
-                    {quarters.map((q) => {
-                      const qd = getQData(member, q.id);
-                      const cellOv = qd.totalCapacity > 1.000001;
+                    {columns.map((column) => {
+                      const data = getColumnData(member, column);
+                      const cellOv =
+                        data.totalCapacity >
+                        columnMemberLimit(column) + 0.000001;
                       return (
                         <td
-                          key={q.id}
+                          key={column.key}
                           className="td-quarter"
                           style={{ width: COL_W, minWidth: COL_W }}
                         >
                           <ReadonlyHeatmapCell
-                            value={qd.totalCapacity}
-                            maxVal={1}
+                            value={data.totalCapacity}
+                            maxVal={columnMemberLimit(column)}
                             rowHeight={42}
                             isOverflow={cellOv}
                           />
@@ -399,12 +508,10 @@ export function MembersView() {
                   </tr>,
                 );
 
-                // feature sub-rows (expanded)
                 if (member.expanded) {
-                  // Collect all features that appear in at least one quarter
                   const featureMap = new Map<number, string>();
-                  for (const qd of member.quarters.values()) {
-                    for (const fa of qd.featureAllocations) {
+                  for (const monthData of member.months.values()) {
+                    for (const fa of monthData.featureAllocations) {
                       featureMap.set(fa.featureId, fa.featureName);
                     }
                   }
@@ -414,7 +521,7 @@ export function MembersView() {
                       <tr key={`${member.id}-empty`} className="tr-member">
                         <td
                           className="td-label td-member-label"
-                          colSpan={quarters.length + 1}
+                          colSpan={columns.length + 1}
                           style={{
                             color: "var(--cv-text-3)",
                             fontStyle: "italic",
@@ -435,17 +542,22 @@ export function MembersView() {
                           <td className="td-label td-member-label">
                             <span className="member-name">{featureName}</span>
                           </td>
-                          {quarters.map((q) => {
-                            const qd = getQData(member, q.id);
-                            const fa = qd.featureAllocations.find(
+                          {columns.map((column) => {
+                            const data = getColumnData(member, column);
+                            const fa = data.featureAllocations.find(
                               (a) => a.featureId === featureId,
                             );
                             const value = fa?.capacity ?? 0;
-                            const cellOv = qd.totalCapacity > 1.000001;
-                            const { bg, fg } = heatBg(value, 1);
+                            const cellOv =
+                              data.totalCapacity >
+                              columnMemberLimit(column) + 0.000001;
+                            const { bg, fg } = heatBg(
+                              value,
+                              columnMemberLimit(column),
+                            );
                             return (
                               <td
-                                key={q.id}
+                                key={column.key}
                                 className="td-member-val"
                                 style={{ width: COL_W, padding: 0 }}
                               >

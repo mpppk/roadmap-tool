@@ -3,10 +3,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { type BunSQLiteDatabase, drizzle } from "drizzle-orm/bun-sqlite";
 import {
-  featureQuarters,
+  featureMonths,
   features,
-  memberAllocations,
+  memberMonthAllocations,
   members,
+  months,
   quarters,
 } from "./db/schema";
 import { router } from "./router";
@@ -15,8 +16,9 @@ const testSchema = {
   features,
   members,
   quarters,
-  featureQuarters,
-  memberAllocations,
+  months,
+  featureMonths,
+  memberMonthAllocations,
 };
 
 type TestDb = BunSQLiteDatabase<typeof testSchema>;
@@ -27,12 +29,39 @@ function createTestDb() {
     CREATE TABLE features (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
     CREATE TABLE members (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
     CREATE TABLE quarters (id INTEGER PRIMARY KEY AUTOINCREMENT, year INTEGER NOT NULL, quarter INTEGER NOT NULL, UNIQUE(year, quarter));
-    CREATE TABLE feature_quarters (id INTEGER PRIMARY KEY AUTOINCREMENT, feature_id INTEGER NOT NULL REFERENCES features(id) ON DELETE CASCADE, quarter_id INTEGER NOT NULL REFERENCES quarters(id) ON DELETE CASCADE, total_capacity REAL NOT NULL DEFAULT 0, UNIQUE(feature_id, quarter_id));
-    CREATE TABLE member_allocations (id INTEGER PRIMARY KEY AUTOINCREMENT, feature_id INTEGER NOT NULL REFERENCES features(id) ON DELETE CASCADE, quarter_id INTEGER NOT NULL REFERENCES quarters(id) ON DELETE CASCADE, member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE, capacity REAL NOT NULL DEFAULT 0, UNIQUE(feature_id, quarter_id, member_id));
+    CREATE TABLE months (id INTEGER PRIMARY KEY AUTOINCREMENT, year INTEGER NOT NULL, month INTEGER NOT NULL, quarter_id INTEGER NOT NULL REFERENCES quarters(id) ON DELETE CASCADE, UNIQUE(year, month), UNIQUE(quarter_id, month));
+    CREATE TABLE feature_months (id INTEGER PRIMARY KEY AUTOINCREMENT, feature_id INTEGER NOT NULL REFERENCES features(id) ON DELETE CASCADE, month_id INTEGER NOT NULL REFERENCES months(id) ON DELETE CASCADE, total_capacity REAL NOT NULL DEFAULT 0, UNIQUE(feature_id, month_id));
+    CREATE TABLE member_month_allocations (id INTEGER PRIMARY KEY AUTOINCREMENT, feature_id INTEGER NOT NULL REFERENCES features(id) ON DELETE CASCADE, month_id INTEGER NOT NULL REFERENCES months(id) ON DELETE CASCADE, member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE, capacity REAL NOT NULL DEFAULT 0, UNIQUE(feature_id, month_id, member_id));
   `);
   return {
     sqlite,
     db: drizzle(sqlite, { schema: testSchema }),
+  };
+}
+
+async function createQuarterWithMonths(
+  db: TestDb,
+  year: number,
+  quarter: number,
+) {
+  const [quarterRow] = await db
+    .insert(quarters)
+    .values({ year, quarter })
+    .returning();
+  const startMonth = (quarter - 1) * 3 + 1;
+  const monthRows = await db
+    .insert(months)
+    .values(
+      [0, 1, 2].map((offset) => ({
+        year,
+        month: startMonth + offset,
+        quarterId: quarterRow!.id,
+      })),
+    )
+    .returning();
+  return {
+    quarter: quarterRow!,
+    months: monthRows.sort((a, b) => a.month - b.month),
   };
 }
 
@@ -53,17 +82,15 @@ async function seedBase(db: TestDb) {
     .insert(members)
     .values({ name: "Alice" })
     .returning();
-  const [quarter] = await db
-    .insert(quarters)
-    .values({ year: 2026, quarter: 1 })
-    .returning();
+  const q1 = await createQuarterWithMonths(db, 2026, 1);
 
   return {
     featureA: featureA!,
     featureB: featureB!,
     featureC: featureC!,
     member: member!,
-    quarter: quarter!,
+    quarter: q1.quarter,
+    month: q1.months[0]!,
   };
 }
 
@@ -71,55 +98,51 @@ async function addAllocation(
   db: TestDb,
   {
     featureId,
-    quarterId,
+    monthId,
     memberId,
     capacity,
   }: {
     featureId: number;
-    quarterId: number;
+    monthId: number;
     memberId: number;
     capacity: number;
   },
 ) {
   await db
-    .insert(featureQuarters)
-    .values({ featureId, quarterId, totalCapacity: capacity });
+    .insert(featureMonths)
+    .values({ featureId, monthId, totalCapacity: capacity });
   await db
-    .insert(memberAllocations)
-    .values({ featureId, quarterId, memberId, capacity });
+    .insert(memberMonthAllocations)
+    .values({ featureId, monthId, memberId, capacity });
 }
 
 async function getAllocation(
   db: TestDb,
   featureId: number,
-  quarterId: number,
+  monthId: number,
   memberId: number,
 ) {
   const [row] = await db
     .select()
-    .from(memberAllocations)
+    .from(memberMonthAllocations)
     .where(
       and(
-        eq(memberAllocations.featureId, featureId),
-        eq(memberAllocations.quarterId, quarterId),
-        eq(memberAllocations.memberId, memberId),
+        eq(memberMonthAllocations.featureId, featureId),
+        eq(memberMonthAllocations.monthId, monthId),
+        eq(memberMonthAllocations.memberId, memberId),
       ),
     );
   return row;
 }
 
-async function getFeatureQuarter(
-  db: TestDb,
-  featureId: number,
-  quarterId: number,
-) {
+async function getFeatureMonth(db: TestDb, featureId: number, monthId: number) {
   const [row] = await db
     .select()
-    .from(featureQuarters)
+    .from(featureMonths)
     .where(
       and(
-        eq(featureQuarters.featureId, featureId),
-        eq(featureQuarters.quarterId, quarterId),
+        eq(featureMonths.featureId, featureId),
+        eq(featureMonths.monthId, monthId),
       ),
     );
   return row;
@@ -133,14 +156,14 @@ describe("allocation capacity conflicts", () => {
     sqlite = null;
   });
 
-  test("previews used elsewhere and assignable capacity", async () => {
+  test("previews used elsewhere and assignable monthly capacity", async () => {
     const testDb = createTestDb();
     sqlite = testDb.sqlite;
     const { db } = testDb;
-    const { featureA, featureB, member, quarter } = await seedBase(db);
+    const { featureA, featureB, member, month } = await seedBase(db);
     await addAllocation(db, {
       featureId: featureB.id,
-      quarterId: quarter.id,
+      monthId: month.id,
       memberId: member.id,
       capacity: 0.7,
     });
@@ -150,50 +173,25 @@ describe("allocation capacity conflicts", () => {
     });
     const result = await preview({
       featureId: featureA.id,
-      quarterId: quarter.id,
-      memberId: member.id,
-    });
-
-    expect(result.usedElsewhere).toBeCloseTo(0.7);
-    expect(result.assignableCapacity).toBeCloseTo(0.3);
-  });
-
-  test("fits direct allocation within the member limit by default", async () => {
-    const testDb = createTestDb();
-    sqlite = testDb.sqlite;
-    const { db } = testDb;
-    const { featureA, featureB, member, quarter } = await seedBase(db);
-    await addAllocation(db, {
-      featureId: featureB.id,
-      quarterId: quarter.id,
-      memberId: member.id,
-      capacity: 0.7,
-    });
-
-    const update = router.allocations.updateMemberAllocation.callable({
-      context: { db },
-    });
-    await update({
-      featureId: featureA.id,
-      quarterId: quarter.id,
+      periodType: "month",
+      monthId: month.id,
       memberId: member.id,
       capacity: 0.55,
     });
 
-    const alloc = await getAllocation(db, featureA.id, quarter.id, member.id);
-    const fq = await getFeatureQuarter(db, featureA.id, quarter.id);
-    expect(alloc?.capacity).toBeCloseTo(0.3);
-    expect(fq?.totalCapacity).toBeCloseTo(0.3);
+    expect(result.usedElsewhere).toBeCloseTo(0.7);
+    expect(result.assignableCapacity).toBeCloseTo(0.3);
+    expect(result.hasConflict).toBe(true);
   });
 
-  test("allows direct allocation to overflow when requested", async () => {
+  test("fits direct monthly allocation within the member limit by default", async () => {
     const testDb = createTestDb();
     sqlite = testDb.sqlite;
     const { db } = testDb;
-    const { featureA, featureB, member, quarter } = await seedBase(db);
+    const { featureA, featureB, member, month } = await seedBase(db);
     await addAllocation(db, {
       featureId: featureB.id,
-      quarterId: quarter.id,
+      monthId: month.id,
       memberId: member.id,
       capacity: 0.7,
     });
@@ -203,31 +201,60 @@ describe("allocation capacity conflicts", () => {
     });
     await update({
       featureId: featureA.id,
-      quarterId: quarter.id,
+      periodType: "month",
+      monthId: month.id,
+      memberId: member.id,
+      capacity: 0.55,
+    });
+
+    const alloc = await getAllocation(db, featureA.id, month.id, member.id);
+    const fm = await getFeatureMonth(db, featureA.id, month.id);
+    expect(alloc?.capacity).toBeCloseTo(0.3);
+    expect(fm?.totalCapacity).toBeCloseTo(0.3);
+  });
+
+  test("allows direct monthly allocation to overflow when requested", async () => {
+    const testDb = createTestDb();
+    sqlite = testDb.sqlite;
+    const { db } = testDb;
+    const { featureA, featureB, member, month } = await seedBase(db);
+    await addAllocation(db, {
+      featureId: featureB.id,
+      monthId: month.id,
+      memberId: member.id,
+      capacity: 0.7,
+    });
+
+    const update = router.allocations.updateMemberAllocation.callable({
+      context: { db },
+    });
+    await update({
+      featureId: featureA.id,
+      periodType: "month",
+      monthId: month.id,
       memberId: member.id,
       capacity: 0.55,
       capacityConflictResolution: "allowOverflow",
     });
 
-    const alloc = await getAllocation(db, featureA.id, quarter.id, member.id);
+    const alloc = await getAllocation(db, featureA.id, month.id, member.id);
     expect(alloc?.capacity).toBeCloseTo(0.55);
   });
 
-  test("rebalances other features proportionally", async () => {
+  test("rebalances other monthly feature allocations proportionally", async () => {
     const testDb = createTestDb();
     sqlite = testDb.sqlite;
     const { db } = testDb;
-    const { featureA, featureB, featureC, member, quarter } =
-      await seedBase(db);
+    const { featureA, featureB, featureC, member, month } = await seedBase(db);
     await addAllocation(db, {
       featureId: featureB.id,
-      quarterId: quarter.id,
+      monthId: month.id,
       memberId: member.id,
       capacity: 0.4,
     });
     await addAllocation(db, {
       featureId: featureC.id,
-      quarterId: quarter.id,
+      monthId: month.id,
       memberId: member.id,
       capacity: 0.3,
     });
@@ -237,15 +264,16 @@ describe("allocation capacity conflicts", () => {
     });
     const result = await update({
       featureId: featureA.id,
-      quarterId: quarter.id,
+      periodType: "month",
+      monthId: month.id,
       memberId: member.id,
       capacity: 0.55,
       capacityConflictResolution: "rebalanceOthersProportionally",
     });
 
-    const allocA = await getAllocation(db, featureA.id, quarter.id, member.id);
-    const allocB = await getAllocation(db, featureB.id, quarter.id, member.id);
-    const allocC = await getAllocation(db, featureC.id, quarter.id, member.id);
+    const allocA = await getAllocation(db, featureA.id, month.id, member.id);
+    const allocB = await getAllocation(db, featureB.id, month.id, member.id);
+    const allocC = await getAllocation(db, featureC.id, month.id, member.id);
     expect(allocA?.capacity).toBeCloseTo(0.55);
     expect(allocB?.capacity).toBeCloseTo(0.257143);
     expect(allocC?.capacity).toBeCloseTo(0.192857);
@@ -254,28 +282,27 @@ describe("allocation capacity conflicts", () => {
         (allocB?.capacity ?? 0) +
         (allocC?.capacity ?? 0),
     ).toBeCloseTo(1);
-    expect(result.updatedQuarters.map((q) => q.featureId).sort()).toEqual([
+    expect(result.updatedFeatures.map((f) => f.featureId).sort()).toEqual([
       featureA.id,
       featureB.id,
       featureC.id,
     ]);
   });
 
-  test("keeps zero allocations when proportional rebalance removes other capacity", async () => {
+  test("keeps zero allocations when proportional rebalance removes other monthly capacity", async () => {
     const testDb = createTestDb();
     sqlite = testDb.sqlite;
     const { db } = testDb;
-    const { featureA, featureB, featureC, member, quarter } =
-      await seedBase(db);
+    const { featureA, featureB, featureC, member, month } = await seedBase(db);
     await addAllocation(db, {
       featureId: featureB.id,
-      quarterId: quarter.id,
+      monthId: month.id,
       memberId: member.id,
       capacity: 0.4,
     });
     await addAllocation(db, {
       featureId: featureC.id,
-      quarterId: quarter.id,
+      monthId: month.id,
       memberId: member.id,
       capacity: 0.3,
     });
@@ -285,22 +312,23 @@ describe("allocation capacity conflicts", () => {
     });
     await update({
       featureId: featureA.id,
-      quarterId: quarter.id,
+      periodType: "month",
+      monthId: month.id,
       memberId: member.id,
       capacity: 1,
       capacityConflictResolution: "rebalanceOthersProportionally",
     });
 
-    const allocB = await getAllocation(db, featureB.id, quarter.id, member.id);
-    const allocC = await getAllocation(db, featureC.id, quarter.id, member.id);
-    const fqB = await getFeatureQuarter(db, featureB.id, quarter.id);
-    const fqC = await getFeatureQuarter(db, featureC.id, quarter.id);
+    const allocB = await getAllocation(db, featureB.id, month.id, member.id);
+    const allocC = await getAllocation(db, featureC.id, month.id, member.id);
+    const fmB = await getFeatureMonth(db, featureB.id, month.id);
+    const fmC = await getFeatureMonth(db, featureC.id, month.id);
     expect(allocB).toBeDefined();
     expect(allocC).toBeDefined();
     expect(allocB?.capacity).toBe(0);
     expect(allocC?.capacity).toBe(0);
-    expect(fqB?.totalCapacity).toBe(0);
-    expect(fqC?.totalCapacity).toBe(0);
+    expect(fmB?.totalCapacity).toBe(0);
+    expect(fmC?.totalCapacity).toBe(0);
   });
 });
 
@@ -312,20 +340,20 @@ describe("allocation cap preserving operations", () => {
     sqlite = null;
   });
 
-  test("keeps updateTotal assigned capacity within the member limit", async () => {
+  test("keeps updateTotal assigned capacity within the member monthly limit", async () => {
     const testDb = createTestDb();
     sqlite = testDb.sqlite;
     const { db } = testDb;
-    const { featureA, featureB, member, quarter } = await seedBase(db);
+    const { featureA, featureB, member, month } = await seedBase(db);
     await addAllocation(db, {
       featureId: featureA.id,
-      quarterId: quarter.id,
+      monthId: month.id,
       memberId: member.id,
       capacity: 1,
     });
     await addAllocation(db, {
       featureId: featureB.id,
-      quarterId: quarter.id,
+      monthId: month.id,
       memberId: member.id,
       capacity: 0.5,
     });
@@ -335,38 +363,35 @@ describe("allocation cap preserving operations", () => {
     });
     const result = await updateTotal({
       featureId: featureA.id,
-      quarterId: quarter.id,
+      periodType: "month",
+      monthId: month.id,
       totalCapacity: 2,
     });
 
-    const allocA = await getAllocation(db, featureA.id, quarter.id, member.id);
+    const allocA = await getAllocation(db, featureA.id, month.id, member.id);
     expect(allocA?.capacity).toBeCloseTo(0.5);
-    expect(result.totalCapacity).toBe(2);
-    expect(result.unassignedCapacity).toBeCloseTo(1.5);
+    expect(result.months[0]?.totalCapacity).toBe(2);
+    expect(result.months[0]?.unassignedCapacity).toBeCloseTo(1.5);
   });
 
-  test("keeps moveQuarter assigned capacity within the destination member limit", async () => {
+  test("keeps moveQuarter assigned capacity within the destination member monthly limit", async () => {
     const testDb = createTestDb();
     sqlite = testDb.sqlite;
     const { db } = testDb;
     const { featureA, featureB, member } = await seedBase(db);
-    const [fromQuarter] = await db
-      .insert(quarters)
-      .values({ year: 2026, quarter: 2 })
-      .returning();
-    const [toQuarter] = await db
-      .insert(quarters)
-      .values({ year: 2026, quarter: 3 })
-      .returning();
+    const fromQuarter = await createQuarterWithMonths(db, 2026, 2);
+    const toQuarter = await createQuarterWithMonths(db, 2026, 3);
+    const fromMonth = fromQuarter.months[0]!;
+    const toMonth = toQuarter.months[0]!;
     await addAllocation(db, {
       featureId: featureA.id,
-      quarterId: fromQuarter!.id,
+      monthId: fromMonth.id,
       memberId: member.id,
       capacity: 0.8,
     });
     await addAllocation(db, {
       featureId: featureB.id,
-      quarterId: toQuarter!.id,
+      monthId: toMonth.id,
       memberId: member.id,
       capacity: 0.7,
     });
@@ -376,18 +401,13 @@ describe("allocation cap preserving operations", () => {
     });
     await moveQuarter({
       featureId: featureA.id,
-      fromQuarterId: fromQuarter!.id,
-      toQuarterId: toQuarter!.id,
+      fromQuarterId: fromQuarter.quarter.id,
+      toQuarterId: toQuarter.quarter.id,
     });
 
-    const allocA = await getAllocation(
-      db,
-      featureA.id,
-      toQuarter!.id,
-      member.id,
-    );
-    const fqA = await getFeatureQuarter(db, featureA.id, toQuarter!.id);
+    const allocA = await getAllocation(db, featureA.id, toMonth.id, member.id);
+    const fmA = await getFeatureMonth(db, featureA.id, toMonth.id);
     expect(allocA?.capacity).toBeCloseTo(0.3);
-    expect(fqA?.totalCapacity).toBeCloseTo(0.8);
+    expect(fmA?.totalCapacity).toBeCloseTo(0.8);
   });
 });

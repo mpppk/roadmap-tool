@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./capacity.css";
 import { navigate } from "./navigate";
 import { orpc } from "./orpc-client";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type Quarter = { id: number; year: number; quarter: number };
+type ViewMode = "quarter" | "month";
+type Month = { id: number; year: number; month: number; quarterId: number };
+type Quarter = { id: number; year: number; quarter: number; months: Month[] };
 type Member = { id: number; name: string };
 
-type QuarterData = {
+type MonthData = {
   totalCapacity: number;
   unassignedCapacity: number;
   memberAllocations: Array<{ memberId: number; capacity: number }>;
@@ -18,7 +20,16 @@ type FeatureRow = {
   id: number;
   name: string;
   expanded: boolean;
-  quarters: Map<number, QuarterData>;
+  months: Map<number, MonthData>;
+};
+
+type PeriodColumn = {
+  key: string;
+  type: ViewMode;
+  label: string;
+  monthIds: number[];
+  monthId?: number;
+  quarterId?: number;
 };
 
 type CapacityConflictResolution =
@@ -26,17 +37,21 @@ type CapacityConflictResolution =
   | "allowOverflow"
   | "rebalanceOthersProportionally";
 
-type QuarterUpdate = {
+type FeatureMonthUpdate = {
   featureId: number;
-  quarterId: number;
-  totalCapacity: number;
-  unassignedCapacity: number;
-  memberAllocations: Array<{ memberId: number; capacity: number }>;
+  months: Array<{
+    monthId: number;
+    totalCapacity: number;
+    unassignedCapacity: number;
+    memberAllocations: Array<{ memberId: number; capacity: number }>;
+  }>;
 };
 
 type PendingCapacityConflict = {
   featureId: number;
-  quarterId: number;
+  periodType: ViewMode;
+  monthId?: number;
+  quarterId?: number;
   memberId: number;
   memberName: string;
   requestedCapacity: number;
@@ -76,6 +91,10 @@ function quarterLabel(q: Quarter): string {
   return `${q.year} Q${q.quarter}`;
 }
 
+function monthLabel(month: Month): string {
+  return `${month.year}-${String(month.month).padStart(2, "0")}`;
+}
+
 function nextQuarterYQ(quarters: Quarter[]): { year: number; quarter: number } {
   const last = quarters[quarters.length - 1];
   if (!last) return { year: new Date().getFullYear(), quarter: 1 };
@@ -83,8 +102,87 @@ function nextQuarterYQ(quarters: Quarter[]): { year: number; quarter: number } {
   return { year: last.year, quarter: last.quarter + 1 };
 }
 
-function emptyQuarterData(): QuarterData {
+function emptyMonthData(): MonthData {
   return { totalCapacity: 0, unassignedCapacity: 0, memberAllocations: [] };
+}
+
+function aggregateMonthData(
+  monthMap: Map<number, MonthData>,
+  monthIds: number[],
+): MonthData {
+  const memberTotals = new Map<number, number>();
+  let totalCapacity = 0;
+  let unassignedCapacity = 0;
+
+  for (const monthId of monthIds) {
+    const data = monthMap.get(monthId) ?? emptyMonthData();
+    totalCapacity += data.totalCapacity;
+    unassignedCapacity += data.unassignedCapacity;
+    for (const alloc of data.memberAllocations) {
+      memberTotals.set(
+        alloc.memberId,
+        (memberTotals.get(alloc.memberId) ?? 0) + alloc.capacity,
+      );
+    }
+  }
+
+  return {
+    totalCapacity,
+    unassignedCapacity,
+    memberAllocations: [...memberTotals].map(([memberId, capacity]) => ({
+      memberId,
+      capacity,
+    })),
+  };
+}
+
+function columnsForMode(
+  quarters: Quarter[],
+  viewMode: ViewMode,
+): PeriodColumn[] {
+  if (viewMode === "quarter") {
+    return quarters.map((q) => ({
+      key: `q-${q.id}`,
+      type: "quarter",
+      label: quarterLabel(q),
+      monthIds: q.months.map((m) => m.id),
+      quarterId: q.id,
+    }));
+  }
+
+  return quarters.flatMap((q) =>
+    q.months.map((m) => ({
+      key: `m-${m.id}`,
+      type: "month",
+      label: monthLabel(m),
+      monthIds: [m.id],
+      monthId: m.id,
+    })),
+  );
+}
+
+function columnMemberLimit(column: PeriodColumn): number {
+  return column.type === "quarter" ? column.monthIds.length : 1;
+}
+
+function updateMonthResults(
+  monthMap: Map<number, MonthData>,
+  results: Array<{
+    monthId: number;
+    totalCapacity: number;
+    unassignedCapacity: number;
+    memberAllocations: Array<{ memberId: number; capacity: number }>;
+  }>,
+) {
+  const newMap = new Map(monthMap);
+  for (const result of results) {
+    newMap.set(result.monthId, {
+      totalCapacity: result.totalCapacity,
+      unassignedCapacity: result.unassignedCapacity,
+      memberAllocations: result.memberAllocations,
+    });
+  }
+  return newMap;
 }
 
 // ── Sub-components ──────────────────────────────────────────────────────────
@@ -126,7 +224,7 @@ function HeatmapCell({
       className="hm-cell"
       style={{ background: bg, height: rowHeight }}
       onClick={startEdit}
-      title={`${value} 人月 — クリックで編集`}
+      title={`${fmt(value)} 人月 · クリックで編集`}
     >
       {editing ? (
         <input
@@ -171,17 +269,19 @@ function HeatmapCell({
 
 function HeatmapMemberCell({
   value,
+  maxVal,
   isOverflow,
   onCommit,
 }: {
   value: number;
+  maxVal: number;
   isOverflow: boolean;
   onCommit: (v: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [editVal, setEditVal] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
-  const { bg, fg } = heatBg(value, 1);
+  const { bg, fg } = heatBg(value, maxVal);
   const ovBg = isOverflow ? "oklch(72% 0.18 25)" : bg;
   const ovFg = isOverflow ? "#fff" : fg;
 
@@ -216,7 +316,8 @@ function HeatmapMemberCell({
             if (e.key === "Enter") commit();
             if (e.key === "Escape") setEditing(false);
           }}
-          style={{ color: ovFg, fontSize: 12 }}
+          onClick={(e) => e.stopPropagation()}
+          style={{ color: ovFg }}
         />
       ) : (
         <span
@@ -243,8 +344,7 @@ function FeatureNameCell({
   const [val, setVal] = useState(name);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const startEdit = (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const startEdit = () => {
     setVal(name);
     setEditing(true);
     setTimeout(() => inputRef.current?.select(), 20);
@@ -252,7 +352,7 @@ function FeatureNameCell({
 
   const commit = () => {
     const trimmed = val.trim();
-    if (trimmed) onRename(trimmed);
+    if (trimmed && trimmed !== name) onRename(trimmed);
     setEditing(false);
   };
 
@@ -268,10 +368,10 @@ function FeatureNameCell({
           if (e.key === "Enter") commit();
           if (e.key === "Escape") setEditing(false);
         }}
-        onClick={(e) => e.stopPropagation()}
       />
     );
   }
+
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
       <button
@@ -375,10 +475,11 @@ function CapacityConflictPopover({
 
 // ── Main component ──────────────────────────────────────────────────────────
 
-const MAX_VAL = 3;
+const FEATURE_MAX_VAL = 3;
 const COL_W = 148;
 
 export function CapacityView() {
+  const [viewMode, setViewMode] = useState<ViewMode>("quarter");
   const [quarters, setQuarters] = useState<Quarter[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [featureRows, setFeatureRows] = useState<FeatureRow[]>([]);
@@ -396,6 +497,11 @@ export function CapacityView() {
   const [capacityConflict, setCapacityConflict] =
     useState<PendingCapacityConflict | null>(null);
 
+  const columns = useMemo(
+    () => columnsForMode(quarters, viewMode),
+    [quarters, viewMode],
+  );
+
   // ── Initial load ────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -407,32 +513,36 @@ export function CapacityView() {
         orpc.members.list({}),
       ]);
 
-      const sortedQs = [...qs].sort(
-        (a, b) => a.year - b.year || a.quarter - b.quarter,
-      );
+      const sortedQs = [...qs]
+        .map((q) => ({
+          ...q,
+          months: [...q.months].sort((a, b) => a.month - b.month),
+        }))
+        .sort((a, b) => a.year - b.year || a.quarter - b.quarter);
 
-      // Load feature view for each feature in parallel
       const featureViews = await Promise.all(
         fs.map((f) => orpc.allocations.getFeatureView({ featureId: f.id })),
       );
 
       const rows: FeatureRow[] = featureViews.map((fv) => {
-        const qMap = new Map<number, QuarterData>();
+        const monthMap = new Map<number, MonthData>();
         for (const qd of fv.quarters) {
-          qMap.set(qd.quarter.id, {
-            totalCapacity: qd.totalCapacity,
-            unassignedCapacity: qd.unassignedCapacity,
-            memberAllocations: qd.memberAllocations.map((a) => ({
-              memberId: a.member.id,
-              capacity: a.capacity,
-            })),
-          });
+          for (const md of qd.months) {
+            monthMap.set(md.month.id, {
+              totalCapacity: md.totalCapacity,
+              unassignedCapacity: md.unassignedCapacity,
+              memberAllocations: md.memberAllocations.map((a) => ({
+                memberId: a.member.id,
+                capacity: a.capacity,
+              })),
+            });
+          }
         }
         return {
           id: fv.feature.id,
           name: fv.feature.name,
           expanded: false,
-          quarters: qMap,
+          months: monthMap,
         };
       });
 
@@ -445,32 +555,37 @@ export function CapacityView() {
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
-  const getQData = (row: FeatureRow, quarterId: number): QuarterData =>
-    row.quarters.get(quarterId) ?? emptyQuarterData();
+  const getColumnData = (row: FeatureRow, column: PeriodColumn): MonthData =>
+    aggregateMonthData(row.months, column.monthIds);
 
-  const getMemberQuarterTotal = (memberId: number, quarterId: number): number =>
+  const getMemberColumnTotal = (
+    memberId: number,
+    column: PeriodColumn,
+  ): number =>
     featureRows.reduce((sum, row) => {
-      const alloc = getQData(row, quarterId).memberAllocations.find(
+      const alloc = getColumnData(row, column).memberAllocations.find(
         (a) => a.memberId === memberId,
       );
       return sum + (alloc?.capacity ?? 0);
     }, 0);
 
-  const isMemberQuarterOverflow = (
+  const isMemberColumnOverflow = (
     memberId: number,
-    quarterId: number,
-  ): boolean => getMemberQuarterTotal(memberId, quarterId) > 1.000001;
+    column: PeriodColumn,
+  ): boolean =>
+    getMemberColumnTotal(memberId, column) >
+    columnMemberLimit(column) + 0.000001;
 
   const getRebalancePreview = (
     memberId: number,
-    quarterId: number,
+    column: PeriodColumn,
     excludeFeatureId: number,
     requestedCapacity: number,
   ): RebalancePreview[] => {
     const otherAllocations = featureRows
       .filter((row) => row.id !== excludeFeatureId)
       .map((row) => {
-        const alloc = getQData(row, quarterId).memberAllocations.find(
+        const alloc = getColumnData(row, column).memberAllocations.find(
           (a) => a.memberId === memberId,
         );
         return {
@@ -483,9 +598,10 @@ export function CapacityView() {
       (sum, change) => sum + change.currentCapacity,
       0,
     );
+    const limit = columnMemberLimit(column);
     const scale =
-      requestedCapacity <= 1 && usedElsewhere > 0
-        ? Math.max(0, (1 - requestedCapacity) / usedElsewhere)
+      requestedCapacity <= limit && usedElsewhere > 0
+        ? Math.max(0, (limit - requestedCapacity) / usedElsewhere)
         : 1;
 
     return otherAllocations.map((change) => ({
@@ -513,61 +629,68 @@ export function CapacityView() {
 
   // ── API actions ───────────────────────────────────────────────────────────
 
-  const applyQuarterUpdates = useCallback((updates: QuarterUpdate[]) => {
-    setFeatureRows((rows) =>
-      rows.map((r) => {
-        const rowUpdates = updates.filter((u) => u.featureId === r.id);
-        if (rowUpdates.length === 0) return r;
-        const newMap = new Map(r.quarters);
-        for (const update of rowUpdates) {
-          newMap.set(update.quarterId, {
-            totalCapacity: update.totalCapacity,
-            unassignedCapacity: update.unassignedCapacity,
-            memberAllocations: update.memberAllocations,
-          });
-        }
-        return { ...r, quarters: newMap };
-      }),
-    );
-  }, []);
+  const applyFeatureMonthUpdates = useCallback(
+    (updates: FeatureMonthUpdate[]) => {
+      setFeatureRows((rows) =>
+        rows.map((r) => {
+          const rowUpdates = updates.filter((u) => u.featureId === r.id);
+          if (rowUpdates.length === 0) return r;
+          let newMap = new Map(r.months);
+          for (const update of rowUpdates) {
+            newMap = updateMonthResults(newMap, update.months);
+          }
+          return { ...r, months: newMap };
+        }),
+      );
+    },
+    [],
+  );
 
   const updateTotal = useCallback(
-    async (featureId: number, quarterId: number, totalCapacity: number) => {
+    async (featureId: number, column: PeriodColumn, totalCapacity: number) => {
       setBusy(true);
       try {
         const result = await orpc.allocations.updateTotal({
           featureId,
-          quarterId,
           totalCapacity,
+          periodType: column.type,
+          monthId: column.monthId,
+          quarterId: column.quarterId,
         });
-        applyQuarterUpdates([result]);
+        applyFeatureMonthUpdates([{ featureId, months: result.months }]);
       } finally {
         setBusy(false);
       }
     },
-    [applyQuarterUpdates],
+    [applyFeatureMonthUpdates],
   );
 
   const updateMemberAllocation = useCallback(
     async (
       featureId: number,
-      quarterId: number,
+      column: PeriodColumn,
       memberId: number,
       capacity: number,
     ) => {
       setBusy(true);
       try {
         setCapacityConflict(null);
-        if (capacity <= 1) {
+        const limit = columnMemberLimit(column);
+        if (capacity <= limit) {
           const preview = await orpc.allocations.previewMemberAllocation({
             featureId,
-            quarterId,
             memberId,
+            capacity,
+            periodType: column.type,
+            monthId: column.monthId,
+            quarterId: column.quarterId,
           });
-          if (preview.usedElsewhere + capacity > 1) {
+          if (preview.hasConflict) {
             setCapacityConflict({
               featureId,
-              quarterId,
+              periodType: column.type,
+              monthId: column.monthId,
+              quarterId: column.quarterId,
               memberId,
               memberName:
                 members.find((member) => member.id === memberId)?.name ??
@@ -582,18 +705,20 @@ export function CapacityView() {
 
         const result = await orpc.allocations.updateMemberAllocation({
           featureId,
-          quarterId,
           memberId,
           capacity,
+          periodType: column.type,
+          monthId: column.monthId,
+          quarterId: column.quarterId,
           capacityConflictResolution:
-            capacity > 1 ? "allowOverflow" : "fitWithinLimit",
+            capacity > limit ? "allowOverflow" : "fitWithinLimit",
         });
-        applyQuarterUpdates(result.updatedQuarters);
+        applyFeatureMonthUpdates(result.updatedFeatures);
       } finally {
         setBusy(false);
       }
     },
-    [applyQuarterUpdates, members],
+    [applyFeatureMonthUpdates, members],
   );
 
   const resolveCapacityConflict = useCallback(
@@ -603,18 +728,20 @@ export function CapacityView() {
       try {
         const result = await orpc.allocations.updateMemberAllocation({
           featureId: capacityConflict.featureId,
+          periodType: capacityConflict.periodType,
+          monthId: capacityConflict.monthId,
           quarterId: capacityConflict.quarterId,
           memberId: capacityConflict.memberId,
           capacity: capacityConflict.requestedCapacity,
           capacityConflictResolution: resolution,
         });
-        applyQuarterUpdates(result.updatedQuarters);
+        applyFeatureMonthUpdates(result.updatedFeatures);
         setCapacityConflict(null);
       } finally {
         setBusy(false);
       }
     },
-    [applyQuarterUpdates, capacityConflict],
+    [applyFeatureMonthUpdates, capacityConflict],
   );
 
   const addFeature = async () => {
@@ -626,7 +753,7 @@ export function CapacityView() {
       if (!f) return;
       setFeatureRows((rows) => [
         ...rows,
-        { id: f.id, name: f.name, expanded: false, quarters: new Map() },
+        { id: f.id, name: f.name, expanded: false, months: new Map() },
       ]);
     } finally {
       setBusy(false);
@@ -634,7 +761,6 @@ export function CapacityView() {
   };
 
   const renameFeature = useCallback(async (id: number, name: string) => {
-    // optimistic update
     setFeatureRows((rows) =>
       rows.map((r) => (r.id === id ? { ...r, name } : r)),
     );
@@ -671,7 +797,10 @@ export function CapacityView() {
       const q = await orpc.quarters.create({ year, quarter });
       if (!q) return;
       setQuarters((qs) =>
-        [...qs, q].sort((a, b) => a.year - b.year || a.quarter - b.quarter),
+        [
+          ...qs,
+          { ...q, months: [...q.months].sort((a, b) => a.month - b.month) },
+        ].sort((a, b) => a.year - b.year || a.quarter - b.quarter),
       );
     } finally {
       setBusy(false);
@@ -680,19 +809,21 @@ export function CapacityView() {
 
   const refreshFeatureRow = useCallback(async (featureId: number) => {
     const fv = await orpc.allocations.getFeatureView({ featureId });
-    const qMap = new Map<number, QuarterData>();
+    const monthMap = new Map<number, MonthData>();
     for (const qd of fv.quarters) {
-      qMap.set(qd.quarter.id, {
-        totalCapacity: qd.totalCapacity,
-        unassignedCapacity: qd.unassignedCapacity,
-        memberAllocations: qd.memberAllocations.map((a) => ({
-          memberId: a.member.id,
-          capacity: a.capacity,
-        })),
-      });
+      for (const md of qd.months) {
+        monthMap.set(md.month.id, {
+          totalCapacity: md.totalCapacity,
+          unassignedCapacity: md.unassignedCapacity,
+          memberAllocations: md.memberAllocations.map((a) => ({
+            memberId: a.member.id,
+            capacity: a.capacity,
+          })),
+        });
+      }
     }
     setFeatureRows((rows) =>
-      rows.map((r) => (r.id === featureId ? { ...r, quarters: qMap } : r)),
+      rows.map((r) => (r.id === featureId ? { ...r, months: monthMap } : r)),
     );
   }, []);
 
@@ -778,6 +909,23 @@ export function CapacityView() {
             Members
           </button>
         </nav>
+        <fieldset className="period-toggle">
+          <legend className="period-toggle-label">表示単位</legend>
+          <button
+            type="button"
+            className={`period-toggle-btn${viewMode === "quarter" ? " active" : ""}`}
+            onClick={() => setViewMode("quarter")}
+          >
+            Quarter
+          </button>
+          <button
+            type="button"
+            className={`period-toggle-btn${viewMode === "month" ? " active" : ""}`}
+            onClick={() => setViewMode("month")}
+          >
+            Month
+          </button>
+        </fieldset>
         {busy && (
           <span
             style={{ marginLeft: 8, fontSize: 11, color: "var(--cv-text-3)" }}
@@ -793,34 +941,34 @@ export function CapacityView() {
             <thead>
               <tr>
                 <th className="th-label">Feature</th>
-                {quarters.map((q) => (
+                {columns.map((column) => (
                   <th
-                    key={q.id}
+                    key={column.key}
                     className="th-quarter"
                     style={{ width: COL_W, minWidth: COL_W }}
                   >
-                    {quarterLabel(q)}
+                    {column.label}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {featureRows.map((feature, fi) => {
-                const hasOverflow = quarters.some(
-                  (q) => (getQData(feature, q.id).unassignedCapacity ?? 0) > 0,
+                const hasOverflow = columns.some(
+                  (column) =>
+                    (getColumnData(feature, column).unassignedCapacity ?? 0) >
+                    0,
                 );
                 const rows: React.ReactNode[] = [];
 
-                // separator (except first)
                 if (fi > 0) {
                   rows.push(
                     <tr key={`sep-${feature.id}`} className="cv-section-sep">
-                      <td colSpan={quarters.length + 1} />
+                      <td colSpan={columns.length + 1} />
                     </tr>,
                   );
                 }
 
-                // feature row
                 rows.push(
                   <tr key={feature.id} className="tr-feature">
                     <td className="td-label">
@@ -846,19 +994,19 @@ export function CapacityView() {
                         )}
                       </div>
                     </td>
-                    {quarters.map((q) => {
-                      const qd = getQData(feature, q.id);
+                    {columns.map((column) => {
+                      const data = getColumnData(feature, column);
                       return (
                         <td
-                          key={q.id}
+                          key={column.key}
                           className="td-quarter"
                           style={{ width: COL_W, minWidth: COL_W }}
                         >
                           <HeatmapCell
-                            value={qd.totalCapacity}
-                            unassigned={qd.unassignedCapacity}
-                            maxVal={MAX_VAL}
-                            onCommit={(v) => updateTotal(feature.id, q.id, v)}
+                            value={data.totalCapacity}
+                            unassigned={data.unassignedCapacity}
+                            maxVal={FEATURE_MAX_VAL}
+                            onCommit={(v) => updateTotal(feature.id, column, v)}
                             rowHeight={42}
                           />
                         </td>
@@ -867,12 +1015,10 @@ export function CapacityView() {
                   </tr>,
                 );
 
-                // member rows (expanded)
                 if (feature.expanded) {
-                  // Only show members explicitly assigned to this feature
                   const assignedMemberIds = new Set<number>();
-                  for (const q of quarters) {
-                    for (const a of getQData(feature, q.id).memberAllocations) {
+                  for (const monthData of feature.months.values()) {
+                    for (const a of monthData.memberAllocations) {
                       assignedMemberIds.add(a.memberId);
                     }
                   }
@@ -881,9 +1027,15 @@ export function CapacityView() {
                   );
 
                   for (const member of assignedMembers) {
-                    // Check if member has overflow in any quarter for this feature
-                    const isOverflow = quarters.some((q) => {
-                      return isMemberQuarterOverflow(member.id, q.id);
+                    const isOverflow = columns.some((column) => {
+                      return (
+                        isMemberColumnOverflow(member.id, column) ||
+                        (capacityConflict?.featureId === feature.id &&
+                          capacityConflict.memberId === member.id &&
+                          capacityConflict.periodType === column.type &&
+                          capacityConflict.monthId === column.monthId &&
+                          capacityConflict.quarterId === column.quarterId)
+                      );
                     });
 
                     rows.push(
@@ -911,38 +1063,42 @@ export function CapacityView() {
                             </button>
                           </div>
                         </td>
-                        {quarters.map((q) => {
-                          const qd = getQData(feature, q.id);
-                          const alloc = qd.memberAllocations.find(
+                        {columns.map((column) => {
+                          const data = getColumnData(feature, column);
+                          const alloc = data.memberAllocations.find(
                             (a) => a.memberId === member.id,
                           );
                           const matchingCapacityConflict =
                             capacityConflict &&
                             capacityConflict.featureId === feature.id &&
-                            capacityConflict.quarterId === q.id &&
+                            capacityConflict.periodType === column.type &&
+                            capacityConflict.monthId === column.monthId &&
+                            capacityConflict.quarterId === column.quarterId &&
                             capacityConflict.memberId === member.id
                               ? capacityConflict
                               : null;
+                          const limit = columnMemberLimit(column);
                           const value =
                             matchingCapacityConflict?.requestedCapacity ??
                             alloc?.capacity ??
                             0;
                           const cellOv =
                             !!matchingCapacityConflict ||
-                            isMemberQuarterOverflow(member.id, q.id);
+                            isMemberColumnOverflow(member.id, column);
                           return (
                             <td
-                              key={q.id}
+                              key={column.key}
                               className="td-member-val"
                               style={{ width: COL_W, padding: 0 }}
                             >
                               <HeatmapMemberCell
                                 value={value}
+                                maxVal={limit}
                                 isOverflow={cellOv}
                                 onCommit={(v) =>
                                   updateMemberAllocation(
                                     feature.id,
-                                    q.id,
+                                    column,
                                     member.id,
                                     v,
                                   )
@@ -964,7 +1120,7 @@ export function CapacityView() {
                                   }
                                   rebalancePreview={getRebalancePreview(
                                     matchingCapacityConflict.memberId,
-                                    matchingCapacityConflict.quarterId,
+                                    column,
                                     matchingCapacityConflict.featureId,
                                     matchingCapacityConflict.requestedCapacity,
                                   )}
@@ -979,7 +1135,6 @@ export function CapacityView() {
                     );
                   }
 
-                  // assign member row
                   const unassignedMembers = members.filter(
                     (m) => !assignedMemberIds.has(m.id),
                   );
@@ -988,7 +1143,7 @@ export function CapacityView() {
                       key={`${feature.id}-assign`}
                       className="tr-assign-member"
                     >
-                      <td colSpan={1 + quarters.length} className="td-assign">
+                      <td colSpan={1 + columns.length} className="td-assign">
                         {assigningFeatureId === feature.id ? (
                           <select
                             className="assign-select"
@@ -1025,7 +1180,6 @@ export function CapacityView() {
                     </tr>,
                   );
 
-                  // unassigned row (only if any quarter has overflow)
                   if (hasOverflow) {
                     rows.push(
                       <tr
@@ -1035,17 +1189,20 @@ export function CapacityView() {
                         <td className="td-label td-unassigned-label">
                           <span className="unassigned-name">未アサイン</span>
                         </td>
-                        {quarters.map((q) => {
-                          const uv = getQData(feature, q.id).unassignedCapacity;
+                        {columns.map((column) => {
+                          const uv = getColumnData(
+                            feature,
+                            column,
+                          ).unassignedCapacity;
                           return (
                             <td
-                              key={q.id}
+                              key={column.key}
                               className="td-member-val"
                               style={{ width: COL_W, background: "#fff8f8" }}
                             >
                               {uv > 0 ? (
                                 <span className="unassigned-val">
-                                  +{uv.toFixed(1)}
+                                  +{fmt(uv)}
                                 </span>
                               ) : (
                                 <span className="mval-dash">—</span>

@@ -3,10 +3,11 @@ import { and, eq, ne, sql } from "drizzle-orm";
 import * as z from "zod";
 import type { db as DbType } from "./db/index";
 import {
-  featureQuarters,
+  featureMonths,
   features,
-  memberAllocations,
+  memberMonthAllocations,
   members,
+  months,
   quarters,
 } from "./db/schema";
 
@@ -17,6 +18,406 @@ const capacityConflictResolutionSchema = z.enum([
   "allowOverflow",
   "rebalanceOthersProportionally",
 ]);
+
+type PeriodTarget = {
+  periodType: "month" | "quarter";
+  monthId?: number;
+  quarterId?: number;
+};
+
+type MonthAllocationResult = {
+  monthId: number;
+  totalCapacity: number;
+  unassignedCapacity: number;
+  memberAllocations: Array<{ memberId: number; capacity: number }>;
+};
+
+const periodInput = {
+  periodType: z.enum(["month", "quarter"]),
+  monthId: z.number().int().optional(),
+  quarterId: z.number().int().optional(),
+};
+
+function monthsInQuarter(quarter: number): number[] {
+  const startMonth = (quarter - 1) * 3 + 1;
+  return [startMonth, startMonth + 1, startMonth + 2];
+}
+
+function monthLabel(year: number, month: number): string {
+  return `${year}-${String(month).padStart(2, "0")}`;
+}
+
+async function getQuarterMonthRows(db: typeof DbType, quarterId: number) {
+  return db
+    .select()
+    .from(months)
+    .where(eq(months.quarterId, quarterId))
+    .orderBy(months.year, months.month)
+    .all();
+}
+
+async function getTargetMonthRows(db: typeof DbType, target: PeriodTarget) {
+  if (target.periodType === "month") {
+    if (!target.monthId) throw new Error("monthId is required");
+    const [month] = await db
+      .select()
+      .from(months)
+      .where(eq(months.id, target.monthId));
+    if (!month) throw new Error("Month not found");
+    return [month];
+  }
+
+  if (!target.quarterId) throw new Error("quarterId is required");
+  const monthRows = await getQuarterMonthRows(db, target.quarterId);
+  if (monthRows.length === 0) throw new Error("Quarter has no months");
+  return monthRows;
+}
+
+async function getQuarterRowsWithMonths(db: typeof DbType) {
+  const allQuarters = await db
+    .select()
+    .from(quarters)
+    .orderBy(quarters.year, quarters.quarter)
+    .all();
+  const allMonths = await db
+    .select()
+    .from(months)
+    .orderBy(months.year, months.month)
+    .all();
+
+  return allQuarters.map((q) => ({
+    ...q,
+    months: allMonths.filter((m) => m.quarterId === q.id),
+  }));
+}
+
+async function getMemberUsageInMonth(
+  db: typeof DbType,
+  memberId: number,
+  monthId: number,
+  excludeFeatureId: number,
+): Promise<number> {
+  const rows = await db
+    .select({
+      total: sql<number>`coalesce(sum(${memberMonthAllocations.capacity}), 0)`,
+    })
+    .from(memberMonthAllocations)
+    .where(
+      and(
+        eq(memberMonthAllocations.memberId, memberId),
+        eq(memberMonthAllocations.monthId, monthId),
+        ne(memberMonthAllocations.featureId, excludeFeatureId),
+      ),
+    );
+  return rows[0]?.total ?? 0;
+}
+
+async function getFeatureMonthRow(
+  db: typeof DbType,
+  featureId: number,
+  monthId: number,
+) {
+  const rows = await db
+    .select()
+    .from(featureMonths)
+    .where(
+      and(
+        eq(featureMonths.featureId, featureId),
+        eq(featureMonths.monthId, monthId),
+      ),
+    );
+  return rows[0] ?? null;
+}
+
+function normalizeCapacity(value: number): number {
+  const rounded = Math.round(value * 1_000_000) / 1_000_000;
+  return Math.abs(rounded) < 1e-9 ? 0 : rounded;
+}
+
+async function upsertFeatureMonthTotal(
+  db: typeof DbType,
+  featureId: number,
+  monthId: number,
+  totalCapacity: number,
+) {
+  const existing = await getFeatureMonthRow(db, featureId, monthId);
+  if (existing) {
+    await db
+      .update(featureMonths)
+      .set({ totalCapacity: normalizeCapacity(totalCapacity) })
+      .where(eq(featureMonths.id, existing.id));
+    return;
+  }
+
+  await db.insert(featureMonths).values({
+    featureId,
+    monthId,
+    totalCapacity: normalizeCapacity(totalCapacity),
+  });
+}
+
+async function buildFeatureMonthResult(
+  db: typeof DbType,
+  featureId: number,
+  monthId: number,
+): Promise<MonthAllocationResult> {
+  const fm = await getFeatureMonthRow(db, featureId, monthId);
+  const totalCapacity = fm?.totalCapacity ?? 0;
+
+  const allocs = await db
+    .select()
+    .from(memberMonthAllocations)
+    .where(
+      and(
+        eq(memberMonthAllocations.featureId, featureId),
+        eq(memberMonthAllocations.monthId, monthId),
+      ),
+    );
+
+  const assignedTotal = allocs.reduce((s, a) => s + a.capacity, 0);
+  return {
+    monthId,
+    totalCapacity,
+    unassignedCapacity: Math.max(0, totalCapacity - assignedTotal),
+    memberAllocations: allocs.map((a) => ({
+      memberId: a.memberId,
+      capacity: a.capacity,
+    })),
+  };
+}
+
+async function buildFeatureMonthsResult(
+  db: typeof DbType,
+  featureId: number,
+  monthIds: number[],
+) {
+  const results = await Promise.all(
+    monthIds.map((monthId) => buildFeatureMonthResult(db, featureId, monthId)),
+  );
+  return { months: results };
+}
+
+async function buildMemberAllocationUpdateResult(
+  db: typeof DbType,
+  featureId: number,
+  monthIds: number[],
+  affectedFeatureIds: Iterable<number>,
+) {
+  const updatedFeatures = [];
+  for (const affectedFeatureId of [...new Set(affectedFeatureIds)]) {
+    updatedFeatures.push({
+      featureId: affectedFeatureId,
+      months: await Promise.all(
+        monthIds.map((monthId) =>
+          buildFeatureMonthResult(db, affectedFeatureId, monthId),
+        ),
+      ),
+    });
+  }
+  const target =
+    updatedFeatures.find((f) => f.featureId === featureId) ??
+    (await buildFeatureMonthsResult(db, featureId, monthIds));
+
+  return {
+    months: target.months,
+    updatedFeatures,
+  };
+}
+
+async function updateSingleMonthTotal(
+  db: typeof DbType,
+  featureId: number,
+  monthId: number,
+  newTotal: number,
+) {
+  const existing = await getFeatureMonthRow(db, featureId, monthId);
+  const oldTotal = existing?.totalCapacity ?? 0;
+  await upsertFeatureMonthTotal(db, featureId, monthId, newTotal);
+
+  const currentAllocs = await db
+    .select()
+    .from(memberMonthAllocations)
+    .where(
+      and(
+        eq(memberMonthAllocations.featureId, featureId),
+        eq(memberMonthAllocations.monthId, monthId),
+      ),
+    );
+
+  for (const alloc of currentAllocs) {
+    const ratio = oldTotal > 0 ? alloc.capacity / oldTotal : 0;
+    const candidate = ratio * newTotal;
+    const usedElsewhere = await getMemberUsageInMonth(
+      db,
+      alloc.memberId,
+      monthId,
+      featureId,
+    );
+    const cap = Math.max(0, 1.0 - usedElsewhere);
+    const newValue = Math.min(candidate, cap);
+
+    await db
+      .update(memberMonthAllocations)
+      .set({ capacity: newValue })
+      .where(eq(memberMonthAllocations.id, alloc.id));
+  }
+}
+
+async function setMemberMonthAllocationCapacity(
+  db: typeof DbType,
+  {
+    featureId,
+    monthId,
+    memberId,
+    capacity,
+    keepZero,
+  }: {
+    featureId: number;
+    monthId: number;
+    memberId: number;
+    capacity: number;
+    keepZero: boolean;
+  },
+) {
+  const nextCapacity = normalizeCapacity(capacity);
+  const existing = await db
+    .select()
+    .from(memberMonthAllocations)
+    .where(
+      and(
+        eq(memberMonthAllocations.featureId, featureId),
+        eq(memberMonthAllocations.monthId, monthId),
+        eq(memberMonthAllocations.memberId, memberId),
+      ),
+    );
+
+  if (nextCapacity <= 0 && !keepZero) {
+    if (existing.length > 0) {
+      await db
+        .delete(memberMonthAllocations)
+        .where(eq(memberMonthAllocations.id, existing[0]!.id));
+    }
+    return;
+  }
+
+  if (existing.length > 0) {
+    await db
+      .update(memberMonthAllocations)
+      .set({ capacity: nextCapacity })
+      .where(eq(memberMonthAllocations.id, existing[0]!.id));
+  } else {
+    await db.insert(memberMonthAllocations).values({
+      featureId,
+      monthId,
+      memberId,
+      capacity: nextCapacity,
+    });
+  }
+}
+
+async function recalculateFeatureMonthTotal(
+  db: typeof DbType,
+  featureId: number,
+  monthId: number,
+) {
+  const updatedAllocs = await db
+    .select()
+    .from(memberMonthAllocations)
+    .where(
+      and(
+        eq(memberMonthAllocations.featureId, featureId),
+        eq(memberMonthAllocations.monthId, monthId),
+      ),
+    );
+  const newTotal = normalizeCapacity(
+    updatedAllocs.reduce((s, a) => s + a.capacity, 0),
+  );
+  await upsertFeatureMonthTotal(db, featureId, monthId, newTotal);
+}
+
+async function updateSingleMemberMonthAllocation(
+  db: typeof DbType,
+  featureId: number,
+  monthId: number,
+  memberId: number,
+  capacity: number,
+  capacityConflictResolution: z.infer<typeof capacityConflictResolutionSchema>,
+): Promise<Set<number>> {
+  const usedElsewhere = await getMemberUsageInMonth(
+    db,
+    memberId,
+    monthId,
+    featureId,
+  );
+  const cap = Math.max(0, 1.0 - usedElsewhere);
+  let nextCapacity =
+    capacityConflictResolution === "fitWithinLimit"
+      ? Math.min(capacity, cap)
+      : capacity;
+  const affectedFeatureIds = new Set<number>([featureId]);
+
+  if (
+    capacityConflictResolution === "rebalanceOthersProportionally" &&
+    capacity <= 1 &&
+    usedElsewhere > 0
+  ) {
+    const scale = Math.max(0, (1 - capacity) / usedElsewhere);
+    const otherAllocs = await db
+      .select()
+      .from(memberMonthAllocations)
+      .where(
+        and(
+          eq(memberMonthAllocations.memberId, memberId),
+          eq(memberMonthAllocations.monthId, monthId),
+          ne(memberMonthAllocations.featureId, featureId),
+        ),
+      );
+
+    for (const alloc of otherAllocs) {
+      affectedFeatureIds.add(alloc.featureId);
+      await setMemberMonthAllocationCapacity(db, {
+        featureId: alloc.featureId,
+        monthId,
+        memberId,
+        capacity: alloc.capacity * scale,
+        keepZero: true,
+      });
+    }
+  }
+
+  if (
+    capacityConflictResolution === "rebalanceOthersProportionally" &&
+    capacity > 1
+  ) {
+    nextCapacity = capacity;
+  }
+
+  await setMemberMonthAllocationCapacity(db, {
+    featureId,
+    monthId,
+    memberId,
+    capacity: nextCapacity,
+    keepZero: false,
+  });
+
+  for (const affectedFeatureId of affectedFeatureIds) {
+    await recalculateFeatureMonthTotal(db, affectedFeatureId, monthId);
+  }
+
+  return affectedFeatureIds;
+}
+
+function splitTotalAcrossMonths(
+  requestedTotal: number,
+  currentTotals: number[],
+): number[] {
+  const currentSum = currentTotals.reduce((s, v) => s + v, 0);
+  if (currentSum <= 0) {
+    const even = requestedTotal / currentTotals.length;
+    return currentTotals.map(() => even);
+  }
+  return currentTotals.map((v) => (v / currentSum) * requestedTotal);
+}
 
 // ---------------------------------------------------------------------------
 // Features
@@ -94,7 +495,7 @@ const membersDelete = o
 
 const quartersList = o
   .input(z.object({}))
-  .handler(async ({ context }) => context.db.select().from(quarters).all());
+  .handler(async ({ context }) => getQuarterRowsWithMonths(context.db));
 
 const quartersCreate = o
   .input(
@@ -108,7 +509,23 @@ const quartersCreate = o
       .insert(quarters)
       .values({ year: input.year, quarter: input.quarter })
       .returning();
-    return row;
+    if (!row) return row;
+
+    const monthRows = await context.db
+      .insert(months)
+      .values(
+        monthsInQuarter(input.quarter).map((month) => ({
+          year: input.year,
+          month,
+          quarterId: row.id,
+        })),
+      )
+      .returning();
+
+    return {
+      ...row,
+      months: monthRows.sort((a, b) => a.month - b.month),
+    };
   });
 
 const quartersDelete = o
@@ -117,192 +534,6 @@ const quartersDelete = o
     await context.db.delete(quarters).where(eq(quarters.id, input.id));
   });
 
-// ---------------------------------------------------------------------------
-// Allocation helpers
-// ---------------------------------------------------------------------------
-
-async function getMemberUsageInQuarter(
-  db: typeof DbType,
-  memberId: number,
-  quarterId: number,
-  excludeFeatureId: number,
-): Promise<number> {
-  const rows = await db
-    .select({ total: sql<number>`sum(${memberAllocations.capacity})` })
-    .from(memberAllocations)
-    .where(
-      and(
-        eq(memberAllocations.memberId, memberId),
-        eq(memberAllocations.quarterId, quarterId),
-        ne(memberAllocations.featureId, excludeFeatureId),
-      ),
-    );
-  return rows[0]?.total ?? 0;
-}
-
-async function getFeatureQuarterRow(
-  db: typeof DbType,
-  featureId: number,
-  quarterId: number,
-) {
-  const rows = await db
-    .select()
-    .from(featureQuarters)
-    .where(
-      and(
-        eq(featureQuarters.featureId, featureId),
-        eq(featureQuarters.quarterId, quarterId),
-      ),
-    );
-  return rows[0] ?? null;
-}
-
-function normalizeCapacity(value: number): number {
-  const rounded = Math.round(value * 1_000_000) / 1_000_000;
-  return Math.abs(rounded) < 1e-9 ? 0 : rounded;
-}
-
-async function setMemberAllocationCapacity(
-  db: typeof DbType,
-  {
-    featureId,
-    quarterId,
-    memberId,
-    capacity,
-    keepZero,
-  }: {
-    featureId: number;
-    quarterId: number;
-    memberId: number;
-    capacity: number;
-    keepZero: boolean;
-  },
-) {
-  const nextCapacity = normalizeCapacity(capacity);
-  const existing = await db
-    .select()
-    .from(memberAllocations)
-    .where(
-      and(
-        eq(memberAllocations.featureId, featureId),
-        eq(memberAllocations.quarterId, quarterId),
-        eq(memberAllocations.memberId, memberId),
-      ),
-    );
-
-  if (nextCapacity <= 0 && !keepZero) {
-    if (existing.length > 0) {
-      await db
-        .delete(memberAllocations)
-        .where(eq(memberAllocations.id, existing[0]!.id));
-    }
-    return;
-  }
-
-  if (existing.length > 0) {
-    await db
-      .update(memberAllocations)
-      .set({ capacity: nextCapacity })
-      .where(eq(memberAllocations.id, existing[0]!.id));
-  } else {
-    await db.insert(memberAllocations).values({
-      featureId,
-      quarterId,
-      memberId,
-      capacity: nextCapacity,
-    });
-  }
-}
-
-async function recalculateFeatureQuarterTotal(
-  db: typeof DbType,
-  featureId: number,
-  quarterId: number,
-) {
-  const allocs = await db
-    .select()
-    .from(memberAllocations)
-    .where(
-      and(
-        eq(memberAllocations.featureId, featureId),
-        eq(memberAllocations.quarterId, quarterId),
-      ),
-    );
-  const newTotal = normalizeCapacity(
-    allocs.reduce((s, a) => s + a.capacity, 0),
-  );
-  const existingFq = await getFeatureQuarterRow(db, featureId, quarterId);
-  if (existingFq) {
-    await db
-      .update(featureQuarters)
-      .set({ totalCapacity: newTotal })
-      .where(
-        and(
-          eq(featureQuarters.featureId, featureId),
-          eq(featureQuarters.quarterId, quarterId),
-        ),
-      );
-  } else if (newTotal > 0) {
-    await db
-      .insert(featureQuarters)
-      .values({ featureId, quarterId, totalCapacity: newTotal });
-  }
-}
-
-async function buildFeatureQuarterResult(
-  db: typeof DbType,
-  featureId: number,
-  quarterId: number,
-) {
-  const fq = await getFeatureQuarterRow(db, featureId, quarterId);
-  const totalCapacity = fq?.totalCapacity ?? 0;
-
-  const allocs = await db
-    .select()
-    .from(memberAllocations)
-    .where(
-      and(
-        eq(memberAllocations.featureId, featureId),
-        eq(memberAllocations.quarterId, quarterId),
-      ),
-    );
-
-  const assignedTotal = allocs.reduce((s, a) => s + a.capacity, 0);
-  return {
-    featureId,
-    quarterId,
-    totalCapacity,
-    unassignedCapacity: Math.max(0, totalCapacity - assignedTotal),
-    memberAllocations: allocs.map((a) => ({
-      memberId: a.memberId,
-      capacity: a.capacity,
-    })),
-  };
-}
-
-async function buildMemberAllocationUpdateResult(
-  db: typeof DbType,
-  featureId: number,
-  quarterId: number,
-  affectedFeatureIds: Iterable<number>,
-) {
-  const updatedQuarters = [];
-  for (const affectedFeatureId of [...new Set(affectedFeatureIds)]) {
-    updatedQuarters.push(
-      await buildFeatureQuarterResult(db, affectedFeatureId, quarterId),
-    );
-  }
-  const targetResult =
-    updatedQuarters.find((r) => r.featureId === featureId) ??
-    (await buildFeatureQuarterResult(db, featureId, quarterId));
-
-  return {
-    ...targetResult,
-    updatedQuarters,
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Allocations
 // ---------------------------------------------------------------------------
 
@@ -316,34 +547,41 @@ const allocationsGetFeatureView = o
       .where(eq(features.id, input.featureId));
     if (!feature) throw new Error("Feature not found");
 
-    const allQuarters = await db.select().from(quarters).all();
+    const allQuarters = await getQuarterRowsWithMonths(db);
     const allMembers = await db.select().from(members).all();
-    const fqRows = await db
+    const fmRows = await db
       .select()
-      .from(featureQuarters)
-      .where(eq(featureQuarters.featureId, input.featureId));
+      .from(featureMonths)
+      .where(eq(featureMonths.featureId, input.featureId));
     const maRows = await db
       .select()
-      .from(memberAllocations)
-      .where(eq(memberAllocations.featureId, input.featureId));
+      .from(memberMonthAllocations)
+      .where(eq(memberMonthAllocations.featureId, input.featureId));
 
-    const quarterData = allQuarters.map((q) => {
-      const fq = fqRows.find((r) => r.quarterId === q.id);
-      const total = fq?.totalCapacity ?? 0;
-      const qAllocs = maRows.filter((r) => r.quarterId === q.id);
-      const assignedTotal = qAllocs.reduce((s, a) => s + a.capacity, 0);
-      return {
-        quarter: q,
-        totalCapacity: total,
-        unassignedCapacity: Math.max(0, total - assignedTotal),
-        memberAllocations: allMembers
-          .map((m) => ({
-            member: m,
-            capacity: qAllocs.find((a) => a.memberId === m.id)?.capacity ?? 0,
-          }))
-          .filter((a) => qAllocs.some((rec) => rec.memberId === a.member.id)),
-      };
-    });
+    const quarterData = allQuarters.map((q) => ({
+      quarter: { id: q.id, year: q.year, quarter: q.quarter },
+      months: q.months.map((month) => {
+        const fm = fmRows.find((r) => r.monthId === month.id);
+        const total = fm?.totalCapacity ?? 0;
+        const monthAllocs = maRows.filter((r) => r.monthId === month.id);
+        const assignedTotal = monthAllocs.reduce((s, a) => s + a.capacity, 0);
+        return {
+          month,
+          totalCapacity: total,
+          unassignedCapacity: Math.max(0, total - assignedTotal),
+          memberAllocations: allMembers
+            .map((member) => ({
+              member,
+              capacity:
+                monthAllocs.find((a) => a.memberId === member.id)?.capacity ??
+                0,
+            }))
+            .filter((a) =>
+              monthAllocs.some((rec) => rec.memberId === a.member.id),
+            ),
+        };
+      }),
+    }));
 
     return { feature, quarters: quarterData };
   });
@@ -358,27 +596,32 @@ const allocationsGetMemberView = o
       .where(eq(members.id, input.memberId));
     if (!member) throw new Error("Member not found");
 
-    const allQuarters = await db.select().from(quarters).all();
+    const allQuarters = await getQuarterRowsWithMonths(db);
     const allFeatures = await db.select().from(features).all();
     const maRows = await db
       .select()
-      .from(memberAllocations)
-      .where(eq(memberAllocations.memberId, input.memberId));
+      .from(memberMonthAllocations)
+      .where(eq(memberMonthAllocations.memberId, input.memberId));
 
-    const quarterData = allQuarters.map((q) => {
-      const qAllocs = maRows.filter((r) => r.quarterId === q.id);
-      const qTotal = qAllocs.reduce((s, a) => s + a.capacity, 0);
-      return {
-        quarter: q,
-        totalCapacity: qTotal,
-        featureAllocations: allFeatures
-          .map((f) => ({
-            feature: f,
-            capacity: qAllocs.find((a) => a.featureId === f.id)?.capacity ?? 0,
-          }))
-          .filter((a) => qAllocs.some((rec) => rec.featureId === a.feature.id)),
-      };
-    });
+    const quarterData = allQuarters.map((q) => ({
+      quarter: { id: q.id, year: q.year, quarter: q.quarter },
+      months: q.months.map((month) => {
+        const monthAllocs = maRows.filter((r) => r.monthId === month.id);
+        const monthTotal = monthAllocs.reduce((s, a) => s + a.capacity, 0);
+        return {
+          month,
+          totalCapacity: monthTotal,
+          featureAllocations: allFeatures
+            .map((feature) => ({
+              feature,
+              capacity:
+                monthAllocs.find((a) => a.featureId === feature.id)?.capacity ??
+                0,
+            }))
+            .filter((a) => a.capacity > 0),
+        };
+      }),
+    }));
 
     return { member, quarters: quarterData };
   });
@@ -393,22 +636,25 @@ const allocationsAssignMember = o
   .handler(async ({ input, context }) => {
     const { db } = context;
     const { featureId, memberId } = input;
-    const allQuarters = await db.select().from(quarters).all();
-    for (const q of allQuarters) {
+    const allMonths = await db.select().from(months).all();
+    for (const month of allMonths) {
       const existing = await db
         .select()
-        .from(memberAllocations)
+        .from(memberMonthAllocations)
         .where(
           and(
-            eq(memberAllocations.featureId, featureId),
-            eq(memberAllocations.quarterId, q.id),
-            eq(memberAllocations.memberId, memberId),
+            eq(memberMonthAllocations.featureId, featureId),
+            eq(memberMonthAllocations.monthId, month.id),
+            eq(memberMonthAllocations.memberId, memberId),
           ),
         );
       if (existing.length === 0) {
-        await db
-          .insert(memberAllocations)
-          .values({ featureId, quarterId: q.id, memberId, capacity: 0 });
+        await db.insert(memberMonthAllocations).values({
+          featureId,
+          monthId: month.id,
+          memberId,
+          capacity: 0,
+        });
       }
     }
   });
@@ -426,49 +672,38 @@ const allocationsRemoveMemberFromFeature = o
 
     const toRemove = await db
       .select()
-      .from(memberAllocations)
+      .from(memberMonthAllocations)
       .where(
         and(
-          eq(memberAllocations.featureId, featureId),
-          eq(memberAllocations.memberId, memberId),
+          eq(memberMonthAllocations.featureId, featureId),
+          eq(memberMonthAllocations.memberId, memberId),
         ),
       );
 
     if (toRemove.length === 0) return;
 
     await db
-      .delete(memberAllocations)
+      .delete(memberMonthAllocations)
       .where(
         and(
-          eq(memberAllocations.featureId, featureId),
-          eq(memberAllocations.memberId, memberId),
+          eq(memberMonthAllocations.featureId, featureId),
+          eq(memberMonthAllocations.memberId, memberId),
         ),
       );
 
-    const affectedQuarterIds = [...new Set(toRemove.map((r) => r.quarterId))];
-    for (const quarterId of affectedQuarterIds) {
+    const affectedMonthIds = [...new Set(toRemove.map((r) => r.monthId))];
+    for (const monthId of affectedMonthIds) {
       const remaining = await db
         .select()
-        .from(memberAllocations)
+        .from(memberMonthAllocations)
         .where(
           and(
-            eq(memberAllocations.featureId, featureId),
-            eq(memberAllocations.quarterId, quarterId),
+            eq(memberMonthAllocations.featureId, featureId),
+            eq(memberMonthAllocations.monthId, monthId),
           ),
         );
       const newTotal = remaining.reduce((s, a) => s + a.capacity, 0);
-      const existingFq = await getFeatureQuarterRow(db, featureId, quarterId);
-      if (existingFq) {
-        await db
-          .update(featureQuarters)
-          .set({ totalCapacity: newTotal })
-          .where(
-            and(
-              eq(featureQuarters.featureId, featureId),
-              eq(featureQuarters.quarterId, quarterId),
-            ),
-          );
-      }
+      await upsertFeatureMonthTotal(db, featureId, monthId, newTotal);
     }
   });
 
@@ -476,93 +711,100 @@ const allocationsUpdateTotal = o
   .input(
     z.object({
       featureId: z.number().int(),
-      quarterId: z.number().int(),
       totalCapacity: z.number().min(0),
+      ...periodInput,
     }),
   )
   .handler(async ({ input, context }) => {
     const { db } = context;
-    const { featureId, quarterId, totalCapacity: newTotal } = input;
+    const monthRows = await getTargetMonthRows(db, input);
+    const currentTotals = await Promise.all(
+      monthRows.map(async (month) => {
+        const fm = await getFeatureMonthRow(db, input.featureId, month.id);
+        return fm?.totalCapacity ?? 0;
+      }),
+    );
+    const newMonthTotals =
+      input.periodType === "month"
+        ? [input.totalCapacity]
+        : splitTotalAcrossMonths(input.totalCapacity, currentTotals);
 
-    // Upsert feature_quarters
-    const existing = await getFeatureQuarterRow(db, featureId, quarterId);
-    const oldTotal = existing?.totalCapacity ?? 0;
-
-    if (existing) {
-      await db
-        .update(featureQuarters)
-        .set({ totalCapacity: newTotal })
-        .where(
-          and(
-            eq(featureQuarters.featureId, featureId),
-            eq(featureQuarters.quarterId, quarterId),
-          ),
-        );
-    } else {
-      await db
-        .insert(featureQuarters)
-        .values({ featureId, quarterId, totalCapacity: newTotal });
-    }
-
-    // Proportionally redistribute member allocations
-    const currentAllocs = await db
-      .select()
-      .from(memberAllocations)
-      .where(
-        and(
-          eq(memberAllocations.featureId, featureId),
-          eq(memberAllocations.quarterId, quarterId),
-        ),
-      );
-
-    for (const alloc of currentAllocs) {
-      const ratio = oldTotal > 0 ? alloc.capacity / oldTotal : 0;
-      const candidate = ratio * newTotal;
-
-      // Cap by member×quarter limit (1.0 across all features)
-      const usedElsewhere = await getMemberUsageInQuarter(
+    for (const [index, month] of monthRows.entries()) {
+      await updateSingleMonthTotal(
         db,
-        alloc.memberId,
-        quarterId,
-        featureId,
+        input.featureId,
+        month.id,
+        newMonthTotals[index] ?? 0,
       );
-      const cap = Math.max(0, 1.0 - usedElsewhere);
-      const newValue = Math.min(candidate, cap);
-
-      if (newValue <= 0) {
-        await db
-          .delete(memberAllocations)
-          .where(eq(memberAllocations.id, alloc.id));
-      } else {
-        await db
-          .update(memberAllocations)
-          .set({ capacity: newValue })
-          .where(eq(memberAllocations.id, alloc.id));
-      }
     }
 
-    return buildFeatureQuarterResult(db, featureId, quarterId);
+    return buildFeatureMonthsResult(
+      db,
+      input.featureId,
+      monthRows.map((month) => month.id),
+    );
   });
 
 const allocationsPreviewMemberAllocation = o
   .input(
     z.object({
       featureId: z.number().int(),
-      quarterId: z.number().int(),
       memberId: z.number().int(),
+      capacity: z.number().min(0),
+      ...periodInput,
     }),
   )
   .handler(async ({ input, context }) => {
-    const usedElsewhere = await getMemberUsageInQuarter(
-      context.db,
-      input.memberId,
-      input.quarterId,
-      input.featureId,
+    const monthRows = await getTargetMonthRows(context.db, input);
+    const currentCapacities = await Promise.all(
+      monthRows.map(async (month) => {
+        const [row] = await context.db
+          .select()
+          .from(memberMonthAllocations)
+          .where(
+            and(
+              eq(memberMonthAllocations.featureId, input.featureId),
+              eq(memberMonthAllocations.monthId, month.id),
+              eq(memberMonthAllocations.memberId, input.memberId),
+            ),
+          );
+        return row?.capacity ?? 0;
+      }),
+    );
+    const requestedCapacities =
+      input.periodType === "month"
+        ? [input.capacity]
+        : splitTotalAcrossMonths(input.capacity, currentCapacities);
+    const monthPreviews = await Promise.all(
+      monthRows.map(async (month, index) => {
+        const usedElsewhere = await getMemberUsageInMonth(
+          context.db,
+          input.memberId,
+          month.id,
+          input.featureId,
+        );
+        const requestedCapacity = requestedCapacities[index] ?? 0;
+        return {
+          usedElsewhere,
+          assignableCapacity: Math.max(0, 1 - usedElsewhere),
+          hasConflict:
+            requestedCapacity <= 1 &&
+            usedElsewhere + requestedCapacity > 1.000001,
+        };
+      }),
     );
 
     return {
-      usedElsewhere: normalizeCapacity(usedElsewhere),
-      assignableCapacity: normalizeCapacity(Math.max(0, 1 - usedElsewhere)),
+      usedElsewhere: normalizeCapacity(
+        monthPreviews.reduce((sum, preview) => sum + preview.usedElsewhere, 0),
+      ),
+      assignableCapacity: normalizeCapacity(
+        monthPreviews.reduce(
+          (sum, preview) => sum + preview.assignableCapacity,
+          0,
+        ),
+      ),
+      hasConflict: monthPreviews.some((preview) => preview.hasConflict),
     };
   });
 
@@ -570,9 +812,9 @@ const allocationsUpdateMemberAllocation = o
   .input(
     z.object({
       featureId: z.number().int(),
-      quarterId: z.number().int(),
       memberId: z.number().int(),
       capacity: z.number().min(0),
+      ...periodInput,
       capacityConflictResolution: capacityConflictResolutionSchema
         .optional()
         .default("fitWithinLimit"),
@@ -580,79 +822,44 @@ const allocationsUpdateMemberAllocation = o
   )
   .handler(async ({ input, context }) => {
     const { db } = context;
-    const {
-      featureId,
-      quarterId,
-      memberId,
-      capacity,
-      capacityConflictResolution,
-    } = input;
-
-    const usedElsewhere = await getMemberUsageInQuarter(
-      db,
-      memberId,
-      quarterId,
-      featureId,
+    const monthRows = await getTargetMonthRows(db, input);
+    const currentCapacities = await Promise.all(
+      monthRows.map(async (month) => {
+        const [row] = await db
+          .select()
+          .from(memberMonthAllocations)
+          .where(
+            and(
+              eq(memberMonthAllocations.featureId, input.featureId),
+              eq(memberMonthAllocations.monthId, month.id),
+              eq(memberMonthAllocations.memberId, input.memberId),
+            ),
+          );
+        return row?.capacity ?? 0;
+      }),
     );
-    const cap = Math.max(0, 1.0 - usedElsewhere);
-    let nextCapacity =
-      capacityConflictResolution === "fitWithinLimit"
-        ? Math.min(capacity, cap)
-        : capacity;
-    const affectedFeatureIds = new Set<number>([featureId]);
+    const newMonthCapacities =
+      input.periodType === "month"
+        ? [input.capacity]
+        : splitTotalAcrossMonths(input.capacity, currentCapacities);
 
-    if (
-      capacityConflictResolution === "rebalanceOthersProportionally" &&
-      capacity <= 1 &&
-      usedElsewhere > 0
-    ) {
-      const scale = Math.max(0, (1 - capacity) / usedElsewhere);
-      const otherAllocs = await db
-        .select()
-        .from(memberAllocations)
-        .where(
-          and(
-            eq(memberAllocations.memberId, memberId),
-            eq(memberAllocations.quarterId, quarterId),
-            ne(memberAllocations.featureId, featureId),
-          ),
-        );
-
-      for (const alloc of otherAllocs) {
-        affectedFeatureIds.add(alloc.featureId);
-        await setMemberAllocationCapacity(db, {
-          featureId: alloc.featureId,
-          quarterId,
-          memberId,
-          capacity: alloc.capacity * scale,
-          keepZero: true,
-        });
-      }
-    }
-
-    if (
-      capacityConflictResolution === "rebalanceOthersProportionally" &&
-      capacity > 1
-    ) {
-      nextCapacity = capacity;
-    }
-
-    await setMemberAllocationCapacity(db, {
-      featureId,
-      quarterId,
-      memberId,
-      capacity: nextCapacity,
-      keepZero: false,
-    });
-
-    for (const affectedFeatureId of affectedFeatureIds) {
-      await recalculateFeatureQuarterTotal(db, affectedFeatureId, quarterId);
+    const affectedFeatureIds = new Set<number>([input.featureId]);
+    for (const [index, month] of monthRows.entries()) {
+      const affected = await updateSingleMemberMonthAllocation(
+        db,
+        input.featureId,
+        month.id,
+        input.memberId,
+        newMonthCapacities[index] ?? 0,
+        input.capacityConflictResolution,
+      );
+      for (const featureId of affected) affectedFeatureIds.add(featureId);
     }
 
     return buildMemberAllocationUpdateResult(
       db,
-      featureId,
-      quarterId,
+      input.featureId,
+      monthRows.map((month) => month.id),
       affectedFeatureIds,
     );
   });
@@ -668,99 +875,91 @@ const allocationsMoveQuarter = o
   .handler(async ({ input, context }) => {
     const { db } = context;
     const { featureId, fromQuarterId, toQuarterId } = input;
+    const fromMonths = await getQuarterMonthRows(db, fromQuarterId);
+    const toMonths = await getQuarterMonthRows(db, toQuarterId);
+    if (fromMonths.length === 0 || toMonths.length === 0) return;
 
-    const fromFq = await getFeatureQuarterRow(db, featureId, fromQuarterId);
-    if (!fromFq) return;
+    for (const [index, fromMonth] of fromMonths.entries()) {
+      const toMonth = toMonths[index];
+      if (!toMonth) continue;
 
-    // Upsert destination feature_quarters
-    const toFq = await getFeatureQuarterRow(db, featureId, toQuarterId);
-    const newTotal = (toFq?.totalCapacity ?? 0) + fromFq.totalCapacity;
-
-    if (toFq) {
-      await db
-        .update(featureQuarters)
-        .set({ totalCapacity: newTotal })
-        .where(
-          and(
-            eq(featureQuarters.featureId, featureId),
-            eq(featureQuarters.quarterId, toQuarterId),
-          ),
-        );
-    } else {
-      await db.insert(featureQuarters).values({
-        featureId,
-        quarterId: toQuarterId,
-        totalCapacity: newTotal,
-      });
-    }
-
-    // Move member allocations
-    const fromAllocs = await db
-      .select()
-      .from(memberAllocations)
-      .where(
-        and(
-          eq(memberAllocations.featureId, featureId),
-          eq(memberAllocations.quarterId, fromQuarterId),
-        ),
-      );
-
-    for (const alloc of fromAllocs) {
-      const toExisting = await db
-        .select()
-        .from(memberAllocations)
-        .where(
-          and(
-            eq(memberAllocations.featureId, featureId),
-            eq(memberAllocations.quarterId, toQuarterId),
-            eq(memberAllocations.memberId, alloc.memberId),
-          ),
-        );
-
-      const usedElsewhere = await getMemberUsageInQuarter(
-        db,
-        alloc.memberId,
-        toQuarterId,
-        featureId,
-      );
-      const cap = Math.max(0, 1.0 - usedElsewhere);
-      const merged = Math.min(
-        (toExisting[0]?.capacity ?? 0) + alloc.capacity,
-        cap,
-      );
-
-      if (toExisting.length > 0) {
-        await db
-          .update(memberAllocations)
-          .set({ capacity: merged })
-          .where(eq(memberAllocations.id, toExisting[0]!.id));
-      } else {
-        await db.insert(memberAllocations).values({
+      const fromFm = await getFeatureMonthRow(db, featureId, fromMonth.id);
+      if (fromFm) {
+        const toFm = await getFeatureMonthRow(db, featureId, toMonth.id);
+        await upsertFeatureMonthTotal(
+          db,
           featureId,
-          quarterId: toQuarterId,
-          memberId: alloc.memberId,
-          capacity: merged,
-        });
+          toMonth.id,
+          (toFm?.totalCapacity ?? 0) + fromFm.totalCapacity,
+        );
       }
-    }
 
-    // Remove source
-    await db
-      .delete(memberAllocations)
-      .where(
-        and(
-          eq(memberAllocations.featureId, featureId),
-          eq(memberAllocations.quarterId, fromQuarterId),
-        ),
-      );
-    await db
-      .delete(featureQuarters)
-      .where(
-        and(
-          eq(featureQuarters.featureId, featureId),
-          eq(featureQuarters.quarterId, fromQuarterId),
-        ),
-      );
+      const fromAllocs = await db
+        .select()
+        .from(memberMonthAllocations)
+        .where(
+          and(
+            eq(memberMonthAllocations.featureId, featureId),
+            eq(memberMonthAllocations.monthId, fromMonth.id),
+          ),
+        );
+
+      for (const alloc of fromAllocs) {
+        const [toExisting] = await db
+          .select()
+          .from(memberMonthAllocations)
+          .where(
+            and(
+              eq(memberMonthAllocations.featureId, featureId),
+              eq(memberMonthAllocations.monthId, toMonth.id),
+              eq(memberMonthAllocations.memberId, alloc.memberId),
+            ),
+          );
+
+        const usedElsewhere = await getMemberUsageInMonth(
+          db,
+          alloc.memberId,
+          toMonth.id,
+          featureId,
+        );
+        const cap = Math.max(0, 1.0 - usedElsewhere);
+        const merged = Math.min(
+          (toExisting?.capacity ?? 0) + alloc.capacity,
+          cap,
+        );
+
+        if (toExisting) {
+          await db
+            .update(memberMonthAllocations)
+            .set({ capacity: merged })
+            .where(eq(memberMonthAllocations.id, toExisting.id));
+        } else {
+          await db.insert(memberMonthAllocations).values({
+            featureId,
+            monthId: toMonth.id,
+            memberId: alloc.memberId,
+            capacity: merged,
+          });
+        }
+      }
+
+      await db
+        .delete(memberMonthAllocations)
+        .where(
+          and(
+            eq(memberMonthAllocations.featureId, featureId),
+            eq(memberMonthAllocations.monthId, fromMonth.id),
+          ),
+        );
+      await db
+        .delete(featureMonths)
+        .where(
+          and(
+            eq(featureMonths.featureId, featureId),
+            eq(featureMonths.monthId, fromMonth.id),
+          ),
+        );
+    }
   });
 
 // ---------------------------------------------------------------------------
@@ -770,25 +969,23 @@ const allocationsMoveQuarter = o
 const exportFeatureCSV = o.input(z.object({})).handler(async ({ context }) => {
   const { db } = context;
   const allFeatures = await db.select().from(features).all();
-  const allQuarters = await db
-    .select()
-    .from(quarters)
-    .orderBy(quarters.year, quarters.quarter)
-    .all();
-  const fqRows = await db.select().from(featureQuarters).all();
+  const allQuarters = await getQuarterRowsWithMonths(db);
+  const fmRows = await db.select().from(featureMonths).all();
 
   const header = [
     "機能",
     ...allQuarters.map((q) => `${q.year}-Q${q.quarter}`),
   ].join(",");
-  const rows = allFeatures.map((f) => {
-    const cells = allQuarters.map((q) => {
-      const fq = fqRows.find(
-        (r) => r.featureId === f.id && r.quarterId === q.id,
-      );
-      return fq?.totalCapacity ?? 0;
-    });
-    return [f.name, ...cells].join(",");
+  const rows = allFeatures.map((feature) => {
+    const cells = allQuarters.map((quarter) =>
+      quarter.months.reduce((sum, month) => {
+        const fm = fmRows.find(
+          (r) => r.featureId === feature.id && r.monthId === month.id,
+        );
+        return sum + (fm?.totalCapacity ?? 0);
+      }, 0),
+    );
+    return [feature.name, ...cells].join(",");
   });
 
   return [header, ...rows].join("\n");
@@ -797,30 +994,29 @@ const exportFeatureCSV = o.input(z.object({})).handler(async ({ context }) => {
 const exportMemberCSV = o.input(z.object({})).handler(async ({ context }) => {
   const { db } = context;
   const allMembers = await db.select().from(members).all();
-  const allQuarters = await db
-    .select()
-    .from(quarters)
-    .orderBy(quarters.year, quarters.quarter)
-    .all();
+  const allQuarters = await getQuarterRowsWithMonths(db);
   const allFeatures = await db.select().from(features).all();
-  const maRows = await db.select().from(memberAllocations).all();
+  const maRows = await db.select().from(memberMonthAllocations).all();
 
-  // Header: 担当者, 機能, Q1, Q2, ...
   const qHeaders = allQuarters.map((q) => `${q.year}-Q${q.quarter}`);
   const header = ["担当者", "機能", ...qHeaders].join(",");
 
   const rows: string[] = [];
-  for (const m of allMembers) {
-    for (const f of allFeatures) {
-      const cells = allQuarters.map((q) => {
-        const alloc = maRows.find(
-          (r) =>
-            r.memberId === m.id && r.featureId === f.id && r.quarterId === q.id,
-        );
-        return alloc?.capacity ?? 0;
-      });
+  for (const member of allMembers) {
+    for (const feature of allFeatures) {
+      const cells = allQuarters.map((quarter) =>
+        quarter.months.reduce((sum, month) => {
+          const alloc = maRows.find(
+            (r) =>
+              r.memberId === member.id &&
+              r.featureId === feature.id &&
+              r.monthId === month.id,
+          );
+          return sum + (alloc?.capacity ?? 0);
+        }, 0),
+      );
       if (cells.some((c) => c > 0)) {
-        rows.push([m.name, f.name, ...cells].join(","));
+        rows.push([member.name, feature.name, ...cells].join(","));
       }
     }
   }
@@ -832,39 +1028,35 @@ const exportAllocationCSV = o
   .input(z.object({}))
   .handler(async ({ context }) => {
     const { db } = context;
-    const allQuarters = await db
+    const allMonths = await db
       .select()
-      .from(quarters)
-      .orderBy(quarters.year, quarters.quarter)
+      .from(months)
+      .orderBy(months.year, months.month)
       .all();
     const allFeatures = await db.select().from(features).all();
     const allMembers = await db.select().from(members).all();
-    const maRows = await db.select().from(memberAllocations).all();
+    const maRows = await db.select().from(memberMonthAllocations).all();
 
     const featureById = new Map(allFeatures.map((f) => [f.id, f.name]));
     const memberById = new Map(allMembers.map((m) => [m.id, m.name]));
-    const quarterById = new Map(allQuarters.map((q) => [q.id, q]));
+    const monthById = new Map(allMonths.map((m) => [m.id, m]));
 
-    const monthsInQuarter = (year: number, quarter: number): string[] => {
-      const startMonth = (quarter - 1) * 3 + 1;
-      return Array.from({ length: 3 }, (_, i) => {
-        const month = startMonth + i;
-        return `${year}-${String(month).padStart(2, "0")}`;
-      });
-    };
-
-    // Header: 機能, 担当者, キャパシティ, 月
     const header = ["機能", "担当者", "キャパシティ", "月"].join(",");
     const rows = maRows
       .filter((r) => r.capacity > 0)
       .flatMap((r) => {
         const featureName = featureById.get(r.featureId) ?? "";
         const memberName = memberById.get(r.memberId) ?? "";
-        const q = quarterById.get(r.quarterId);
-        if (!q) return [];
-        return monthsInQuarter(q.year, q.quarter).map((month) =>
-          [featureName, memberName, r.capacity, month].join(","),
-        );
+        const month = monthById.get(r.monthId);
+        if (!month) return [];
+        return [
+          [
+            featureName,
+            memberName,
+            r.capacity,
+            monthLabel(month.year, month.month),
+          ].join(","),
+        ];
       });
 
     return [header, ...rows].join("\n");

@@ -14,7 +14,7 @@ import { orpc } from "./orpc-client";
 type ViewMode = "quarter" | "month";
 type Month = { id: number; year: number; month: number; quarterId: number };
 type Quarter = { id: number; year: number; quarter: number; months: Month[] };
-type Member = { id: number; name: string };
+type Member = { id: number; name: string; maxCapacity: number | null };
 
 type MemberMonthData = {
   totalCapacity: number;
@@ -28,6 +28,7 @@ type MemberMonthData = {
 type MemberRow = {
   id: number;
   name: string;
+  maxCapacity: number | null;
   expanded: boolean;
   months: Map<number, MemberMonthData>;
 };
@@ -132,8 +133,10 @@ function columnsForMode(
   );
 }
 
-function columnMemberLimit(column: PeriodColumn): number {
-  return column.type === "quarter" ? column.monthIds.length : 1;
+function columnMemberLimit(column: PeriodColumn, maxCapacity: number): number {
+  return column.type === "quarter"
+    ? column.monthIds.length * maxCapacity
+    : maxCapacity;
 }
 
 // ── Sub-components ──────────────────────────────────────────────────────────
@@ -282,6 +285,116 @@ function MemberNameCell({
   );
 }
 
+function MaxCapacityCell({
+  member,
+  onSetMaxCapacity,
+}: {
+  member: Member;
+  onSetMaxCapacity: (id: number, maxCapacity: number | null) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const committingRef = useRef(false);
+
+  const displayValue =
+    member.maxCapacity != null ? fmt(member.maxCapacity) : "–";
+
+  const startEdit = () => {
+    setVal(member.maxCapacity != null ? fmt(member.maxCapacity) : "");
+    setError(null);
+    setEditing(true);
+    setTimeout(() => {
+      inputRef.current?.select();
+    }, 20);
+  };
+
+  const cancelEdit = () => {
+    setError(null);
+    setEditing(false);
+  };
+
+  const commit = async () => {
+    if (committingRef.current) return;
+    const trimmed = val.trim();
+    const nextValue = trimmed === "" ? null : Number(trimmed);
+    if (
+      nextValue !== null &&
+      (Number.isNaN(nextValue) || nextValue <= 0 || nextValue > 1)
+    ) {
+      setError("0より大きく1以下の値を入力してください");
+      return;
+    }
+    if (nextValue === member.maxCapacity) {
+      cancelEdit();
+      return;
+    }
+    committingRef.current = true;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSetMaxCapacity(member.id, nextValue);
+      setEditing(false);
+    } catch {
+      setError("保存できませんでした。");
+    } finally {
+      committingRef.current = false;
+      setSaving(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        <input
+          ref={inputRef}
+          className="feature-name-input"
+          style={{ width: 64, textAlign: "right" }}
+          type="number"
+          min="0.001"
+          max="1"
+          step="0.05"
+          placeholder="1.0"
+          value={val}
+          disabled={saving}
+          aria-invalid={error ? true : undefined}
+          onChange={(e) => {
+            setVal(e.target.value);
+            setError(null);
+          }}
+          onBlur={() => void commit()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void commit();
+            }
+            if (e.key === "Escape") cancelEdit();
+          }}
+        />
+        {error && (
+          <span className="name-warning" role="alert" style={{ fontSize: 10 }}>
+            {error}
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className="feature-name"
+      style={{ minWidth: 40, textAlign: "right" }}
+      onClick={startEdit}
+      title="クリックでMax Capacityを編集（空白でリセット）"
+    >
+      {displayValue}
+    </button>
+  );
+}
+
 // ── Main component ──────────────────────────────────────────────────────────
 
 const COL_W = 148;
@@ -334,9 +447,11 @@ export function MembersView() {
             });
           }
         }
+        const memberInfo = ms.find((m) => m.id === mv.member.id);
         return {
           id: mv.member.id,
           name: mv.member.name,
+          maxCapacity: memberInfo?.maxCapacity ?? null,
           expanded: false,
           months: monthMap,
         };
@@ -378,7 +493,13 @@ export function MembersView() {
       if (!m) return;
       setMemberRows((rows) => [
         ...rows,
-        { id: m.id, name: m.name, expanded: false, months: new Map() },
+        {
+          id: m.id,
+          name: m.name,
+          maxCapacity: m.maxCapacity ?? null,
+          expanded: false,
+          months: new Map(),
+        },
       ]);
     } catch (error) {
       const message = getNameErrorMessage(error);
@@ -407,6 +528,16 @@ export function MembersView() {
       setBusy(false);
     }
   }, []);
+
+  const setMaxCapacity = useCallback(
+    async (id: number, maxCapacity: number | null) => {
+      await orpc.members.setMaxCapacity({ id, maxCapacity });
+      setMemberRows((rows) =>
+        rows.map((r) => (r.id === id ? { ...r, maxCapacity } : r)),
+      );
+    },
+    [],
+  );
 
   const addQuarter = async () => {
     setBusy(true);
@@ -508,6 +639,13 @@ export function MembersView() {
             <thead>
               <tr>
                 <th className="th-label">Member</th>
+                <th
+                  className="th-quarter"
+                  style={{ width: 80, minWidth: 80, textAlign: "right" }}
+                  title="月あたりの最大キャパシティ（未設定時は1.0）"
+                >
+                  Max Cap
+                </th>
                 {columns.map((column) => (
                   <th
                     key={column.key}
@@ -531,6 +669,7 @@ export function MembersView() {
                   );
                 }
 
+                const memberMaxCap = member.maxCapacity ?? 1;
                 rows.push(
                   <tr key={member.id} className="tr-feature">
                     <td className="td-label">
@@ -550,11 +689,19 @@ export function MembersView() {
                         />
                       </div>
                     </td>
+                    <td
+                      className="td-quarter"
+                      style={{ width: 80, minWidth: 80, padding: "0 8px" }}
+                    >
+                      <MaxCapacityCell
+                        member={member}
+                        onSetMaxCapacity={setMaxCapacity}
+                      />
+                    </td>
                     {columns.map((column) => {
                       const data = getColumnData(member, column);
-                      const cellOv =
-                        data.totalCapacity >
-                        columnMemberLimit(column) + 0.000001;
+                      const limit = columnMemberLimit(column, memberMaxCap);
+                      const cellOv = data.totalCapacity > limit + 0.000001;
                       return (
                         <td
                           key={column.key}
@@ -563,7 +710,7 @@ export function MembersView() {
                         >
                           <ReadonlyHeatmapCell
                             value={data.totalCapacity}
-                            maxVal={columnMemberLimit(column)}
+                            maxVal={limit}
                             rowHeight={42}
                             isOverflow={cellOv}
                           />
@@ -586,7 +733,7 @@ export function MembersView() {
                       <tr key={`${member.id}-empty`} className="tr-member">
                         <td
                           className="td-label td-member-label"
-                          colSpan={columns.length + 1}
+                          colSpan={columns.length + 2}
                           style={{
                             color: "var(--cv-text-3)",
                             fontStyle: "italic",
@@ -607,19 +754,20 @@ export function MembersView() {
                           <td className="td-label td-member-label">
                             <span className="member-name">{featureName}</span>
                           </td>
+                          <td style={{ width: 80, minWidth: 80 }} />
                           {columns.map((column) => {
                             const data = getColumnData(member, column);
                             const fa = data.featureAllocations.find(
                               (a) => a.featureId === featureId,
                             );
                             const value = fa?.capacity ?? 0;
-                            const cellOv =
-                              data.totalCapacity >
-                              columnMemberLimit(column) + 0.000001;
-                            const { bg, fg } = heatBg(
-                              value,
-                              columnMemberLimit(column),
+                            const limit = columnMemberLimit(
+                              column,
+                              memberMaxCap,
                             );
+                            const cellOv =
+                              data.totalCapacity > limit + 0.000001;
+                            const { bg, fg } = heatBg(value, limit);
                             return (
                               <td
                                 key={column.key}

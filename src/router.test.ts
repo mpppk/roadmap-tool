@@ -38,9 +38,11 @@ function createTestDb() {
     CREATE TABLE members (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
+      max_capacity REAL,
       created_at INTEGER NOT NULL,
       CONSTRAINT members_name_trimmed_check CHECK (name = trim(name)),
-      CONSTRAINT members_name_not_empty_check CHECK (length(name) > 0)
+      CONSTRAINT members_name_not_empty_check CHECK (length(name) > 0),
+      CONSTRAINT members_max_capacity_check CHECK (max_capacity IS NULL OR (max_capacity > 0 AND max_capacity <= 1))
     );
     CREATE UNIQUE INDEX members_name_trim_unique ON members (trim(name));
 

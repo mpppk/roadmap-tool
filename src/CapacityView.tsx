@@ -814,9 +814,10 @@ export function CapacityView() {
           const usedElsewhere = featureRows
             .filter((row) => row.id !== featureId)
             .reduce((sum, row) => {
-              const alloc = getColumnData(row, column).memberAllocations.find(
-                (a) => a.memberId === memberId,
-              );
+              const alloc = aggregateMonthData(
+                row.months,
+                column.monthIds,
+              ).memberAllocations.find((a) => a.memberId === memberId);
               return sum + (alloc?.capacity ?? 0);
             }, 0);
           setMaxCapacityOverflow({

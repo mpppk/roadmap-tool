@@ -36,9 +36,11 @@ function createTestDb() {
     CREATE TABLE members (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
+      max_capacity REAL,
       created_at INTEGER NOT NULL,
       CONSTRAINT members_name_trimmed_check CHECK (name = trim(name)),
-      CONSTRAINT members_name_not_empty_check CHECK (length(name) > 0)
+      CONSTRAINT members_name_not_empty_check CHECK (length(name) > 0),
+      CONSTRAINT members_max_capacity_check CHECK (max_capacity IS NULL OR (max_capacity > 0 AND max_capacity <= 1))
     );
     CREATE UNIQUE INDEX members_name_trim_unique ON members (trim(name));
 
@@ -196,6 +198,47 @@ describe("DB schema", () => {
       state.sqlite
         .prepare("INSERT INTO members (name, created_at) VALUES (?, ?)")
         .run(" Alice ", now);
+    }, "SQLITE_CONSTRAINT_CHECK");
+  });
+
+  test("members max_capacity: accepts null, valid fractions, and rejects invalid values", () => {
+    const now = Date.now();
+    state.sqlite
+      .prepare("INSERT INTO members (name, created_at) VALUES (?, ?)")
+      .run("Alice", now);
+    state.sqlite
+      .prepare(
+        "INSERT INTO members (name, max_capacity, created_at) VALUES (?, ?, ?)",
+      )
+      .run("Bob", 0.8, now);
+    state.sqlite
+      .prepare(
+        "INSERT INTO members (name, max_capacity, created_at) VALUES (?, ?, ?)",
+      )
+      .run("Carol", 1.0, now);
+
+    expectSqliteError(() => {
+      state.sqlite
+        .prepare(
+          "INSERT INTO members (name, max_capacity, created_at) VALUES (?, ?, ?)",
+        )
+        .run("Dave", 0, now);
+    }, "SQLITE_CONSTRAINT_CHECK");
+
+    expectSqliteError(() => {
+      state.sqlite
+        .prepare(
+          "INSERT INTO members (name, max_capacity, created_at) VALUES (?, ?, ?)",
+        )
+        .run("Eve", 1.1, now);
+    }, "SQLITE_CONSTRAINT_CHECK");
+
+    expectSqliteError(() => {
+      state.sqlite
+        .prepare(
+          "INSERT INTO members (name, max_capacity, created_at) VALUES (?, ?, ?)",
+        )
+        .run("Frank", -0.5, now);
     }, "SQLITE_CONSTRAINT_CHECK");
   });
 

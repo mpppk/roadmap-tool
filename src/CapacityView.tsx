@@ -14,7 +14,7 @@ import { orpc } from "./orpc-client";
 type ViewMode = "quarter" | "month";
 type Month = { id: number; year: number; month: number; quarterId: number };
 type Quarter = { id: number; year: number; quarter: number; months: Month[] };
-type Member = { id: number; name: string };
+type Member = { id: number; name: string; maxCapacity: number | null };
 
 type MonthData = {
   totalCapacity: number;
@@ -167,8 +167,10 @@ function columnsForMode(
   );
 }
 
-function columnMemberLimit(column: PeriodColumn): number {
-  return column.type === "quarter" ? column.monthIds.length : 1;
+function columnMemberLimit(column: PeriodColumn, maxCapacity = 1): number {
+  return column.type === "quarter"
+    ? column.monthIds.length * maxCapacity
+    : maxCapacity;
 }
 
 function updateMonthResults(
@@ -627,12 +629,18 @@ export function CapacityView() {
       return sum + (alloc?.capacity ?? 0);
     }, 0);
 
+  const getMemberMaxCap = useCallback(
+    (memberId: number): number =>
+      members.find((m) => m.id === memberId)?.maxCapacity ?? 1,
+    [members],
+  );
+
   const isMemberColumnOverflow = (
     memberId: number,
     column: PeriodColumn,
   ): boolean =>
     getMemberColumnTotal(memberId, column) >
-    columnMemberLimit(column) + 0.000001;
+    columnMemberLimit(column, getMemberMaxCap(memberId)) + 0.000001;
 
   const getRebalancePreview = (
     memberId: number,
@@ -656,7 +664,7 @@ export function CapacityView() {
       (sum, change) => sum + change.currentCapacity,
       0,
     );
-    const limit = columnMemberLimit(column);
+    const limit = columnMemberLimit(column, getMemberMaxCap(memberId));
     const scale =
       requestedCapacity <= limit && usedElsewhere > 0
         ? Math.max(0, (limit - requestedCapacity) / usedElsewhere)
@@ -733,7 +741,7 @@ export function CapacityView() {
       setBusy(true);
       try {
         setCapacityConflict(null);
-        const limit = columnMemberLimit(column);
+        const limit = columnMemberLimit(column, getMemberMaxCap(memberId));
         if (capacity <= limit) {
           const preview = await orpc.allocations.previewMemberAllocation({
             featureId,
@@ -776,7 +784,7 @@ export function CapacityView() {
         setBusy(false);
       }
     },
-    [applyFeatureMonthUpdates, members],
+    [applyFeatureMonthUpdates, members, getMemberMaxCap],
   );
 
   const resolveCapacityConflict = useCallback(
@@ -1153,7 +1161,10 @@ export function CapacityView() {
                             capacityConflict.memberId === member.id
                               ? capacityConflict
                               : null;
-                          const limit = columnMemberLimit(column);
+                          const limit = columnMemberLimit(
+                            column,
+                            getMemberMaxCap(member.id),
+                          );
                           const value =
                             matchingCapacityConflict?.requestedCapacity ??
                             alloc?.capacity ??

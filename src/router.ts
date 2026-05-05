@@ -187,6 +187,17 @@ async function getQuarterRowsWithMonths(db: typeof DbType) {
   }));
 }
 
+async function getMemberMaxCapacity(
+  db: typeof DbType,
+  memberId: number,
+): Promise<number> {
+  const [row] = await db
+    .select({ maxCapacity: members.maxCapacity })
+    .from(members)
+    .where(eq(members.id, memberId));
+  return row?.maxCapacity ?? 1.0;
+}
+
 async function getMemberUsageInMonth(
   db: typeof DbType,
   memberId: number,
@@ -349,7 +360,8 @@ async function updateSingleMonthTotal(
       monthId,
       featureId,
     );
-    const cap = Math.max(0, 1.0 - usedElsewhere);
+    const maxCap = await getMemberMaxCapacity(db, alloc.memberId);
+    const cap = Math.max(0, maxCap - usedElsewhere);
     const newValue = Math.min(candidate, cap);
 
     await db
@@ -445,7 +457,8 @@ async function updateSingleMemberMonthAllocation(
     monthId,
     featureId,
   );
-  const cap = Math.max(0, 1.0 - usedElsewhere);
+  const maxCap = await getMemberMaxCapacity(db, memberId);
+  const cap = Math.max(0, maxCap - usedElsewhere);
   let nextCapacity =
     capacityConflictResolution === "fitWithinLimit"
       ? Math.min(capacity, cap)
@@ -454,10 +467,10 @@ async function updateSingleMemberMonthAllocation(
 
   if (
     capacityConflictResolution === "rebalanceOthersProportionally" &&
-    capacity <= 1 &&
+    capacity <= maxCap &&
     usedElsewhere > 0
   ) {
-    const scale = Math.max(0, (1 - capacity) / usedElsewhere);
+    const scale = Math.max(0, (maxCap - capacity) / usedElsewhere);
     const otherAllocs = await db
       .select()
       .from(memberMonthAllocations)
@@ -483,7 +496,7 @@ async function updateSingleMemberMonthAllocation(
 
   if (
     capacityConflictResolution === "rebalanceOthersProportionally" &&
-    capacity > 1
+    capacity > maxCap
   ) {
     nextCapacity = capacity;
   }
@@ -607,6 +620,22 @@ const membersDelete = o
   .input(z.object({ id: z.number().int() }))
   .handler(async ({ input, context }) => {
     await context.db.delete(members).where(eq(members.id, input.id));
+  });
+
+const membersSetMaxCapacity = o
+  .input(
+    z.object({
+      id: z.number().int(),
+      maxCapacity: z.number().min(0.001).max(1).nullable(),
+    }),
+  )
+  .handler(async ({ input, context }) => {
+    const [row] = await context.db
+      .update(members)
+      .set({ maxCapacity: input.maxCapacity })
+      .where(eq(members.id, input.id))
+      .returning();
+    return row;
   });
 
 // ---------------------------------------------------------------------------
@@ -904,12 +933,13 @@ const allocationsPreviewMemberAllocation = o
           input.featureId,
         );
         const requestedCapacity = requestedCapacities[index] ?? 0;
+        const maxCap = await getMemberMaxCapacity(context.db, input.memberId);
         return {
           usedElsewhere,
-          assignableCapacity: Math.max(0, 1 - usedElsewhere),
+          assignableCapacity: Math.max(0, maxCap - usedElsewhere),
           hasConflict:
-            requestedCapacity <= 1 &&
-            usedElsewhere + requestedCapacity > 1.000001,
+            requestedCapacity <= maxCap &&
+            usedElsewhere + requestedCapacity > maxCap + 0.000001,
         };
       }),
     );
@@ -1042,7 +1072,8 @@ const allocationsMoveQuarter = o
           toMonth.id,
           featureId,
         );
-        const cap = Math.max(0, 1.0 - usedElsewhere);
+        const maxCap = await getMemberMaxCapacity(db, alloc.memberId);
+        const cap = Math.max(0, maxCap - usedElsewhere);
         const merged = Math.min(
           (toExisting?.capacity ?? 0) + alloc.capacity,
           cap,
@@ -1198,6 +1229,7 @@ export const router = {
     create: membersCreate,
     rename: membersRename,
     delete: membersDelete,
+    setMaxCapacity: membersSetMaxCapacity,
   },
   quarters: {
     list: quartersList,

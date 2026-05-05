@@ -30,6 +30,7 @@ export const members = sqliteTable(
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     name: text("name").notNull(),
+    maxCapacity: real("max_capacity"),
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .$defaultFn(() => new Date()),
@@ -38,6 +39,10 @@ export const members = sqliteTable(
     check("members_name_trimmed_check", sql`${t.name} = trim(${t.name})`),
     check("members_name_not_empty_check", sql`length(${t.name}) > 0`),
     uniqueIndex("members_name_trim_unique").on(sql`trim(${t.name})`),
+    check(
+      "members_max_capacity_check",
+      sql`${t.maxCapacity} IS NULL OR (${t.maxCapacity} > 0 AND ${t.maxCapacity} <= 1)`,
+    ),
   ],
 );
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./capacity.css";
+import { parseCapacityTSV } from "./capacity-clipboard";
 import {
   getNameErrorMessage,
   NAME_ERROR_MESSAGES,
@@ -96,11 +97,14 @@ type SelectionRect = {
   type: CellType;
 };
 
-type CellClipboard = {
-  data: number[][];
+type CopiedSelection = {
   viewMode: ViewMode;
-  type: CellType;
   sourceSel: SelectionRect;
+};
+
+type GridPasteTarget = {
+  row: number;
+  col: number;
 };
 
 type PasteOp =
@@ -248,23 +252,14 @@ function updateMonthResults(
   return newMap;
 }
 
-function parseTSV(text: string): number[][] | null {
-  const lines = text.trimEnd().split("\n");
-  const result: number[][] = [];
-  for (const line of lines) {
-    if (!line.trim()) continue;
-    const cells = line.split("\t");
-    const nums = cells.map((c) => {
-      const trimmed = c.trim();
-      const v = parseFloat(trimmed);
-      if (!Number.isNaN(v)) return Math.max(0, v);
-      // Try replacing comma as decimal separator (European locale)
-      const v2 = parseFloat(trimmed.replace(",", "."));
-      return Number.isNaN(v2) ? 0 : Math.max(0, v2);
-    });
-    result.push(nums);
-  }
-  return result.length > 0 ? result : null;
+function isEditablePasteTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return !!target.closest("input, textarea, [contenteditable='true']");
+}
+
+function isGridValuePasteTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return !!target.closest(".hm-input");
 }
 
 // ── Sub-components ──────────────────────────────────────────────────────────
@@ -279,7 +274,7 @@ function HeatmapCell({
   isCopied,
   onCellMouseDown,
   onCellMouseEnter,
-  onPasteClick,
+  editCancelToken,
 }: {
   value: number;
   unassigned: number;
@@ -290,7 +285,7 @@ function HeatmapCell({
   isCopied?: boolean;
   onCellMouseDown?: () => void;
   onCellMouseEnter?: () => void;
-  onPasteClick?: () => void;
+  editCancelToken?: number;
 }) {
   const [editing, setEditing] = useState(false);
   const [editVal, setEditVal] = useState("");
@@ -310,7 +305,11 @@ function HeatmapCell({
     setEditing(false);
   };
 
-  const handleClick = onPasteClick ?? startEdit;
+  useEffect(() => {
+    if (editCancelToken === undefined) return;
+    setEditing(false);
+  }, [editCancelToken]);
+
   const cls = ["hm-cell", isSelected && "is-selected", isCopied && "is-copied"]
     .filter(Boolean)
     .join(" ");
@@ -320,7 +319,7 @@ function HeatmapCell({
       type="button"
       className={cls}
       style={{ background: bg, height: rowHeight }}
-      onClick={handleClick}
+      onClick={startEdit}
       onMouseDown={onCellMouseDown}
       onMouseEnter={onCellMouseEnter}
       title={`${fmt(value)} 人月 · クリックで編集`}
@@ -375,7 +374,7 @@ function HeatmapMemberCell({
   isCopied,
   onCellMouseDown,
   onCellMouseEnter,
-  onPasteClick,
+  editCancelToken,
 }: {
   value: number;
   maxVal: number;
@@ -385,7 +384,7 @@ function HeatmapMemberCell({
   isCopied?: boolean;
   onCellMouseDown?: () => void;
   onCellMouseEnter?: () => void;
-  onPasteClick?: () => void;
+  editCancelToken?: number;
 }) {
   const [editing, setEditing] = useState(false);
   const [editVal, setEditVal] = useState("");
@@ -406,7 +405,11 @@ function HeatmapMemberCell({
     setEditing(false);
   };
 
-  const handleClick = onPasteClick ?? startEdit;
+  useEffect(() => {
+    if (editCancelToken === undefined) return;
+    setEditing(false);
+  }, [editCancelToken]);
+
   const cls = [
     "hm-member-cell",
     isSelected && "is-selected",
@@ -420,7 +423,7 @@ function HeatmapMemberCell({
       type="button"
       className={cls}
       style={{ background: ovBg }}
-      onClick={handleClick}
+      onClick={startEdit}
       onMouseDown={onCellMouseDown}
       onMouseEnter={onCellMouseEnter}
     >
@@ -797,9 +800,12 @@ export function CapacityView() {
   const [selStartCol, setSelStartCol] = useState<number | null>(null);
   const [selEndCol, setSelEndCol] = useState<number | null>(null);
   const [selType, setSelType] = useState<CellType | null>(null);
-  const [cellClipboard, setCellClipboard] = useState<CellClipboard | null>(
-    null,
-  );
+  const [copiedSelection, setCopiedSelection] =
+    useState<CopiedSelection | null>(null);
+  const [lastGridPasteTarget, setLastGridPasteTarget] =
+    useState<GridPasteTarget | null>(null);
+  const [editCancelToken, setEditCancelToken] = useState(0);
+  const [pasteNotice, setPasteNotice] = useState<string | null>(null);
   const [pasteConflict, setPasteConflict] = useState<PasteConflictState | null>(
     null,
   );
@@ -890,8 +896,13 @@ export function CapacityView() {
 
   const isCellInClipSrc = useCallback(
     (rowIndex: number, colIndex: number, cellType: CellType): boolean => {
-      if (!cellClipboard || cellClipboard.type !== cellType) return false;
-      const s = cellClipboard.sourceSel;
+      if (
+        !copiedSelection ||
+        copiedSelection.viewMode !== viewMode ||
+        copiedSelection.sourceSel.type !== cellType
+      )
+        return false;
+      const s = copiedSelection.sourceSel;
       return (
         rowIndex >= s.minRow &&
         rowIndex <= s.maxRow &&
@@ -899,7 +910,7 @@ export function CapacityView() {
         colIndex <= s.maxCol
       );
     },
-    [cellClipboard],
+    [copiedSelection, viewMode],
   );
 
   const clearSelection = useCallback(() => {
@@ -1040,6 +1051,8 @@ export function CapacityView() {
     (rowIndex: number, colIndex: number, type: CellType) => {
       didDragRef.current = false;
       dragStartRef.current = { row: rowIndex, col: colIndex, type };
+      setLastGridPasteTarget({ row: rowIndex, col: colIndex });
+      setPasteNotice(null);
       setSelType(type);
       setSelStartRow(rowIndex);
       setSelStartCol(colIndex);
@@ -1240,7 +1253,7 @@ export function CapacityView() {
 
   // ── Copy / Paste logic ────────────────────────────────────────────────────
 
-  const handleCopy = useCallback(() => {
+  const handleCopy = useCallback(async () => {
     if (!normalizedSel) return;
     const { minRow, maxRow, minCol, maxCol, type } = normalizedSel;
     const data: number[][] = [];
@@ -1274,11 +1287,14 @@ export function CapacityView() {
 
     if (data.length === 0) return;
 
-    setCellClipboard({ data, viewMode, type, sourceSel: normalizedSel });
-
-    // Write TSV to system clipboard for Excel interop
     const tsv = data.map((row) => row.map((v) => fmt(v)).join("\t")).join("\n");
-    navigator.clipboard.writeText(tsv).catch(() => {});
+    try {
+      await navigator.clipboard.writeText(tsv);
+      setCopiedSelection({ viewMode, sourceSel: normalizedSel });
+      setPasteNotice(null);
+    } catch {
+      setPasteNotice("クリップボードへコピーできませんでした。");
+    }
   }, [normalizedSel, selectableRows, featureRows, columns, viewMode]);
 
   const getMemberUsedElsewhere = useCallback(
@@ -1408,46 +1424,27 @@ export function CapacityView() {
       } finally {
         setBusy(false);
         setPasteConflict(null);
-        setCellClipboard(null);
+        setCopiedSelection(null);
+        setPasteNotice(null);
         clearSelection();
       }
     },
     [applyFeatureMonthUpdates, clearSelection],
   );
 
-  const handlePaste = useCallback(
-    async (anchorRow?: number, anchorCol?: number) => {
-      // Determine anchor position
-      const aRow = anchorRow ?? normalizedSel?.minRow;
-      const aCol = anchorCol ?? normalizedSel?.minCol;
-      if (aRow === undefined || aCol === undefined) return;
-
-      // Determine clip data and type
-      let clipData: number[][] | null = null;
-      let clipType: CellType | null = null;
-
-      if (cellClipboard && cellClipboard.viewMode === viewMode) {
-        clipData = cellClipboard.data;
-        clipType = cellClipboard.type;
-      } else {
-        // Try reading from system clipboard (e.g., paste from Excel)
-        try {
-          const text = await navigator.clipboard.readText();
-          const parsed = parseTSV(text);
-          if (parsed) {
-            clipData = parsed;
-            // Infer type from anchor row
-            clipType = selectableRows[aRow]?.type ?? null;
-          }
-        } catch {
-          return;
-        }
+  const handleGridPaste = useCallback(
+    async (clipData: number[][], target: GridPasteTarget) => {
+      const clipType = selectableRows[target.row]?.type ?? null;
+      if (!clipType || !columns[target.col]) {
+        setPasteNotice("貼り付け先セルを選択してください。");
+        return;
       }
 
-      if (!clipData || !clipType) return;
-
-      const ops = buildPasteOps(clipData, aRow, aCol, clipType);
-      if (ops.length === 0) return;
+      const ops = buildPasteOps(clipData, target.row, target.col, clipType);
+      if (ops.length === 0) {
+        setPasteNotice("貼り付け可能な範囲がありません。");
+        return;
+      }
 
       const conflicts = detectPasteConflicts(ops);
       if (conflicts.length > 0) {
@@ -1469,10 +1466,8 @@ export function CapacityView() {
       }
     },
     [
-      normalizedSel,
-      cellClipboard,
-      viewMode,
       selectableRows,
+      columns,
       buildPasteOps,
       detectPasteConflicts,
       executePaste,
@@ -1495,23 +1490,56 @@ export function CapacityView() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setCellClipboard(null);
+        setCopiedSelection(null);
+        setPasteNotice(null);
         clearSelection();
         return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key === "c" && normalizedSel) {
         e.preventDefault();
-        handleCopy();
+        void handleCopy();
         return;
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === "v") {
-        e.preventDefault();
-        void handlePaste();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [handleCopy, handlePaste, normalizedSel, clearSelection]);
+  }, [handleCopy, normalizedSel, clearSelection]);
+
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const isEditable = isEditablePasteTarget(e.target);
+      const isGridValueInput = isGridValuePasteTarget(e.target);
+      if (isEditable && !isGridValueInput) return;
+
+      const text = e.clipboardData?.getData("text/plain") ?? "";
+      const parsed = parseCapacityTSV(text);
+      if (!parsed) {
+        if (!isEditable && lastGridPasteTarget) {
+          e.preventDefault();
+          setPasteNotice("クリップボードに貼り付け可能な数値TSVがありません。");
+        }
+        return;
+      }
+
+      const target =
+        lastGridPasteTarget ??
+        (normalizedSel
+          ? { row: normalizedSel.minRow, col: normalizedSel.minCol }
+          : null);
+      e.preventDefault();
+      if (!target) {
+        setPasteNotice("貼り付け先セルを選択してください。");
+        return;
+      }
+
+      setEditCancelToken((token) => token + 1);
+      setPasteNotice(null);
+      void handleGridPaste(parsed, target);
+    };
+
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [handleGridPaste, lastGridPasteTarget, normalizedSel]);
 
   // ── Feature actions ────────────────────────────────────────────────────────
 
@@ -1660,24 +1688,6 @@ export function CapacityView() {
     }
   }, [importCsv, loadAll]);
 
-  // ── Paste mode (clipboard active and same view mode) ──────────────────────
-
-  const pasteMode =
-    cellClipboard !== null && cellClipboard.viewMode === viewMode;
-
-  const makePasteClickHandler = useCallback(
-    (rowIndex: number, colIndex: number) => {
-      return () => {
-        if (didDragRef.current) {
-          didDragRef.current = false;
-          return;
-        }
-        void handlePaste(rowIndex, colIndex);
-      };
-    },
-    [handlePaste],
-  );
-
   // ── Render ────────────────────────────────────────────────────────────────
 
   if (loading) {
@@ -1753,11 +1763,11 @@ export function CapacityView() {
             保存中…
           </span>
         )}
-        {pasteMode && (
+        {copiedSelection && copiedSelection.viewMode === viewMode && (
           <span
             style={{ marginLeft: 8, fontSize: 11, color: "var(--cv-accent)" }}
           >
-            コピー中 · クリックでペースト / Ctrl+V / Esc でキャンセル
+            コピー済み · Ctrl+Vでペースト / Escで解除
           </span>
         )}
       </header>
@@ -1849,6 +1859,7 @@ export function CapacityView() {
                             rowHeight={42}
                             isSelected={selected}
                             isCopied={copied}
+                            editCancelToken={editCancelToken}
                             onCellMouseDown={() =>
                               handleCellMouseDown(
                                 featureRowIndex,
@@ -1862,11 +1873,6 @@ export function CapacityView() {
                                 ci,
                                 "feature",
                               )
-                            }
-                            onPasteClick={
-                              pasteMode
-                                ? makePasteClickHandler(featureRowIndex, ci)
-                                : undefined
                             }
                           />
                         </td>
@@ -1992,6 +1998,7 @@ export function CapacityView() {
                                 }
                                 isSelected={selected}
                                 isCopied={copied}
+                                editCancelToken={editCancelToken}
                                 onCellMouseDown={() =>
                                   handleCellMouseDown(
                                     memberRowIndex,
@@ -2005,11 +2012,6 @@ export function CapacityView() {
                                     ci,
                                     "member",
                                   )
-                                }
-                                onPasteClick={
-                                  pasteMode
-                                    ? makePasteClickHandler(memberRowIndex, ci)
-                                    : undefined
                                 }
                               />
                               {matchingMaxCapacityOverflow && (
@@ -2192,9 +2194,9 @@ export function CapacityView() {
           >
             CSVをインポート
           </button>
-          {actionWarning && (
+          {(pasteNotice || actionWarning) && (
             <span className="name-action-warning" role="alert">
-              {actionWarning}
+              {pasteNotice || actionWarning}
             </span>
           )}
           <span className="hint-text">

@@ -1251,7 +1251,9 @@ export function CapacityView() {
         const column = columns[ci];
         if (!column) continue;
         if (type === "feature") {
-          rowData.push(aggregateMonthData(feature.months, column.monthIds).totalCapacity);
+          rowData.push(
+            aggregateMonthData(feature.months, column.monthIds).totalCapacity,
+          );
         } else {
           const memberId = (selRow as { type: "member"; memberId: number })
             .memberId;
@@ -1302,7 +1304,11 @@ export function CapacityView() {
     ): PasteOp[] => {
       const ops: PasteOp[] = [];
       let dataRowIdx = 0;
-      for (let ri = anchorRow; ri < selectableRows.length && dataRowIdx < data.length; ri++) {
+      for (
+        let ri = anchorRow;
+        ri < selectableRows.length && dataRowIdx < data.length;
+        ri++
+      ) {
         const selRow = selectableRows[ri];
         if (!selRow || selRow.type !== type) continue;
         const rowData = data[dataRowIdx++] ?? [];
@@ -1311,11 +1317,22 @@ export function CapacityView() {
           if (!column) break; // range clip
           const value = rowData[ci] ?? 0;
           if (type === "feature") {
-            ops.push({ kind: "feature", featureId: selRow.featureId, column, value });
+            ops.push({
+              kind: "feature",
+              featureId: selRow.featureId,
+              column,
+              value,
+            });
           } else {
             const memberId = (selRow as { type: "member"; memberId: number })
               .memberId;
-            ops.push({ kind: "member", featureId: selRow.featureId, memberId, column, value });
+            ops.push({
+              kind: "member",
+              featureId: selRow.featureId,
+              memberId,
+              column,
+              value,
+            });
           }
         }
       }
@@ -2294,7 +2311,9 @@ export function CapacityView() {
           conflicts={pasteConflict.conflicts}
           opsForCapped={pasteConflict.opsForCapped}
           opsForOverflow={pasteConflict.opsForOverflow}
-          onExecute={(ops, allowOverflow) => void executePaste(ops, allowOverflow)}
+          onExecute={(ops, allowOverflow) =>
+            void executePaste(ops, allowOverflow)
+          }
           onCancel={() => setPasteConflict(null)}
         />
       )}

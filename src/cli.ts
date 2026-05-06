@@ -13,12 +13,14 @@ const HELP_TEXT = `Usage:
   bun cli.ts features add <name> [--epic-id <id>] [--description <text>] [--link <title=url> ...]
   bun cli.ts features rename <id> <name> [--epic-id <id>] [--description <text>] [--link <title=url> ...] [--clear-description] [--clear-links]
   bun cli.ts features move <id> --epic-id <id> [--before <feature-id>] [--after <feature-id>]
+  bun cli.ts features import <path|->
 
   bun cli.ts epics list
   bun cli.ts epics add <name> [--description <text>] [--link <title=url> ...]
   bun cli.ts epics rename <id> <name> [--description <text>] [--link <title=url> ...] [--clear-description] [--clear-links]
   bun cli.ts epics delete <id>
   bun cli.ts epics move <id> [--before <epic-id>] [--after <epic-id>]
+  bun cli.ts epics import <path|->
 
   bun cli.ts members list
   bun cli.ts members add <name>
@@ -39,6 +41,14 @@ const [, , resource, command, ...args] = process.argv;
 
 if (resource === "help" || resource === "--help" || resource === "-h") help();
 if (!resource || !command) usage();
+
+async function readImportSource(args: string[]): Promise<string> {
+  const source = args[0];
+  if (!source || args.length !== 1 || source.startsWith("--")) usage();
+  return source === "-"
+    ? await Bun.stdin.text()
+    : await Bun.file(source).text();
+}
 
 function parseFeatureMetadataFlags(args: string[]): {
   rest: string[];
@@ -175,6 +185,10 @@ async function run() {
       if (!id || !epicId) usage();
       const f = await orpc.features.move({ id, epicId, beforeId, afterId });
       console.log(`Moved: ${f!.id}\t${f!.name}`);
+    } else if (command === "import") {
+      const csv = await readImportSource(args);
+      const result = await orpc.import.featureMetadataCSVImport({ csv });
+      console.log(`Imported: ${result.success}`);
     } else {
       usage();
     }
@@ -218,6 +232,10 @@ async function run() {
       if (!id) usage();
       await orpc.epics.move({ id, beforeId, afterId });
       console.log(`Moved: ${id}`);
+    } else if (command === "import") {
+      const csv = await readImportSource(args);
+      const result = await orpc.import.epicMetadataCSVImport({ csv });
+      console.log(`Imported: ${result.success}`);
     } else {
       usage();
     }

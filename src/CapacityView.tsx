@@ -3239,7 +3239,7 @@ export function CapacityView({ history }: { history: HistoryController }) {
                         key={`${feature.id}-assign`}
                         className="tr-assign-member"
                       >
-                        <td colSpan={1 + columns.length} className="td-assign">
+                        <td className="td-assign">
                           {assigningFeatureId === feature.id ? (
                             <select
                               className="assign-select"
@@ -3273,6 +3273,7 @@ export function CapacityView({ history }: { history: HistoryController }) {
                             </button>
                           )}
                         </td>
+                        {columns.length > 0 && <td colSpan={columns.length} />}
                       </tr>,
                     );
 
@@ -3313,7 +3314,7 @@ export function CapacityView({ history }: { history: HistoryController }) {
 
                 rows.push(
                   <tr key={`epic-${epic.id}-add`} className="tr-assign-member">
-                    <td colSpan={1 + columns.length} className="td-assign">
+                    <td className="td-assign">
                       <button
                         type="button"
                         className="btn-assign"
@@ -3323,6 +3324,7 @@ export function CapacityView({ history }: { history: HistoryController }) {
                         + Feature
                       </button>
                     </td>
+                    {columns.length > 0 && <td colSpan={columns.length} />}
                   </tr>,
                 );
 

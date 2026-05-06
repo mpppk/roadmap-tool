@@ -435,6 +435,14 @@ export function MembersView({ history }: { history: HistoryController }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [actionWarning, setActionWarning] = useState<string | null>(null);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importTsv, setImportTsv] = useState("");
+  const [importResult, setImportResult] = useState<{
+    success: number;
+    skipped: number;
+    errors: { row: number; message: string }[];
+  } | null>(null);
+  const [importing, setImporting] = useState(false);
 
   const displayedQuarters = useMemo(() => {
     if (!rangeStart || !rangeEnd) return quarters;
@@ -616,6 +624,29 @@ export function MembersView({ history }: { history: HistoryController }) {
     },
     [history],
   );
+
+  const runImportTSV = useCallback(async () => {
+    setImporting(true);
+    try {
+      const result = await orpc.import.memberTSVImport({ tsv: importTsv });
+      setImportResult(result);
+      await loadAll();
+    } catch (error) {
+      setImportResult({
+        success: 0,
+        skipped: 0,
+        errors: [
+          {
+            row: 0,
+            message:
+              error instanceof Error ? error.message : "インポートに失敗しました",
+          },
+        ],
+      });
+    } finally {
+      setImporting(false);
+    }
+  }, [importTsv, loadAll]);
 
   const applyRange = async (start: QuarterYQ, end: QuarterYQ) => {
     if (start.year * 4 + start.quarter > end.year * 4 + end.quarter) return;
@@ -1029,6 +1060,18 @@ export function MembersView({ history }: { history: HistoryController }) {
           >
             + Member
           </button>
+          <button
+            type="button"
+            className="btn-sm"
+            onClick={() => {
+              setImportTsv("");
+              setImportResult(null);
+              setImportModalOpen(true);
+            }}
+            title="TSVをインポート（name, max_capacity）"
+          >
+            TSVをインポート
+          </button>
           {(actionWarning || history.warning) && (
             <span className="name-action-warning" role="alert">
               {actionWarning || history.warning}
@@ -1037,6 +1080,71 @@ export function MembersView({ history }: { history: HistoryController }) {
           <span className="hint-text">+ でFeature展開</span>
         </div>
       </div>
+
+      {importModalOpen && (
+        <div className="confirm-overlay">
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="confirm-dialog import-dialog"
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && !importing) setImportModalOpen(false);
+            }}
+          >
+            <p className="confirm-msg">TSVをインポート</p>
+            <p className="import-hint">
+              ヘッダー行（name, max_capacity）を含むTSVを貼り付けてください。
+            </p>
+            {!importResult ? (
+              <textarea
+                className="import-textarea"
+                value={importTsv}
+                onChange={(e) => setImportTsv(e.target.value)}
+                placeholder={"name\tmax_capacity\nAlice\t0.8\nBob\t1"}
+                disabled={importing}
+              />
+            ) : (
+              <div className="import-result">
+                <p>
+                  完了: <strong>{importResult.success}件成功</strong>
+                  {importResult.skipped > 0 &&
+                    `、${importResult.skipped}件スキップ`}
+                </p>
+                {importResult.errors.length > 0 && (
+                  <ul className="import-errors">
+                    {importResult.errors.map((e) => (
+                      <li key={e.row}>
+                        {e.row > 0 ? `行${e.row}: ` : ""}
+                        {e.message}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+            <div className="confirm-actions">
+              <button
+                type="button"
+                className="btn-sm"
+                onClick={() => setImportModalOpen(false)}
+                disabled={importing}
+              >
+                {importResult ? "閉じる" : "キャンセル"}
+              </button>
+              {!importResult && (
+                <button
+                  type="button"
+                  className="btn-sm btn-primary"
+                  onClick={runImportTSV}
+                  disabled={importing || !importTsv.trim()}
+                >
+                  {importing ? "インポート中…" : "インポート"}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

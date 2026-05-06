@@ -1615,6 +1615,10 @@ const exportFeatureMetadataCSV = o
 // Import
 // ---------------------------------------------------------------------------
 
+function parseTSVLine(line: string): string[] {
+  return line.split("\t");
+}
+
 function parseCSVLine(line: string): string[] {
   const result: string[] = [];
   let current = "";
@@ -1992,6 +1996,93 @@ const featureMetadataCSVImport = o
     return { success: rows.length };
   });
 
+const memberTSVImport = o
+  .input(z.object({ tsv: z.string() }))
+  .handler(async ({ input, context }) => {
+    const { db } = context;
+    const lines = input.tsv
+      .split("\n")
+      .map((l) => l.trimEnd())
+      .filter((l) => l.trim().length > 0);
+
+    if (lines.length < 2) {
+      return { success: 0, skipped: 0, errors: [] as ImportRowError[] };
+    }
+
+    const headers = parseTSVLine(lines[0]!).map((h) => h.trim());
+    const colName = headers.indexOf("name");
+    const colMaxCapacity = headers.indexOf("max_capacity");
+
+    if (colName === -1) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: "TSVヘッダーに「name」カラムが必要です。",
+      });
+    }
+
+    const errors: ImportRowError[] = [];
+    let success = 0;
+    let skipped = 0;
+
+    const existingMembers = await db.select().from(members).all();
+    const memberByName = new Map(existingMembers.map((m) => [m.name, m]));
+
+    for (let i = 1; i < lines.length; i++) {
+      const rowNum = i + 1;
+      const cols = parseTSVLine(lines[i]!);
+      const rawName = cols[colName] ?? "";
+      let name: string;
+      try {
+        name = normalizeNameInput(rawName, "member");
+      } catch {
+        skipped++;
+        continue;
+      }
+      if (name.length === 0) {
+        skipped++;
+        continue;
+      }
+
+      let maxCapacity: number | null = null;
+      if (colMaxCapacity !== -1) {
+        const rawCap = (cols[colMaxCapacity] ?? "").trim();
+        if (rawCap.length > 0) {
+          const parsed = Number(rawCap);
+          if (Number.isNaN(parsed) || parsed <= 0 || parsed > 1) {
+            errors.push({
+              row: rowNum,
+              message: `max_capacity は 0 より大きく 1 以下の値を入力してください（値: ${rawCap}）`,
+            });
+            continue;
+          }
+          maxCapacity = parsed;
+        }
+      }
+
+      try {
+        const existing = memberByName.get(name);
+        if (existing) {
+          const [updated] = await db
+            .update(members)
+            .set({ maxCapacity })
+            .where(eq(members.id, existing.id))
+            .returning();
+          if (updated) memberByName.set(name, updated);
+        } else {
+          const [created] = await db
+            .insert(members)
+            .values({ name, maxCapacity })
+            .returning();
+          if (created) memberByName.set(name, created);
+        }
+        success++;
+      } catch (_error) {
+        errors.push({ row: rowNum, message: `行 ${rowNum}: インポートに失敗しました` });
+      }
+    }
+
+    return { success, skipped, errors };
+  });
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -2038,6 +2129,7 @@ export const router = {
   import: {
     csvImport,
     featureMetadataCSVImport,
+    memberTSVImport,
   },
 };
 

@@ -22,6 +22,7 @@ import { orpc } from "./orpc-client";
 // ── Types ──────────────────────────────────────────────────────────────────
 
 type ViewMode = "quarter" | "month";
+type CapacityAggMode = "total" | "average";
 type Month = { id: number; year: number; month: number; quarterId: number };
 type Quarter = { id: number; year: number; quarter: number; months: Month[] };
 type Member = { id: number; name: string; maxCapacity: number | null };
@@ -862,6 +863,7 @@ function MaxCapacityOverflowPopover({
   usedElsewhere,
   onResolve,
   onCancel,
+  displayDivisor = 1,
 }: {
   memberName: string;
   limit: number;
@@ -869,16 +871,18 @@ function MaxCapacityOverflowPopover({
   usedElsewhere: number;
   onResolve: (resolution: "fitWithinLimit" | "allowOverflow") => void;
   onCancel: () => void;
+  displayDivisor?: number;
 }) {
+  const d = displayDivisor;
   const reducedValue = Math.max(0, limit - usedElsewhere);
 
   return (
     <div className="capacity-conflict-popover" role="dialog" aria-modal="false">
       <div className="capacity-conflict-lines">
         <div>
-          {memberName}のmax capacity ({fmt2(limit)}) を超えています。
+          {memberName}のmax capacity ({fmt2(limit / d)}) を超えています。
         </div>
-        <div>今回の割り当てキャパシティ: {fmt2(requestedCapacity)}</div>
+        <div>今回の割り当てキャパシティ: {fmt2(requestedCapacity / d)}</div>
       </div>
       <div className="capacity-conflict-actions">
         <button
@@ -886,14 +890,14 @@ function MaxCapacityOverflowPopover({
           className="btn-sm capacity-conflict-action-btn"
           onClick={() => onResolve("fitWithinLimit")}
         >
-          {`縮小して設定 (${fmt2(reducedValue)})`}
+          {`縮小して設定 (${fmt2(reducedValue / d)})`}
         </button>
         <button
           type="button"
           className="btn-sm capacity-conflict-action-btn"
           onClick={() => onResolve("allowOverflow")}
         >
-          {`max capacityを超えて設定 (${fmt2(requestedCapacity)})`}
+          {`max capacityを超えて設定 (${fmt2(requestedCapacity / d)})`}
         </button>
         <button
           type="button"
@@ -915,6 +919,7 @@ function CapacityConflictPopover({
   rebalancePreview,
   onResolve,
   onCancel,
+  displayDivisor = 1,
 }: {
   memberName: string;
   usedElsewhere: number;
@@ -923,16 +928,18 @@ function CapacityConflictPopover({
   rebalancePreview: RebalancePreview[];
   onResolve: (resolution: CapacityConflictResolution) => void;
   onCancel: () => void;
+  displayDivisor?: number;
 }) {
+  const d = displayDivisor;
   const overflowTotal = usedElsewhere + requestedCapacity;
 
   return (
     <div className="capacity-conflict-popover" role="dialog" aria-modal="false">
       <div className="capacity-conflict-lines">
         <div>{memberName}の合計キャパシティが1を超えています。</div>
-        <div>割り当て済み: {fmt2(usedElsewhere)}</div>
-        <div>残りキャパシティ: {fmt2(assignableCapacity)}</div>
-        <div>今回の割り当てキャパシティ: {fmt2(requestedCapacity)}</div>
+        <div>割り当て済み: {fmt2(usedElsewhere / d)}</div>
+        <div>残りキャパシティ: {fmt2(assignableCapacity / d)}</div>
+        <div>今回の割り当てキャパシティ: {fmt2(requestedCapacity / d)}</div>
       </div>
       <div className="capacity-conflict-actions">
         <button
@@ -940,16 +947,16 @@ function CapacityConflictPopover({
           className="btn-sm capacity-conflict-action-btn"
           onClick={() => onResolve("allowOverflow")}
         >
-          {`そのまま割り当て(${fmt2(usedElsewhere)}+${fmt2(
-            requestedCapacity,
-          )}=${fmt2(overflowTotal)})`}
+          {`そのまま割り当て(${fmt2(usedElsewhere / d)}+${fmt2(
+            requestedCapacity / d,
+          )}=${fmt2(overflowTotal / d)})`}
         </button>
         <button
           type="button"
           className="btn-sm capacity-conflict-action-btn"
           onClick={() => onResolve("fitWithinLimit")}
         >
-          超過しない最大値({fmt2(assignableCapacity)})を割り当て
+          超過しない最大値({fmt2(assignableCapacity / d)})を割り当て
         </button>
         <button
           type="button"
@@ -964,8 +971,8 @@ function CapacityConflictPopover({
                   key={change.featureName}
                   className="capacity-conflict-preview-item"
                 >
-                  {change.featureName}: {fmt(change.currentCapacity)}→
-                  {fmt(change.nextCapacity)}
+                  {change.featureName}: {fmt(change.currentCapacity / d)}→
+                  {fmt(change.nextCapacity / d)}
                 </span>
               ))}
             </span>
@@ -1050,6 +1057,8 @@ const COL_W = 148;
 
 export function CapacityView() {
   const [viewMode, setViewMode] = useState<ViewMode>("quarter");
+  const [capacityAggMode, setCapacityAggMode] =
+    useState<CapacityAggMode>("total");
   const [quarters, setQuarters] = useState<Quarter[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [featureRows, setFeatureRows] = useState<FeatureRow[]>([]);
@@ -1268,6 +1277,14 @@ export function CapacityView() {
   }, [loadAll]);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
+
+  const colDivisor = useCallback(
+    (column: PeriodColumn): number =>
+      capacityAggMode === "average" && column.type === "quarter"
+        ? column.monthIds.length
+        : 1,
+    [capacityAggMode],
+  );
 
   const getColumnData = (row: FeatureRow, column: PeriodColumn): MonthData =>
     aggregateMonthData(row.months, column.monthIds);
@@ -1561,9 +1578,11 @@ export function CapacityView() {
       for (let ci = minCol; ci <= maxCol; ci++) {
         const column = columns[ci];
         if (!column) continue;
+        const div = colDivisor(column);
         if (type === "feature") {
           rowData.push(
-            aggregateMonthData(feature.months, column.monthIds).totalCapacity,
+            aggregateMonthData(feature.months, column.monthIds).totalCapacity /
+              div,
           );
         } else {
           const memberId = (selRow as { type: "member"; memberId: number })
@@ -1572,7 +1591,7 @@ export function CapacityView() {
             feature.months,
             column.monthIds,
           ).memberAllocations.find((a) => a.memberId === memberId);
-          rowData.push(alloc?.capacity ?? 0);
+          rowData.push((alloc?.capacity ?? 0) / div);
         }
       }
       if (rowData.length > 0) data.push(rowData);
@@ -1588,7 +1607,14 @@ export function CapacityView() {
     } catch {
       setPasteNotice("クリップボードへコピーできませんでした。");
     }
-  }, [normalizedSel, selectableRows, featureRows, columns, viewMode]);
+  }, [
+    normalizedSel,
+    selectableRows,
+    featureRows,
+    columns,
+    viewMode,
+    colDivisor,
+  ]);
 
   const getMemberUsedElsewhere = useCallback(
     (memberId: number, featureId: number, monthIds: number[]): number => {
@@ -1667,7 +1693,8 @@ export function CapacityView() {
           op.featureId,
           op.column.monthIds,
         );
-        const available = Math.max(0, maxCap - usedElsewhere);
+        const div = colDivisor(op.column);
+        const available = Math.max(0, maxCap - usedElsewhere) / div;
         if (op.value > available + 0.000001) {
           const feature = featureRows.find((f) => f.id === op.featureId);
           conflicts.push({
@@ -1680,7 +1707,7 @@ export function CapacityView() {
       }
       return conflicts;
     },
-    [members, featureRows, getMemberUsedElsewhere],
+    [members, featureRows, getMemberUsedElsewhere, colDivisor],
   );
 
   const executePaste = useCallback(
@@ -1688,10 +1715,11 @@ export function CapacityView() {
       setBusy(true);
       try {
         for (const op of ops) {
+          const div = colDivisor(op.column);
           if (op.kind === "feature") {
             const result = await orpc.allocations.updateTotal({
               featureId: op.featureId,
-              totalCapacity: op.value,
+              totalCapacity: op.value * div,
               periodType: op.column.type,
               monthId: op.column.monthId,
               quarterId: op.column.quarterId,
@@ -1703,7 +1731,7 @@ export function CapacityView() {
             const result = await orpc.allocations.updateMemberAllocation({
               featureId: op.featureId,
               memberId: op.memberId,
-              capacity: op.value,
+              capacity: op.value * div,
               periodType: op.column.type,
               monthId: op.column.monthId,
               quarterId: op.column.quarterId,
@@ -1722,7 +1750,7 @@ export function CapacityView() {
         clearSelection();
       }
     },
-    [applyFeatureMonthUpdates, clearSelection],
+    [applyFeatureMonthUpdates, clearSelection, colDivisor],
   );
 
   const handleGridPaste = useCallback(
@@ -1750,7 +1778,8 @@ export function CapacityView() {
             op.featureId,
             op.column.monthIds,
           );
-          const available = Math.max(0, maxCap - usedElsewhere);
+          const div = colDivisor(op.column);
+          const available = Math.max(0, maxCap - usedElsewhere) / div;
           return { ...op, value: Math.min(op.value, r2(available)) };
         });
         setPasteConflict({ conflicts, opsForCapped, opsForOverflow: ops });
@@ -1766,6 +1795,7 @@ export function CapacityView() {
       executePaste,
       members,
       getMemberUsedElsewhere,
+      colDivisor,
     ],
   );
 
@@ -2102,6 +2132,25 @@ export function CapacityView() {
             Month
           </button>
         </fieldset>
+        {viewMode === "quarter" && (
+          <fieldset className="period-toggle">
+            <legend className="period-toggle-label">集計</legend>
+            <button
+              type="button"
+              className={`period-toggle-btn${capacityAggMode === "total" ? " active" : ""}`}
+              onClick={() => setCapacityAggMode("total")}
+            >
+              合計
+            </button>
+            <button
+              type="button"
+              className={`period-toggle-btn${capacityAggMode === "average" ? " active" : ""}`}
+              onClick={() => setCapacityAggMode("average")}
+            >
+              月平均
+            </button>
+          </fieldset>
+        )}
         {busy && (
           <span
             style={{ marginLeft: 8, fontSize: 11, color: "var(--cv-text-3)" }}
@@ -2205,10 +2254,18 @@ export function CapacityView() {
                           style={{ width: COL_W, minWidth: COL_W }}
                         >
                           <HeatmapCell
-                            value={data.totalCapacity}
-                            unassigned={data.unassignedCapacity}
-                            maxVal={FEATURE_MAX_VAL}
-                            onCommit={(v) => updateTotal(feature.id, column, v)}
+                            value={data.totalCapacity / colDivisor(column)}
+                            unassigned={
+                              data.unassignedCapacity / colDivisor(column)
+                            }
+                            maxVal={FEATURE_MAX_VAL / colDivisor(column)}
+                            onCommit={(v) =>
+                              updateTotal(
+                                feature.id,
+                                column,
+                                v * colDivisor(column),
+                              )
+                            }
                             rowHeight={42}
                             isSelected={selected}
                             isCopied={copied}
@@ -2312,11 +2369,14 @@ export function CapacityView() {
                             column,
                             getMemberMaxCap(member.id),
                           );
-                          const value =
+                          const rawValue =
                             matchingMaxCapacityOverflow?.requestedCapacity ??
                             matchingCapacityConflict?.requestedCapacity ??
                             alloc?.capacity ??
                             0;
+                          const div = colDivisor(column);
+                          const value = rawValue / div;
+                          const displayLimit = limit / div;
                           const cellOv =
                             !!matchingCapacityConflict ||
                             !!matchingMaxCapacityOverflow ||
@@ -2339,14 +2399,14 @@ export function CapacityView() {
                             >
                               <HeatmapMemberCell
                                 value={value}
-                                maxVal={limit}
+                                maxVal={displayLimit}
                                 isOverflow={cellOv}
                                 onCommit={(v) =>
                                   updateMemberAllocation(
                                     feature.id,
                                     column,
                                     member.id,
-                                    v,
+                                    v * div,
                                   )
                                 }
                                 isSelected={selected}
@@ -2381,6 +2441,7 @@ export function CapacityView() {
                                   }
                                   onResolve={resolveMaxCapacityOverflow}
                                   onCancel={() => setMaxCapacityOverflow(null)}
+                                  displayDivisor={colDivisor(column)}
                                 />
                               )}
                               {matchingCapacityConflict && (
@@ -2405,6 +2466,7 @@ export function CapacityView() {
                                   )}
                                   onResolve={resolveCapacityConflict}
                                   onCancel={() => setCapacityConflict(null)}
+                                  displayDivisor={colDivisor(column)}
                                 />
                               )}
                             </td>
@@ -2469,10 +2531,9 @@ export function CapacityView() {
                           <span className="unassigned-name">未アサイン</span>
                         </td>
                         {columns.map((column) => {
-                          const uv = getColumnData(
-                            feature,
-                            column,
-                          ).unassignedCapacity;
+                          const uv =
+                            getColumnData(feature, column).unassignedCapacity /
+                            colDivisor(column);
                           return (
                             <td
                               key={column.key}

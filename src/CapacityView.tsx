@@ -1061,7 +1061,7 @@ const COL_W = 148;
 export function CapacityView({ history }: { history: HistoryController }) {
   const [viewMode, setViewMode] = useState<ViewMode>("quarter");
   const [capacityAggMode, setCapacityAggMode] =
-    useState<CapacityAggMode>("total");
+    useState<CapacityAggMode>("average");
   const [quarters, setQuarters] = useState<Quarter[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [featureRows, setFeatureRows] = useState<FeatureRow[]>([]);

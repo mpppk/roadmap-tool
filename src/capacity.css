@@ -166,8 +166,8 @@
 
 .cv-table {
   border-collapse: collapse;
-  min-width: 100%;
   font-size: 13px;
+  table-layout: fixed;
 }
 
 /* Sticky header */
@@ -268,6 +268,9 @@
   border-right: 1px solid var(--border);
   white-space: nowrap;
   user-select: none;
+  width: var(--col-label);
+  max-width: var(--col-label);
+  overflow: hidden;
 }
 .td-label-inner {
   display: flex;

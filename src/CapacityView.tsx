@@ -2297,6 +2297,7 @@ export function CapacityView({ history }: { history: HistoryController }) {
                 position: f.position,
                 links: f.links,
               }
+
             : r,
         ),
       );
@@ -2490,6 +2491,7 @@ export function CapacityView({ history }: { history: HistoryController }) {
             orpc.quarters.create({ year: yq.year, quarter: yq.quarter }),
           ),
         ),
+
       );
       if (!created) return;
       const valid = created.filter(Boolean);

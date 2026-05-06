@@ -67,6 +67,13 @@ function monthLabel(month: Month): string {
   return `${month.year}-${String(month.month).padStart(2, "0")}`;
 }
 
+function nextQuarterYQ(qs: Quarter[]): { year: number; quarter: number } {
+  const last = qs[qs.length - 1];
+  if (!last) return { year: new Date().getFullYear(), quarter: 1 };
+  if (last.quarter === 4) return { year: last.year + 1, quarter: 1 };
+  return { year: last.year, quarter: last.quarter + 1 };
+}
+
 type QuarterYQ = { year: number; quarter: number };
 
 function quartersInRange(start: QuarterYQ, end: QuarterYQ): QuarterYQ[] {
@@ -518,6 +525,7 @@ export function MembersView({ history }: { history: HistoryController }) {
         setRangeEnd({ year: yr, quarter: q });
       }
     }
+
     setMemberRows(rows);
     setLoading(false);
   }, []);
@@ -642,6 +650,7 @@ export function MembersView({ history }: { history: HistoryController }) {
             orpc.quarters.create({ year: yq.year, quarter: yq.quarter }),
           ),
         ),
+
       );
       if (!created) return;
       const valid = created.filter(Boolean);
@@ -656,6 +665,25 @@ export function MembersView({ history }: { history: HistoryController }) {
           ].sort((a, b) => a.year - b.year || a.quarter - b.quarter),
         );
       }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addQuarter = async () => {
+    setBusy(true);
+    try {
+      const { year, quarter } = nextQuarterYQ(quarters);
+      const q = await history.record("Quarterを追加", async () => {
+        return orpc.quarters.create({ year, quarter });
+      });
+      if (!q) return;
+      setQuarters((qs) =>
+        [
+          ...qs,
+          { ...q, months: [...q.months].sort((a, b) => a.month - b.month) },
+        ].sort((a, b) => a.year - b.year || a.quarter - b.quarter),
+      );
     } finally {
       setBusy(false);
     }
@@ -1047,6 +1075,15 @@ export function MembersView({ history }: { history: HistoryController }) {
           >
             + Member
           </button>
+          <button
+            type="button"
+            className="btn-sm"
+            onClick={addQuarter}
+            disabled={busy}
+          >
+            + Quarter
+          </button>
+
           {(actionWarning || history.warning) && (
             <span className="name-action-warning" role="alert">
               {actionWarning || history.warning}

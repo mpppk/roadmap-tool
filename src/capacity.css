@@ -183,7 +183,6 @@
   white-space: nowrap;
   position: sticky;
   top: 0;
-  z-index: 10;
 }
 .th-label {
   width: var(--col-label);
@@ -213,6 +212,7 @@
   text-align: center;
   padding: 0 8px;
   border-right: 1px solid var(--border);
+  z-index: 10;
 }
 
 /* Feature row */

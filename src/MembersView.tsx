@@ -66,11 +66,33 @@ function monthLabel(month: Month): string {
   return `${month.year}-${String(month.month).padStart(2, "0")}`;
 }
 
-function nextQuarterYQ(quarters: Quarter[]): { year: number; quarter: number } {
-  const last = quarters[quarters.length - 1];
-  if (!last) return { year: new Date().getFullYear(), quarter: 1 };
-  if (last.quarter === 4) return { year: last.year + 1, quarter: 1 };
-  return { year: last.year, quarter: last.quarter + 1 };
+type QuarterYQ = { year: number; quarter: number };
+
+function quartersInRange(start: QuarterYQ, end: QuarterYQ): QuarterYQ[] {
+  const result: QuarterYQ[] = [];
+  let { year, quarter } = start;
+  const endKey = end.year * 4 + end.quarter;
+  while (year * 4 + quarter <= endKey) {
+    result.push({ year, quarter });
+    if (quarter === 4) {
+      year++;
+      quarter = 1;
+    } else {
+      quarter++;
+    }
+  }
+  return result;
+}
+
+function isQuarterInRange(
+  q: QuarterYQ,
+  start: QuarterYQ,
+  end: QuarterYQ,
+): boolean {
+  const qKey = q.year * 4 + q.quarter;
+  return (
+    qKey >= start.year * 4 + start.quarter && qKey <= end.year * 4 + end.quarter
+  );
 }
 
 function emptyMemberMonthData(): MemberMonthData {
@@ -406,14 +428,29 @@ export function MembersView({ history }: { history: HistoryController }) {
   const [capacityAggMode, setCapacityAggMode] =
     useState<CapacityAggMode>("total");
   const [quarters, setQuarters] = useState<Quarter[]>([]);
+  const [rangeStart, setRangeStart] = useState<QuarterYQ | null>(null);
+  const [rangeEnd, setRangeEnd] = useState<QuarterYQ | null>(null);
+  const rangeInitializedRef = useRef(false);
   const [memberRows, setMemberRows] = useState<MemberRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [actionWarning, setActionWarning] = useState<string | null>(null);
 
+  const displayedQuarters = useMemo(() => {
+    if (!rangeStart || !rangeEnd) return quarters;
+    return quarters.filter((q) => isQuarterInRange(q, rangeStart, rangeEnd));
+  }, [quarters, rangeStart, rangeEnd]);
+
+  const yearOptions = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    const existing = quarters.map((q) => q.year);
+    const base = Array.from({ length: 10 }, (_, i) => currentYear - 2 + i);
+    return [...new Set([...existing, ...base])].sort((a, b) => a - b);
+  }, [quarters]);
+
   const columns = useMemo(
-    () => columnsForMode(quarters, viewMode),
-    [quarters, viewMode],
+    () => columnsForMode(displayedQuarters, viewMode),
+    [displayedQuarters, viewMode],
   );
 
   // ── Initial load ────────────────────────────────────────────────────────
@@ -461,6 +498,21 @@ export function MembersView({ history }: { history: HistoryController }) {
     });
 
     setQuarters(sortedQs);
+    if (!rangeInitializedRef.current) {
+      rangeInitializedRef.current = true;
+      const first = sortedQs[0];
+      const last = sortedQs[sortedQs.length - 1];
+      if (first && last) {
+        setRangeStart({ year: first.year, quarter: first.quarter });
+        setRangeEnd({ year: last.year, quarter: last.quarter });
+      } else {
+        const now = new Date();
+        const yr = now.getFullYear();
+        const q = Math.ceil((now.getMonth() + 1) / 3) as 1 | 2 | 3 | 4;
+        setRangeStart({ year: yr, quarter: q });
+        setRangeEnd({ year: yr, quarter: q });
+      }
+    }
     setMemberRows(rows);
     setLoading(false);
   }, []);
@@ -565,20 +617,37 @@ export function MembersView({ history }: { history: HistoryController }) {
     [history],
   );
 
-  const addQuarter = async () => {
+  const applyRange = async (start: QuarterYQ, end: QuarterYQ) => {
+    if (start.year * 4 + start.quarter > end.year * 4 + end.quarter) return;
+    setRangeStart(start);
+    setRangeEnd(end);
+
+    const needed = quartersInRange(start, end);
+    const missing = needed.filter(
+      (yq) =>
+        !quarters.some((q) => q.year === yq.year && q.quarter === yq.quarter),
+    );
+    if (missing.length === 0) return;
+
     setBusy(true);
     try {
-      const { year, quarter } = nextQuarterYQ(quarters);
-      const q = await history.record("Quarterを追加", async () => {
-        return orpc.quarters.create({ year, quarter });
-      });
-      if (!q) return;
-      setQuarters((qs) =>
-        [
-          ...qs,
-          { ...q, months: [...q.months].sort((a, b) => a.month - b.month) },
-        ].sort((a, b) => a.year - b.year || a.quarter - b.quarter),
+      const created = await Promise.all(
+        missing.map((yq) =>
+          orpc.quarters.create({ year: yq.year, quarter: yq.quarter }),
+        ),
       );
+      const valid = created.filter(Boolean);
+      if (valid.length > 0) {
+        setQuarters((qs) =>
+          [
+            ...qs,
+            ...valid.map((q) => ({
+              ...q!,
+              months: [...q!.months].sort((a, b) => a.month - b.month),
+            })),
+          ].sort((a, b) => a.year - b.year || a.quarter - b.quarter),
+        );
+      }
     } finally {
       setBusy(false);
     }
@@ -672,6 +741,88 @@ export function MembersView({ history }: { history: HistoryController }) {
             </button>
           </fieldset>
         )}
+        <fieldset className="period-toggle">
+          <legend className="period-toggle-label">表示期間</legend>
+          <select
+            value={rangeStart?.year ?? new Date().getFullYear()}
+            disabled={busy}
+            onChange={(e) => {
+              const yr = Number(e.target.value);
+              void applyRange(
+                { year: yr, quarter: rangeStart?.quarter ?? 1 },
+                rangeEnd ?? { year: yr, quarter: 4 },
+              );
+            }}
+          >
+            {yearOptions.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
+          <select
+            value={rangeStart?.quarter ?? 1}
+            disabled={busy}
+            onChange={(e) => {
+              const q = Number(e.target.value) as 1 | 2 | 3 | 4;
+              void applyRange(
+                {
+                  year: rangeStart?.year ?? new Date().getFullYear(),
+                  quarter: q,
+                },
+                rangeEnd ?? {
+                  year: rangeStart?.year ?? new Date().getFullYear(),
+                  quarter: 4,
+                },
+              );
+            }}
+          >
+            <option value={1}>Q1</option>
+            <option value={2}>Q2</option>
+            <option value={3}>Q3</option>
+            <option value={4}>Q4</option>
+          </select>
+          <span style={{ fontSize: 11, color: "var(--cv-text-3)" }}>〜</span>
+          <select
+            value={rangeEnd?.year ?? new Date().getFullYear()}
+            disabled={busy}
+            onChange={(e) => {
+              const yr = Number(e.target.value);
+              void applyRange(rangeStart ?? { year: yr, quarter: 1 }, {
+                year: yr,
+                quarter: rangeEnd?.quarter ?? 4,
+              });
+            }}
+          >
+            {yearOptions.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
+          <select
+            value={rangeEnd?.quarter ?? 4}
+            disabled={busy}
+            onChange={(e) => {
+              const q = Number(e.target.value) as 1 | 2 | 3 | 4;
+              void applyRange(
+                rangeStart ?? {
+                  year: rangeEnd?.year ?? new Date().getFullYear(),
+                  quarter: 1,
+                },
+                {
+                  year: rangeEnd?.year ?? new Date().getFullYear(),
+                  quarter: q,
+                },
+              );
+            }}
+          >
+            <option value={1}>Q1</option>
+            <option value={2}>Q2</option>
+            <option value={3}>Q3</option>
+            <option value={4}>Q4</option>
+          </select>
+        </fieldset>
         {busy && (
           <span
             style={{ marginLeft: 8, fontSize: 11, color: "var(--cv-text-3)" }}
@@ -874,14 +1025,6 @@ export function MembersView({ history }: { history: HistoryController }) {
             disabled={busy}
           >
             + Member
-          </button>
-          <button
-            type="button"
-            className="btn-sm"
-            onClick={addQuarter}
-            disabled={busy}
-          >
-            + Quarter
           </button>
           {(actionWarning || history.warning) && (
             <span className="name-action-warning" role="alert">

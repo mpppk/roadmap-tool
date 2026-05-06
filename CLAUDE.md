@@ -101,7 +101,6 @@ Browser → React (src/App.tsx)
 ### CLI
 
 `src/cli.ts` は、フィーチャーとメンバー向けの薄い oRPC クライアント CLI を提供します。`ROADMAP_URL`（デフォルト: `http://localhost:3000`）に接続し、サーバーの起動が必要です。
-```
 
 ### テスト
 
@@ -114,6 +113,10 @@ Browser → React (src/App.tsx)
 `src/index.html` は `src/index.ts` にルートハンドラーとして直接インポートされます — Bun のバンドラーが `src/frontend.tsx` と CSS を自動的にトランスパイル・バンドルします。開発環境では `import.meta.hot` を通じて HMR が有効です。
 
 詳細については、`node_modules/bun-types/docs/**.mdx` にある Bun API ドキュメントを参照してください。
+
+## 実装プランの作成
+
+プランの作成時は、検討が必要な項目を徹底的に洗い出し、曖昧性が完全に排除されるまでユーザに質問・確認を行なってください。
 
 ## ブラウザでの動作確認
 

@@ -17,11 +17,13 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun src/db/run-migrate.ts",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "playwright-cli": "playwright-cli"
   },
   "dependencies": {
     "@orpc/client": "^1.14.0",
     "@orpc/server": "^1.14.0",
+    "@playwright/cli": "^0.1.11",
     "@radix-ui/react-label": "^2.1.7",
     "@radix-ui/react-select": "^2.2.6",
     "@radix-ui/react-slot": "^1.2.3",

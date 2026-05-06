@@ -3403,7 +3403,9 @@ export function CapacityView({ history }: { history: HistoryController }) {
                 className="import-textarea"
                 value={importTsv}
                 onChange={(e) => setImportTsv(e.target.value)}
-                placeholder={"機能\t担当者\tキャパシティ\t月\nFeature A\tAlice\t0.5\t2026-04"}
+                placeholder={
+                  "機能\t担当者\tキャパシティ\t月\nFeature A\tAlice\t0.5\t2026-04"
+                }
                 rows={8}
                 disabled={importing}
               />

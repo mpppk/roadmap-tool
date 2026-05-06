@@ -631,11 +631,14 @@ export function MembersView({ history }: { history: HistoryController }) {
 
     setBusy(true);
     try {
-      const created = await Promise.all(
-        missing.map((yq) =>
-          orpc.quarters.create({ year: yq.year, quarter: yq.quarter }),
+      const created = await history.record("表示期間を変更", async () =>
+        Promise.all(
+          missing.map((yq) =>
+            orpc.quarters.create({ year: yq.year, quarter: yq.quarter }),
+          ),
         ),
       );
+      if (!created) return;
       const valid = created.filter(Boolean);
       if (valid.length > 0) {
         setQuarters((qs) =>

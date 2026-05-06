@@ -531,6 +531,205 @@ describe("feature metadata", () => {
     const members = await listMembers({});
     expect(members.some((m) => m.name === "Alice")).toBe(true);
   });
+
+  test("imports allocation tsv with feature_id and member_id for rename tracking", async () => {
+    const createQuarter = router.quarters.create.callable({
+      context: { db: state.db },
+    });
+    const createFeature = router.features.create.callable({
+      context: { db: state.db },
+    });
+    const createMember = router.members.create.callable({
+      context: { db: state.db },
+    });
+    const renameFeature = router.features.rename.callable({
+      context: { db: state.db },
+    });
+    const renameMember = router.members.rename.callable({
+      context: { db: state.db },
+    });
+    const importTsv = router.import.tsvImport.callable({
+      context: { db: state.db },
+    });
+
+    await createQuarter({ year: 2026, quarter: 2 });
+    const feature = await createFeature({ name: "Auth" });
+    const member = await createMember({ name: "Alice" });
+
+    // Rename both before importing
+    await renameFeature({ id: feature!.id, name: "Auth v2", links: [] });
+    await renameMember({ id: member!.id, name: "Alice Smith" });
+
+    // Import using old names but correct IDs — IDs should win
+    const result = await importTsv({
+      tsv: [
+        "機能\tfeature_id\t担当者\tmember_id\tキャパシティ\t月",
+        `Auth\t${feature!.id}\tAlice\t${member!.id}\t0.5\t2026-04`,
+      ].join("\n"),
+    });
+
+    expect(result.success).toBe(1);
+    expect(result.errors).toHaveLength(0);
+
+    const allocations = await state.db.select().from(memberMonthAllocations).all();
+    expect(allocations).toHaveLength(1);
+    expect(allocations[0]?.capacity).toBe(0.5);
+  });
+
+  test("imports allocation csv with feature_id and member_id for rename tracking", async () => {
+    const createQuarter = router.quarters.create.callable({
+      context: { db: state.db },
+    });
+    const createFeature = router.features.create.callable({
+      context: { db: state.db },
+    });
+    const createMember = router.members.create.callable({
+      context: { db: state.db },
+    });
+    const renameFeature = router.features.rename.callable({
+      context: { db: state.db },
+    });
+    const renameMember = router.members.rename.callable({
+      context: { db: state.db },
+    });
+    const importCsv = router.import.csvImport.callable({
+      context: { db: state.db },
+    });
+
+    await createQuarter({ year: 2026, quarter: 2 });
+    const feature = await createFeature({ name: "Search" });
+    const member = await createMember({ name: "Bob" });
+
+    await renameFeature({ id: feature!.id, name: "Search v2", links: [] });
+    await renameMember({ id: member!.id, name: "Bob Smith" });
+
+    const result = await importCsv({
+      csv: [
+        "Epic,機能,feature_id,担当者,member_id,キャパシティ,月",
+        `,Search,${feature!.id},Bob,${member!.id},1,2026-04`,
+      ].join("\n"),
+    });
+
+    expect(result.success).toBe(1);
+    expect(result.errors).toHaveLength(0);
+
+    const allocations = await state.db.select().from(memberMonthAllocations).all();
+    expect(allocations).toHaveLength(1);
+    expect(allocations[0]?.capacity).toBe(1);
+  });
+
+  test("exports allocationCSV with feature_id and member_id columns", async () => {
+    const createQuarter = router.quarters.create.callable({
+      context: { db: state.db },
+    });
+    const createFeature = router.features.create.callable({
+      context: { db: state.db },
+    });
+    const createMember = router.members.create.callable({
+      context: { db: state.db },
+    });
+    const exportCsv = router.export.allocationCSV.callable({
+      context: { db: state.db },
+    });
+    const assignMember = router.allocations.assignMember.callable({
+      context: { db: state.db },
+    });
+
+    await createQuarter({ year: 2026, quarter: 2 });
+    const feature = await createFeature({ name: "Auth" });
+    const member = await createMember({ name: "Alice" });
+    await assignMember({ featureId: feature!.id, memberId: member!.id });
+
+    await router.allocations.updateMemberAllocation.callable({
+      context: { db: state.db },
+    })({
+      featureId: feature!.id,
+      memberId: member!.id,
+      periodType: "month",
+      monthId: (await state.db.select().from(months).all())[0]!.id,
+      capacity: 0.5,
+    });
+
+    const csv = await exportCsv({});
+    const lines = csv.split("\n");
+    const header = lines[0]!;
+    expect(header).toContain("feature_id");
+    expect(header).toContain("member_id");
+
+    const dataLine = lines[1]!;
+    const cols = dataLine.split(",");
+    const headerCols = header.split(",");
+    const featureIdCol = headerCols.indexOf("feature_id");
+    const memberIdCol = headerCols.indexOf("member_id");
+    expect(Number(cols[featureIdCol])).toBe(feature!.id);
+    expect(Number(cols[memberIdCol])).toBe(member!.id);
+  });
+
+  test("featureMetadataCSVImport uses feature_id for rename tracking", async () => {
+    const createFeature = router.features.create.callable({
+      context: { db: state.db },
+    });
+    const renameFeature = router.features.rename.callable({
+      context: { db: state.db },
+    });
+    const importCsv = router.import.featureMetadataCSVImport.callable({
+      context: { db: state.db },
+    });
+    const listFeatures = router.features.list.callable({
+      context: { db: state.db },
+    });
+
+    const feature = await createFeature({ name: "Auth", description: "Old" });
+    await renameFeature({ id: feature!.id, name: "Auth v2", links: [] });
+
+    // Import using old name but correct feature_id — ID should win
+    await importCsv({
+      csv: [
+        "epic,feature_id,name,description,links",
+        `,${feature!.id},Auth,New description,[]`,
+      ].join("\n"),
+    });
+
+    const listed = await listFeatures({});
+    const updated = listed.find((f) => f.id === feature!.id);
+    expect(updated?.description).toBe("New description");
+    // Name should not be changed by featureMetadataCSVImport
+    expect(updated?.name).toBe("Auth v2");
+  });
+
+  test("memberTSVImport uses id column for rename tracking", async () => {
+    const createMember = router.members.create.callable({
+      context: { db: state.db },
+    });
+    const renameMember = router.members.rename.callable({
+      context: { db: state.db },
+    });
+    const importTsv = router.import.memberTSVImport.callable({
+      context: { db: state.db },
+    });
+    const listMembers = router.members.list.callable({
+      context: { db: state.db },
+    });
+
+    const member = await createMember({ name: "Alice" });
+    await renameMember({ id: member!.id, name: "Alice Smith" });
+
+    // Import using old name but correct id — ID should win
+    const result = await importTsv({
+      tsv: [
+        "id\tname\tmax_capacity",
+        `${member!.id}\tAlice\t0.8`,
+      ].join("\n"),
+    });
+
+    expect(result.success).toBe(1);
+
+    const listed = await listMembers({});
+    const updated = listed.find((m) => m.id === member!.id);
+    expect(updated?.maxCapacity).toBe(0.8);
+    // Name should not change — member was found by ID
+    expect(updated?.name).toBe("Alice Smith");
+  });
 });
 
 describe("history snapshots", () => {

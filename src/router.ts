@@ -1908,6 +1908,7 @@ const exportFeatureCSV = o.input(z.object({})).handler(async ({ context }) => {
   const header = [
     "Epic",
     "機能",
+    "feature_id",
     ...allQuarters.map((q) => `${q.year}-Q${q.quarter}`),
   ].join(",");
   const rows = allFeatures.map((feature) => {
@@ -1922,6 +1923,7 @@ const exportFeatureCSV = o.input(z.object({})).handler(async ({ context }) => {
     return [
       csvCell(epicById.get(feature.epicId) ?? ""),
       csvCell(feature.name),
+      feature.id,
       ...cells,
     ].join(",");
   });
@@ -1939,7 +1941,7 @@ const exportMemberCSV = o.input(z.object({})).handler(async ({ context }) => {
   const epicById = new Map(allEpics.map((epic) => [epic.id, epic.name]));
 
   const qHeaders = allQuarters.map((q) => `${q.year}-Q${q.quarter}`);
-  const header = ["担当者", "Epic", "機能", ...qHeaders].join(",");
+  const header = ["担当者", "member_id", "Epic", "機能", "feature_id", ...qHeaders].join(",");
 
   const rows: string[] = [];
   for (const member of allMembers) {
@@ -1959,8 +1961,10 @@ const exportMemberCSV = o.input(z.object({})).handler(async ({ context }) => {
         rows.push(
           [
             csvCell(member.name),
+            member.id,
             csvCell(epicById.get(feature.epicId) ?? ""),
             csvCell(feature.name),
+            feature.id,
             ...cells,
           ].join(","),
         );
@@ -1990,7 +1994,7 @@ const exportAllocationCSV = o
     const memberById = new Map(allMembers.map((m) => [m.id, m.name]));
     const monthById = new Map(allMonths.map((m) => [m.id, m]));
 
-    const header = ["Epic", "機能", "担当者", "キャパシティ", "月"].join(",");
+    const header = ["Epic", "機能", "feature_id", "担当者", "member_id", "キャパシティ", "月"].join(",");
     const rows = maRows
       .filter((r) => r.capacity > 0)
       .flatMap((r) => {
@@ -2003,7 +2007,9 @@ const exportAllocationCSV = o
           [
             csvCell(feature ? (epicById.get(feature.epicId) ?? "") : ""),
             csvCell(featureName),
+            r.featureId,
             csvCell(memberName),
+            r.memberId,
             r.capacity,
             monthLabel(month.year, month.month),
           ].join(","),
@@ -2029,6 +2035,7 @@ const exportFeatureMetadataCSV = o
         const links = await getFeatureLinks(context.db, feature.id);
         return [
           csvCell(epicById.get(feature.epicId) ?? ""),
+          feature.id,
           csvCell(feature.name),
           csvCell(feature.description ?? ""),
           csvCell(
@@ -2039,7 +2046,7 @@ const exportFeatureMetadataCSV = o
         ].join(",");
       }),
     );
-    return [["epic", "name", "description", "links"].join(","), ...rows].join(
+    return [["epic", "feature_id", "name", "description", "links"].join(","), ...rows].join(
       "\n",
     );
   });
@@ -2162,6 +2169,7 @@ type ImportRowError = { row: number; message: string };
 type FeatureMetadataImportRow = {
   row: number;
   epic: string | null | undefined;
+  featureId: number | null;
   name: string;
   description: string | null;
   links: NormalizedFeatureLinkInput[];
@@ -2217,6 +2225,8 @@ const csvImport = o
     const colCapacity = headers.indexOf("キャパシティ");
     const colMonth = headers.indexOf("月");
     const colEpic = headers.indexOf("Epic");
+    const colFeatureId = headers.indexOf("feature_id");
+    const colMemberId = headers.indexOf("member_id");
 
     if ([colFeature, colMember, colCapacity, colMonth].includes(-1)) {
       throw new ORPCError("BAD_REQUEST", {
@@ -2231,13 +2241,19 @@ const csvImport = o
 
     // Preload caches
     const featureCache = new Map<string, { id: number; epicId: number }>();
+    const featureCacheById = new Map<number, { id: number; epicId: number }>();
     const memberCache = new Map<string, number>();
+    const memberCacheById = new Map<number, number>();
     const monthCache = new Map<string, number>();
     const defaultEpicId = await getDefaultEpicId(db);
-    for (const f of await db.select().from(features).all())
+    for (const f of await db.select().from(features).all()) {
       featureCache.set(f.name, { id: f.id, epicId: f.epicId });
-    for (const m of await db.select().from(members).all())
+      featureCacheById.set(f.id, { id: f.id, epicId: f.epicId });
+    }
+    for (const m of await db.select().from(members).all()) {
       memberCache.set(m.name, m.id);
+      memberCacheById.set(m.id, m.id);
+    }
     for (const m of await db.select().from(months).all())
       monthCache.set(monthLabel(m.year, m.month), m.id);
 
@@ -2251,6 +2267,8 @@ const csvImport = o
       const memberName = (cols[colMember] ?? "").trim();
       const capacityStr = (cols[colCapacity] ?? "").trim();
       const monthStr = (cols[colMonth] ?? "").trim();
+      const rawFeatureId = colFeatureId >= 0 ? (cols[colFeatureId] ?? "").trim() : "";
+      const rawMemberId = colMemberId >= 0 ? (cols[colMemberId] ?? "").trim() : "";
       const epicName = colEpic >= 0 ? (cols[colEpic] ?? "").trim() : undefined;
 
       if (!featureName) {
@@ -2297,7 +2315,11 @@ const csvImport = o
       // Find or create feature
       const desiredEpicId =
         colEpic >= 0 ? await getOrCreateEpicByName(db, epicName) : undefined;
-      let featureRecord = featureCache.get(featureName);
+      // ID lookup first, then name fallback
+      const parsedFeatureId = rawFeatureId ? Number(rawFeatureId) : NaN;
+      let featureRecord =
+        (!Number.isNaN(parsedFeatureId) && featureCacheById.get(parsedFeatureId)) ||
+        featureCache.get(featureName);
       let featureId = featureRecord?.id;
       if (featureId === undefined) {
         const epicId = desiredEpicId ?? defaultEpicId;
@@ -2313,6 +2335,7 @@ const csvImport = o
         featureId = newF.id;
         featureRecord = { id: featureId, epicId: newF.epicId };
         featureCache.set(featureName, featureRecord);
+        featureCacheById.set(featureId, featureRecord);
       } else if (
         desiredEpicId !== undefined &&
         featureRecord &&
@@ -2325,11 +2348,17 @@ const csvImport = o
             position: await nextFeaturePosition(db, desiredEpicId),
           })
           .where(eq(features.id, featureId));
-        featureCache.set(featureName, { id: featureId, epicId: desiredEpicId });
+        const updated = { id: featureId, epicId: desiredEpicId };
+        featureCache.set(featureName, updated);
+        featureCacheById.set(featureId, updated);
       }
 
       // Find or create member
-      let memberId = memberCache.get(memberName);
+      // ID lookup first, then name fallback
+      const parsedMemberId = rawMemberId ? Number(rawMemberId) : NaN;
+      let memberId =
+        (!Number.isNaN(parsedMemberId) && memberCacheById.get(parsedMemberId)) ||
+        memberCache.get(memberName);
       if (memberId === undefined) {
         const [newM] = await db
           .insert(members)
@@ -2338,6 +2367,7 @@ const csvImport = o
         if (!newM) throw new Error(`Failed to create member: ${memberName}`);
         memberId = newM.id;
         memberCache.set(memberName, memberId);
+        memberCacheById.set(memberId, memberId);
       }
 
       // Find or create month (and quarter if needed)
@@ -2415,6 +2445,8 @@ const tsvImport = o
     const colCapacity = headers.indexOf("キャパシティ");
     const colMonth = headers.indexOf("月");
     const colEpic = headers.indexOf("Epic");
+    const colFeatureId = headers.indexOf("feature_id");
+    const colMemberId = headers.indexOf("member_id");
 
     if ([colFeature, colMember, colCapacity, colMonth].includes(-1)) {
       throw new ORPCError("BAD_REQUEST", {
@@ -2429,13 +2461,19 @@ const tsvImport = o
 
     // Preload caches
     const featureCache = new Map<string, { id: number; epicId: number }>();
+    const featureCacheById = new Map<number, { id: number; epicId: number }>();
     const memberCache = new Map<string, number>();
+    const memberCacheById = new Map<number, number>();
     const monthCache = new Map<string, number>();
     const defaultEpicId = await getDefaultEpicId(db);
-    for (const f of await db.select().from(features).all())
+    for (const f of await db.select().from(features).all()) {
       featureCache.set(f.name, { id: f.id, epicId: f.epicId });
-    for (const m of await db.select().from(members).all())
+      featureCacheById.set(f.id, { id: f.id, epicId: f.epicId });
+    }
+    for (const m of await db.select().from(members).all()) {
       memberCache.set(m.name, m.id);
+      memberCacheById.set(m.id, m.id);
+    }
     for (const m of await db.select().from(months).all())
       monthCache.set(monthLabel(m.year, m.month), m.id);
 
@@ -2449,6 +2487,8 @@ const tsvImport = o
       const memberName = (cols[colMember] ?? "").trim();
       const capacityStr = (cols[colCapacity] ?? "").trim();
       const monthStr = (cols[colMonth] ?? "").trim();
+      const rawFeatureId = colFeatureId >= 0 ? (cols[colFeatureId] ?? "").trim() : "";
+      const rawMemberId = colMemberId >= 0 ? (cols[colMemberId] ?? "").trim() : "";
       const epicName = colEpic >= 0 ? (cols[colEpic] ?? "").trim() : undefined;
 
       if (!featureName) {
@@ -2495,7 +2535,11 @@ const tsvImport = o
       // Find or create feature
       const desiredEpicId =
         colEpic >= 0 ? await getOrCreateEpicByName(db, epicName) : undefined;
-      let featureRecord = featureCache.get(featureName);
+      // ID lookup first, then name fallback
+      const parsedFeatureId = rawFeatureId ? Number(rawFeatureId) : NaN;
+      let featureRecord =
+        (!Number.isNaN(parsedFeatureId) && featureCacheById.get(parsedFeatureId)) ||
+        featureCache.get(featureName);
       let featureId = featureRecord?.id;
       if (featureId === undefined) {
         const epicId = desiredEpicId ?? defaultEpicId;
@@ -2511,6 +2555,7 @@ const tsvImport = o
         featureId = newF.id;
         featureRecord = { id: featureId, epicId: newF.epicId };
         featureCache.set(featureName, featureRecord);
+        featureCacheById.set(featureId, featureRecord);
       } else if (
         desiredEpicId !== undefined &&
         featureRecord &&
@@ -2523,11 +2568,17 @@ const tsvImport = o
             position: await nextFeaturePosition(db, desiredEpicId),
           })
           .where(eq(features.id, featureId));
-        featureCache.set(featureName, { id: featureId, epicId: desiredEpicId });
+        const updated = { id: featureId, epicId: desiredEpicId };
+        featureCache.set(featureName, updated);
+        featureCacheById.set(featureId, updated);
       }
 
       // Find or create member
-      let memberId = memberCache.get(memberName);
+      // ID lookup first, then name fallback
+      const parsedMemberId = rawMemberId ? Number(rawMemberId) : NaN;
+      let memberId =
+        (!Number.isNaN(parsedMemberId) && memberCacheById.get(parsedMemberId)) ||
+        memberCache.get(memberName);
       if (memberId === undefined) {
         const [newM] = await db
           .insert(members)
@@ -2536,6 +2587,7 @@ const tsvImport = o
         if (!newM) throw new Error(`Failed to create member: ${memberName}`);
         memberId = newM.id;
         memberCache.set(memberName, memberId);
+        memberCacheById.set(memberId, memberId);
       }
 
       // Find or create month (and quarter if needed)
@@ -2607,6 +2659,7 @@ const featureMetadataCSVImport = o
 
     const headers = parseCSVLine(lines[0]!).map((h) => h.trim());
     const colEpic = headers.indexOf("epic");
+    const colFeatureId = headers.indexOf("feature_id");
     const colName = headers.indexOf("name");
     const colDescription = headers.indexOf("description");
     const colLinks = headers.indexOf("links");
@@ -2635,6 +2688,9 @@ const featureMetadataCSVImport = o
       }
       seenNames.add(name);
 
+      const rawFeatureId = colFeatureId >= 0 ? (cols[colFeatureId] ?? "").trim() : "";
+      const featureId = rawFeatureId ? Number(rawFeatureId) : null;
+
       const description = normalizeFeatureDescriptionInput(
         cols[colDescription] ?? "",
       );
@@ -2644,6 +2700,7 @@ const featureMetadataCSVImport = o
       rows.push({
         row: rowNum,
         epic,
+        featureId: featureId !== null && !Number.isNaN(featureId) ? featureId : null,
         name,
         description: description ?? null,
         links: links ?? [],
@@ -2652,10 +2709,12 @@ const featureMetadataCSVImport = o
 
     const existingFeatures = await db.select().from(features).all();
     const featureByName = new Map(existingFeatures.map((f) => [f.name, f]));
+    const featureById = new Map(existingFeatures.map((f) => [f.id, f]));
     const defaultEpicId = await getDefaultEpicId(db);
 
     for (const row of rows) {
-      const existing = featureByName.get(row.name);
+      // ID lookup first, then name fallback
+      const existing = (row.featureId !== null && featureById.get(row.featureId)) || featureByName.get(row.name);
       const epicId =
         row.epic === undefined
           ? (existing?.epicId ?? defaultEpicId)
@@ -2681,6 +2740,7 @@ const featureMetadataCSVImport = o
         }
         await saveFeatureLinks(db, existing.id, row.links);
         featureByName.set(row.name, updated);
+        featureById.set(existing.id, updated);
       } else {
         const [created] = await db
           .insert(features)
@@ -2698,6 +2758,7 @@ const featureMetadataCSVImport = o
         }
         await saveFeatureLinks(db, created.id, row.links);
         featureByName.set(row.name, created);
+        featureById.set(created.id, created);
       }
     }
 
@@ -2718,6 +2779,7 @@ const memberTSVImport = o
     }
 
     const headers = parseTSVLine(lines[0]!).map((h) => h.trim());
+    const colId = headers.indexOf("id");
     const colName = headers.indexOf("name");
     const colMaxCapacity = headers.indexOf("max_capacity");
 
@@ -2733,6 +2795,7 @@ const memberTSVImport = o
 
     const existingMembers = await db.select().from(members).all();
     const memberByName = new Map(existingMembers.map((m) => [m.name, m]));
+    const memberById = new Map(existingMembers.map((m) => [m.id, m]));
 
     for (let i = 1; i < lines.length; i++) {
       const rowNum = i + 1;
@@ -2767,20 +2830,31 @@ const memberTSVImport = o
       }
 
       try {
-        const existing = memberByName.get(name);
+        // ID lookup first, then name fallback
+        const rawId = colId >= 0 ? (cols[colId] ?? "").trim() : "";
+        const parsedId = rawId ? Number(rawId) : NaN;
+        const existing =
+          (!Number.isNaN(parsedId) && memberById.get(parsedId)) ||
+          memberByName.get(name);
         if (existing) {
           const [updated] = await db
             .update(members)
             .set({ maxCapacity })
             .where(eq(members.id, existing.id))
             .returning();
-          if (updated) memberByName.set(name, updated);
+          if (updated) {
+            memberByName.set(existing.name, updated);
+            memberById.set(existing.id, updated);
+          }
         } else {
           const [created] = await db
             .insert(members)
             .values({ name, maxCapacity })
             .returning();
-          if (created) memberByName.set(name, created);
+          if (created) {
+            memberByName.set(name, created);
+            memberById.set(created.id, created);
+          }
         }
         success++;
       } catch (_error) {

@@ -36,6 +36,11 @@ const MIGRATIONS: Migration[] = [
   },
   { name: "0003_member_max_capacity", sql: migration0003 },
   { name: "0004_feature_metadata", sql: migration0004 },
+  {
+    name: "0005_epics",
+    up: addEpics,
+    transaction: false,
+  },
 ];
 
 function normalizedNameRows(
@@ -126,6 +131,110 @@ function enforceTrimmedUniqueNames(sqlite: Database): void {
   try {
     rebuildNameTable(sqlite, "features", "Feature");
     rebuildNameTable(sqlite, "members", "Member");
+    sqlite.exec("COMMIT");
+  } catch (error) {
+    sqlite.exec("ROLLBACK");
+    throw error;
+  } finally {
+    sqlite.exec(`PRAGMA foreign_keys = ${foreignKeysEnabled ? "ON" : "OFF"}`);
+  }
+}
+
+function addEpics(sqlite: Database): void {
+  const pragma = sqlite
+    .prepare<{ foreign_keys: number }, []>("PRAGMA foreign_keys")
+    .get();
+  const foreignKeysEnabled = pragma?.foreign_keys === 1;
+  const now = Date.now();
+
+  sqlite.exec("PRAGMA foreign_keys = OFF");
+  sqlite.exec("BEGIN");
+  try {
+    sqlite.exec(`
+      CREATE TABLE epics (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+        name        TEXT NOT NULL,
+        description TEXT,
+        position    INTEGER NOT NULL DEFAULT 0,
+        is_default  INTEGER NOT NULL DEFAULT 0,
+        created_at  INTEGER NOT NULL,
+        CONSTRAINT epics_name_trimmed_check CHECK (name = trim(name)),
+        CONSTRAINT epics_name_not_empty_check CHECK (length(name) > 0),
+        CONSTRAINT epics_position_check CHECK (position >= 0)
+      );
+      CREATE UNIQUE INDEX epics_name_trim_unique ON epics (trim(name));
+      CREATE UNIQUE INDEX epics_default_unique ON epics (is_default) WHERE is_default = 1;
+
+      CREATE TABLE epic_links (
+        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        epic_id  INTEGER NOT NULL REFERENCES epics(id) ON DELETE CASCADE,
+        title    TEXT NOT NULL,
+        url      TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        CONSTRAINT epic_links_title_not_empty_check CHECK (length(title) > 0),
+        CONSTRAINT epic_links_url_not_empty_check CHECK (length(url) > 0),
+        CONSTRAINT epic_links_position_check CHECK (position >= 0),
+        UNIQUE(epic_id, position),
+        UNIQUE(epic_id, url)
+      );
+    `);
+
+    const defaultEpic = sqlite
+      .prepare<{ id: number }, [string, number, number, number]>(
+        "INSERT INTO epics (name, position, is_default, created_at) VALUES (?, ?, ?, ?) RETURNING id",
+      )
+      .get("未分類", 0, 1, now);
+    if (!defaultEpic) throw new Error("Failed to create default Epic");
+
+    sqlite.exec(`
+      DROP INDEX IF EXISTS features_name_unique;
+      DROP INDEX IF EXISTS features_name_trim_unique;
+      DROP TABLE IF EXISTS features__new;
+      CREATE TABLE features__new (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+        name        TEXT NOT NULL,
+        description TEXT,
+        epic_id     INTEGER NOT NULL REFERENCES epics(id) ON DELETE RESTRICT,
+        position    INTEGER NOT NULL DEFAULT 0,
+        created_at  INTEGER NOT NULL,
+        CONSTRAINT features_name_trimmed_check CHECK (name = trim(name)),
+        CONSTRAINT features_name_not_empty_check CHECK (length(name) > 0),
+        CONSTRAINT features_position_check CHECK (position >= 0)
+      );
+    `);
+
+    const rows = sqlite
+      .prepare<
+        {
+          id: number;
+          name: string;
+          description: string | null;
+          created_at: number;
+        },
+        []
+      >("SELECT id, name, description, created_at FROM features ORDER BY id")
+      .all();
+    const insert = sqlite.prepare(
+      "INSERT INTO features__new (id, name, description, epic_id, position, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    rows.forEach((row, index) => {
+      insert.run(
+        row.id,
+        row.name,
+        row.description,
+        defaultEpic.id,
+        index,
+        row.created_at,
+      );
+    });
+
+    sqlite.exec(`
+      DROP TABLE features;
+      ALTER TABLE features__new RENAME TO features;
+      CREATE UNIQUE INDEX features_name_trim_unique ON features (trim(name));
+      CREATE UNIQUE INDEX features_epic_id_position_unique ON features (epic_id, position);
+    `);
+
     sqlite.exec("COMMIT");
   } catch (error) {
     sqlite.exec("ROLLBACK");

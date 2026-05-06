@@ -23,6 +23,7 @@ type MemberMonthData = {
   featureAllocations: Array<{
     featureId: number;
     featureName: string;
+    epicName: string | null;
     capacity: number;
   }>;
 };
@@ -105,7 +106,7 @@ function aggregateMemberMonthData(
 ): MemberMonthData {
   const featureTotals = new Map<
     number,
-    { featureName: string; capacity: number }
+    { featureName: string; epicName: string | null; capacity: number }
   >();
   let totalCapacity = 0;
 
@@ -115,10 +116,12 @@ function aggregateMemberMonthData(
     for (const allocation of data.featureAllocations) {
       const current = featureTotals.get(allocation.featureId) ?? {
         featureName: allocation.featureName,
+        epicName: allocation.epicName,
         capacity: 0,
       };
       featureTotals.set(allocation.featureId, {
         featureName: allocation.featureName,
+        epicName: allocation.epicName,
         capacity: current.capacity + allocation.capacity,
       });
     }
@@ -129,6 +132,7 @@ function aggregateMemberMonthData(
     featureAllocations: [...featureTotals].map(([featureId, data]) => ({
       featureId,
       featureName: data.featureName,
+      epicName: data.epicName,
       capacity: data.capacity,
     })),
   };
@@ -482,6 +486,7 @@ export function MembersView({ history }: { history: HistoryController }) {
             featureAllocations: md.featureAllocations.map((fa) => ({
               featureId: fa.feature.id,
               featureName: fa.feature.name,
+              epicName: fa.feature.epic?.name ?? null,
               capacity: fa.capacity,
             })),
           });
@@ -924,10 +929,16 @@ export function MembersView({ history }: { history: HistoryController }) {
                 );
 
                 if (member.expanded) {
-                  const featureMap = new Map<number, string>();
+                  const featureMap = new Map<
+                    number,
+                    { featureName: string; epicName: string | null }
+                  >();
                   for (const monthData of member.months.values()) {
                     for (const fa of monthData.featureAllocations) {
-                      featureMap.set(fa.featureId, fa.featureName);
+                      featureMap.set(fa.featureId, {
+                        featureName: fa.featureName,
+                        epicName: fa.epicName,
+                      });
                     }
                   }
 
@@ -948,14 +959,21 @@ export function MembersView({ history }: { history: HistoryController }) {
                       </tr>,
                     );
                   } else {
-                    for (const [featureId, featureName] of featureMap) {
+                    for (const [featureId, featureInfo] of featureMap) {
                       rows.push(
                         <tr
                           key={`${member.id}-${featureId}`}
                           className="tr-member"
                         >
                           <td className="td-label td-member-label">
-                            <span className="member-name">{featureName}</span>
+                            <span className="member-name">
+                              {featureInfo.featureName}
+                              {featureInfo.epicName && (
+                                <span className="member-feature-epic">
+                                  {featureInfo.epicName}
+                                </span>
+                              )}
+                            </span>
                           </td>
                           <td style={{ width: 80, minWidth: 80 }} />
                           {columns.map((column) => {

@@ -3,6 +3,8 @@ import { and, asc, eq, ne, sql } from "drizzle-orm";
 import * as z from "zod";
 import type { db as DbType } from "./db/index";
 import {
+  epicLinks,
+  epics,
   featureLinks,
   featureMonths,
   features,
@@ -26,10 +28,19 @@ const capacityConflictResolutionSchema = z.enum([
   "rebalanceOthersProportionally",
 ]);
 
-const snapshotFeatureSchema = z.object({
+const snapshotEpicSchema = z.object({
   id: z.number().int(),
   name: z.string(),
   description: z.string().nullable(),
+  position: z.number().int(),
+  isDefault: z.boolean(),
+});
+const snapshotFeatureSchema = z.object({
+  id: z.number().int(),
+  epicId: z.number().int(),
+  name: z.string(),
+  description: z.string().nullable(),
+  position: z.number().int(),
   createdAt: z.number().int(),
 });
 const snapshotFeatureLinkSchema = z.object({
@@ -70,6 +81,7 @@ const snapshotMemberMonthAllocationSchema = z.object({
   capacity: z.number(),
 });
 const roadmapSnapshotSchema = z.object({
+  epics: z.array(snapshotEpicSchema),
   features: z.array(snapshotFeatureSchema),
   featureLinks: z.array(snapshotFeatureLinkSchema),
   members: z.array(snapshotMemberSchema),
@@ -98,6 +110,7 @@ type NormalizedFeatureLinkInput = {
 };
 
 type FeatureRowRecord = typeof features.$inferSelect;
+type EpicRowRecord = typeof epics.$inferSelect;
 
 type SQLiteConstraintError = {
   code?: string;
@@ -209,23 +222,23 @@ function rethrowNameMutationError(
 ): never {
   const sqliteError = asSQLiteConstraintError(error);
   const message = sqliteError?.message ?? "";
+  const tableName =
+    resource === "feature"
+      ? "features"
+      : resource === "member"
+        ? "members"
+        : "epics";
   if (
     sqliteError?.code === "SQLITE_CONSTRAINT_UNIQUE" &&
-    (message.includes(
-      `${resource === "feature" ? "features" : "members"}.name`,
-    ) ||
-      message.includes(
-        `${resource === "feature" ? "features" : "members"}_name_trim_unique`,
-      ))
+    (message.includes(`${tableName}.name`) ||
+      message.includes(`${tableName}_name_trim_unique`))
   ) {
     throwNameError(resource, "DUPLICATE_NAME");
   }
 
   if (
     sqliteError?.code === "SQLITE_CONSTRAINT_CHECK" &&
-    message.includes(
-      `${resource === "feature" ? "features" : "members"}_name_not_empty_check`,
-    )
+    message.includes(`${tableName}_name_not_empty_check`)
   ) {
     throwNameError(resource, "BLANK_NAME");
   }
@@ -265,6 +278,27 @@ async function assertMemberNameAvailable(
   if (existing.length > 0) throwNameError("member", "DUPLICATE_NAME");
 }
 
+async function assertEpicNameAvailable(
+  db: typeof DbType,
+  name: string,
+  excludeId?: number,
+): Promise<void> {
+  const where =
+    excludeId === undefined
+      ? sql`trim(${epics.name}) = ${name}`
+      : and(sql`trim(${epics.name}) = ${name}`, ne(epics.id, excludeId));
+  const existing = await db.select({ id: epics.id }).from(epics).where(where);
+  if (existing.length > 0) throwNameError("epic", "DUPLICATE_NAME");
+}
+
+async function getEpicLinks(db: typeof DbType, epicId: number) {
+  return db
+    .select()
+    .from(epicLinks)
+    .where(eq(epicLinks.epicId, epicId))
+    .orderBy(asc(epicLinks.position), asc(epicLinks.id));
+}
+
 async function getFeatureLinks(db: typeof DbType, featureId: number) {
   return db
     .select()
@@ -273,11 +307,35 @@ async function getFeatureLinks(db: typeof DbType, featureId: number) {
     .orderBy(asc(featureLinks.position), asc(featureLinks.id));
 }
 
+async function buildEpicDto(db: typeof DbType, epic: EpicRowRecord) {
+  return {
+    ...epic,
+    links: await getEpicLinks(db, epic.id),
+  };
+}
+
 async function buildFeatureDto(db: typeof DbType, feature: FeatureRowRecord) {
   return {
     ...feature,
     links: await getFeatureLinks(db, feature.id),
   };
+}
+
+async function saveEpicLinks(
+  db: typeof DbType,
+  epicId: number,
+  links: NormalizedFeatureLinkInput[],
+) {
+  await db.delete(epicLinks).where(eq(epicLinks.epicId, epicId));
+  if (links.length === 0) return;
+  await db.insert(epicLinks).values(
+    links.map((link) => ({
+      epicId,
+      title: link.title,
+      url: link.url,
+      position: link.position,
+    })),
+  );
 }
 
 async function saveFeatureLinks(
@@ -295,6 +353,74 @@ async function saveFeatureLinks(
       position: link.position,
     })),
   );
+}
+
+async function getDefaultEpicId(db: typeof DbType): Promise<number> {
+  const [defaultEpic] = await db
+    .select({ id: epics.id })
+    .from(epics)
+    .where(eq(epics.isDefault, true));
+  if (defaultEpic) return defaultEpic.id;
+
+  const [fallback] = await db
+    .select({ id: epics.id })
+    .from(epics)
+    .orderBy(asc(epics.position), asc(epics.id))
+    .limit(1);
+  if (fallback) return fallback.id;
+
+  const [created] = await db
+    .insert(epics)
+    .values({ name: "未分類", position: 0, isDefault: true })
+    .returning();
+  if (!created) throw new Error("Failed to create default Epic");
+  return created.id;
+}
+
+async function getOrCreateEpicByName(
+  db: typeof DbType,
+  name: string | null | undefined,
+): Promise<number> {
+  const normalized =
+    name === undefined || name === null || name.trim().length === 0
+      ? null
+      : normalizeNameInput(name, "epic");
+  if (normalized === null) return getDefaultEpicId(db);
+
+  const [existing] = await db
+    .select({ id: epics.id })
+    .from(epics)
+    .where(sql`trim(${epics.name}) = ${normalized}`);
+  if (existing) return existing.id;
+
+  const [last] = await db
+    .select({ position: epics.position })
+    .from(epics)
+    .orderBy(sql`${epics.position} DESC`, sql`${epics.id} DESC`)
+    .limit(1);
+  const [created] = await db
+    .insert(epics)
+    .values({
+      name: normalized,
+      position: (last?.position ?? -1) + 1,
+      isDefault: false,
+    })
+    .returning();
+  if (!created) throw new Error(`Failed to create Epic: ${normalized}`);
+  return created.id;
+}
+
+async function nextFeaturePosition(
+  db: typeof DbType,
+  epicId: number,
+): Promise<number> {
+  const [last] = await db
+    .select({ position: features.position })
+    .from(features)
+    .where(eq(features.epicId, epicId))
+    .orderBy(sql`${features.position} DESC`, sql`${features.id} DESC`)
+    .limit(1);
+  return (last?.position ?? -1) + 1;
 }
 
 type PeriodTarget = {
@@ -721,6 +847,7 @@ function snapshotsEqual(a: RoadmapSnapshot, b: RoadmapSnapshot): boolean {
 
 async function getRoadmapSnapshot(db: typeof DbType): Promise<RoadmapSnapshot> {
   const [
+    epicRows,
     featureRows,
     featureLinkRows,
     memberRows,
@@ -729,6 +856,7 @@ async function getRoadmapSnapshot(db: typeof DbType): Promise<RoadmapSnapshot> {
     featureMonthRows,
     memberMonthAllocationRows,
   ] = await Promise.all([
+    db.select().from(epics).orderBy(asc(epics.id)).all(),
     db.select().from(features).orderBy(asc(features.id)).all(),
     db.select().from(featureLinks).orderBy(asc(featureLinks.id)).all(),
     db.select().from(members).orderBy(asc(members.id)).all(),
@@ -743,10 +871,19 @@ async function getRoadmapSnapshot(db: typeof DbType): Promise<RoadmapSnapshot> {
   ]);
 
   return {
-    features: featureRows.map((row) => ({
+    epics: epicRows.map((row) => ({
       id: row.id,
       name: row.name,
       description: row.description,
+      position: row.position,
+      isDefault: row.isDefault,
+    })),
+    features: featureRows.map((row) => ({
+      id: row.id,
+      epicId: row.epicId,
+      name: row.name,
+      description: row.description,
+      position: row.position,
       createdAt: snapshotTimestamp(row.createdAt),
     })),
     featureLinks: featureLinkRows.map((row) => ({
@@ -800,13 +937,19 @@ async function restoreRoadmapSnapshot(
   await db.delete(quarters);
   await db.delete(members);
   await db.delete(features);
+  await db.delete(epics);
 
+  if (snapshot.epics.length > 0) {
+    await db.insert(epics).values(snapshot.epics);
+  }
   if (snapshot.features.length > 0) {
     await db.insert(features).values(
       snapshot.features.map((row) => ({
         id: row.id,
+        epicId: row.epicId,
         name: row.name,
         description: row.description,
+        position: row.position,
         createdAt: new Date(row.createdAt),
       })),
     );
@@ -840,6 +983,54 @@ async function restoreRoadmapSnapshot(
   }
 }
 
+function insertMovedId(
+  ids: number[],
+  id: number,
+  beforeId?: number,
+  afterId?: number,
+): number[] {
+  const without = ids.filter((itemId) => itemId !== id);
+  let index = without.length;
+  if (beforeId !== undefined) {
+    const beforeIndex = without.indexOf(beforeId);
+    if (beforeIndex >= 0) index = beforeIndex;
+  } else if (afterId !== undefined) {
+    const afterIndex = without.indexOf(afterId);
+    if (afterIndex >= 0) index = afterIndex + 1;
+  }
+  without.splice(index, 0, id);
+  return without;
+}
+
+async function resequenceEpics(db: typeof DbType, orderedIds: number[]) {
+  for (let index = 0; index < orderedIds.length; index++) {
+    await db
+      .update(epics)
+      .set({ position: index })
+      .where(eq(epics.id, orderedIds[index]!));
+  }
+}
+
+async function resequenceFeatures(
+  db: typeof DbType,
+  epicId: number,
+  orderedIds: number[],
+) {
+  const tempOffset = 1_000_000;
+  for (let index = 0; index < orderedIds.length; index++) {
+    await db
+      .update(features)
+      .set({ epicId, position: tempOffset + index })
+      .where(eq(features.id, orderedIds[index]!));
+  }
+  for (let index = 0; index < orderedIds.length; index++) {
+    await db
+      .update(features)
+      .set({ epicId, position: index })
+      .where(eq(features.id, orderedIds[index]!));
+  }
+}
+
 // ---------------------------------------------------------------------------
 // History
 // ---------------------------------------------------------------------------
@@ -870,11 +1061,154 @@ const historyRestore = o
   });
 
 // ---------------------------------------------------------------------------
+// Epics
+// ---------------------------------------------------------------------------
+
+const epicsList = o.input(z.object({})).handler(async ({ context }) => {
+  const rows = await context.db
+    .select()
+    .from(epics)
+    .orderBy(asc(epics.position), asc(epics.id))
+    .all();
+  return Promise.all(rows.map((epic) => buildEpicDto(context.db, epic)));
+});
+
+const epicsCreate = o
+  .input(
+    z.object({
+      name: z.string(),
+      description: z.string().nullable().optional(),
+      links: z.array(featureLinkInputSchema).optional(),
+    }),
+  )
+  .handler(async ({ input, context }) => {
+    const name = normalizeNameInput(input.name, "epic");
+    const description = normalizeFeatureDescriptionInput(input.description);
+    const links = normalizeFeatureLinksInput(input.links);
+    await assertEpicNameAvailable(context.db, name);
+    const [last] = await context.db
+      .select({ position: epics.position })
+      .from(epics)
+      .orderBy(sql`${epics.position} DESC`, sql`${epics.id} DESC`)
+      .limit(1);
+    try {
+      const [row] = await context.db
+        .insert(epics)
+        .values({
+          name,
+          description: description ?? null,
+          position: (last?.position ?? -1) + 1,
+          isDefault: false,
+        })
+        .returning();
+      if (!row) return row;
+      if (links !== undefined) await saveEpicLinks(context.db, row.id, links);
+      return buildEpicDto(context.db, row);
+    } catch (error) {
+      rethrowNameMutationError("epic", error);
+    }
+  });
+
+const epicsRename = o
+  .input(
+    z.object({
+      id: z.number().int(),
+      name: z.string(),
+      description: z.string().nullable().optional(),
+      links: z.array(featureLinkInputSchema).optional(),
+    }),
+  )
+  .handler(async ({ input, context }) => {
+    const name = normalizeNameInput(input.name, "epic");
+    const description = normalizeFeatureDescriptionInput(input.description);
+    const links = normalizeFeatureLinksInput(input.links);
+    await assertEpicNameAvailable(context.db, name, input.id);
+    try {
+      const values: { name: string; description?: string | null } = { name };
+      if (description !== undefined) values.description = description;
+      const [row] = await context.db
+        .update(epics)
+        .set(values)
+        .where(eq(epics.id, input.id))
+        .returning();
+      if (!row) return row;
+      if (links !== undefined) await saveEpicLinks(context.db, row.id, links);
+      return buildEpicDto(context.db, row);
+    } catch (error) {
+      rethrowNameMutationError("epic", error);
+    }
+  });
+
+const epicsDelete = o
+  .input(z.object({ id: z.number().int() }))
+  .handler(async ({ input, context }) => {
+    const [epic] = await context.db
+      .select()
+      .from(epics)
+      .where(eq(epics.id, input.id));
+    if (!epic) return;
+    if (epic.isDefault) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: "既定Epicは削除できません。",
+      });
+    }
+    const [child] = await context.db
+      .select({ id: features.id })
+      .from(features)
+      .where(eq(features.epicId, input.id))
+      .limit(1);
+    if (child) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: "Featureが残っているEpicは削除できません。",
+      });
+    }
+    await context.db.delete(epics).where(eq(epics.id, input.id));
+  });
+
+const epicsMove = o
+  .input(
+    z.object({
+      id: z.number().int(),
+      beforeId: z.number().int().optional(),
+      afterId: z.number().int().optional(),
+    }),
+  )
+  .handler(async ({ input, context }) => {
+    const rows = await context.db
+      .select({ id: epics.id })
+      .from(epics)
+      .orderBy(asc(epics.position), asc(epics.id))
+      .all();
+    if (!rows.some((row) => row.id === input.id)) {
+      throw new ORPCError("NOT_FOUND", { message: "Epic not found" });
+    }
+    const orderedIds = insertMovedId(
+      rows.map((row) => row.id),
+      input.id,
+      input.beforeId,
+      input.afterId,
+    );
+    await resequenceEpics(context.db, orderedIds);
+    const updatedRows = await context.db
+      .select()
+      .from(epics)
+      .orderBy(asc(epics.position), asc(epics.id))
+      .all();
+    return Promise.all(
+      updatedRows.map((epic) => buildEpicDto(context.db, epic)),
+    );
+  });
+
+// ---------------------------------------------------------------------------
 // Features
 // ---------------------------------------------------------------------------
 
 const featuresList = o.input(z.object({})).handler(async ({ context }) => {
-  const rows = await context.db.select().from(features).all();
+  const rows = await context.db
+    .select()
+    .from(features)
+    .orderBy(asc(features.epicId), asc(features.position), asc(features.id))
+    .all();
   return Promise.all(
     rows.map((feature) => buildFeatureDto(context.db, feature)),
   );
@@ -884,6 +1218,7 @@ const featuresCreate = o
   .input(
     z.object({
       name: z.string(),
+      epicId: z.number().int().optional(),
       description: z.string().nullable().optional(),
       links: z.array(featureLinkInputSchema).optional(),
     }),
@@ -892,11 +1227,17 @@ const featuresCreate = o
     const name = normalizeNameInput(input.name, "feature");
     const description = normalizeFeatureDescriptionInput(input.description);
     const links = normalizeFeatureLinksInput(input.links);
+    const epicId = input.epicId ?? (await getDefaultEpicId(context.db));
     await assertFeatureNameAvailable(context.db, name);
     try {
       const [row] = await context.db
         .insert(features)
-        .values({ name, description: description ?? null })
+        .values({
+          name,
+          description: description ?? null,
+          epicId,
+          position: await nextFeaturePosition(context.db, epicId),
+        })
         .returning();
       if (!row) return row;
       if (links !== undefined)
@@ -912,6 +1253,7 @@ const featuresRename = o
     z.object({
       id: z.number().int(),
       name: z.string(),
+      epicId: z.number().int().optional(),
       description: z.string().nullable().optional(),
       links: z.array(featureLinkInputSchema).optional(),
     }),
@@ -922,8 +1264,23 @@ const featuresRename = o
     const links = normalizeFeatureLinksInput(input.links);
     await assertFeatureNameAvailable(context.db, name, input.id);
     try {
-      const values: { name: string; description?: string | null } = { name };
+      const values: {
+        name: string;
+        description?: string | null;
+        epicId?: number;
+        position?: number;
+      } = { name };
       if (description !== undefined) values.description = description;
+      if (input.epicId !== undefined) {
+        const [current] = await context.db
+          .select({ epicId: features.epicId })
+          .from(features)
+          .where(eq(features.id, input.id));
+        values.epicId = input.epicId;
+        if (current?.epicId !== input.epicId) {
+          values.position = await nextFeaturePosition(context.db, input.epicId);
+        }
+      }
       const [row] = await context.db
         .update(features)
         .set(values)
@@ -942,6 +1299,52 @@ const featuresDelete = o
   .input(z.object({ id: z.number().int() }))
   .handler(async ({ input, context }) => {
     await context.db.delete(features).where(eq(features.id, input.id));
+  });
+
+const featuresMove = o
+  .input(
+    z.object({
+      id: z.number().int(),
+      epicId: z.number().int(),
+      beforeId: z.number().int().optional(),
+      afterId: z.number().int().optional(),
+    }),
+  )
+  .handler(async ({ input, context }) => {
+    const [target] = await context.db
+      .select()
+      .from(features)
+      .where(eq(features.id, input.id));
+    if (!target)
+      throw new ORPCError("NOT_FOUND", { message: "Feature not found" });
+
+    const affectedEpicIds = new Set<number>([target.epicId, input.epicId]);
+    for (const epicId of affectedEpicIds) {
+      const rows = await context.db
+        .select({ id: features.id })
+        .from(features)
+        .where(eq(features.epicId, epicId))
+        .orderBy(asc(features.position), asc(features.id))
+        .all();
+      let orderedIds = rows
+        .map((row) => row.id)
+        .filter((id) => id !== input.id);
+      if (epicId === input.epicId) {
+        orderedIds = insertMovedId(
+          [...orderedIds, input.id],
+          input.id,
+          input.beforeId,
+          input.afterId,
+        );
+      }
+      await resequenceFeatures(context.db, epicId, orderedIds);
+    }
+    const [row] = await context.db
+      .select()
+      .from(features)
+      .where(eq(features.id, input.id));
+    if (!row) return row;
+    return buildFeatureDto(context.db, row);
   });
 
 // ---------------------------------------------------------------------------
@@ -1119,6 +1522,8 @@ const allocationsGetMemberView = o
 
     const allQuarters = await getQuarterRowsWithMonths(db);
     const allFeatures = await db.select().from(features).all();
+    const allEpics = await db.select().from(epics).all();
+    const epicById = new Map(allEpics.map((epic) => [epic.id, epic]));
     const maRows = await db
       .select()
       .from(memberMonthAllocations)
@@ -1134,7 +1539,10 @@ const allocationsGetMemberView = o
           totalCapacity: monthTotal,
           featureAllocations: allFeatures
             .map((feature) => ({
-              feature,
+              feature: {
+                ...feature,
+                epic: epicById.get(feature.epicId) ?? null,
+              },
               capacity:
                 monthAllocs.find((a) => a.featureId === feature.id)?.capacity ??
                 0,
@@ -1492,10 +1900,13 @@ const allocationsMoveQuarter = o
 const exportFeatureCSV = o.input(z.object({})).handler(async ({ context }) => {
   const { db } = context;
   const allFeatures = await db.select().from(features).all();
+  const allEpics = await db.select().from(epics).all();
   const allQuarters = await getQuarterRowsWithMonths(db);
   const fmRows = await db.select().from(featureMonths).all();
+  const epicById = new Map(allEpics.map((epic) => [epic.id, epic.name]));
 
   const header = [
+    "Epic",
     "機能",
     ...allQuarters.map((q) => `${q.year}-Q${q.quarter}`),
   ].join(",");
@@ -1508,7 +1919,11 @@ const exportFeatureCSV = o.input(z.object({})).handler(async ({ context }) => {
         return sum + (fm?.totalCapacity ?? 0);
       }, 0),
     );
-    return [feature.name, ...cells].join(",");
+    return [
+      csvCell(epicById.get(feature.epicId) ?? ""),
+      csvCell(feature.name),
+      ...cells,
+    ].join(",");
   });
 
   return [header, ...rows].join("\n");
@@ -1519,10 +1934,12 @@ const exportMemberCSV = o.input(z.object({})).handler(async ({ context }) => {
   const allMembers = await db.select().from(members).all();
   const allQuarters = await getQuarterRowsWithMonths(db);
   const allFeatures = await db.select().from(features).all();
+  const allEpics = await db.select().from(epics).all();
   const maRows = await db.select().from(memberMonthAllocations).all();
+  const epicById = new Map(allEpics.map((epic) => [epic.id, epic.name]));
 
   const qHeaders = allQuarters.map((q) => `${q.year}-Q${q.quarter}`);
-  const header = ["担当者", "機能", ...qHeaders].join(",");
+  const header = ["担当者", "Epic", "機能", ...qHeaders].join(",");
 
   const rows: string[] = [];
   for (const member of allMembers) {
@@ -1539,7 +1956,14 @@ const exportMemberCSV = o.input(z.object({})).handler(async ({ context }) => {
         }, 0),
       );
       if (cells.some((c) => c > 0)) {
-        rows.push([member.name, feature.name, ...cells].join(","));
+        rows.push(
+          [
+            csvCell(member.name),
+            csvCell(epicById.get(feature.epicId) ?? ""),
+            csvCell(feature.name),
+            ...cells,
+          ].join(","),
+        );
       }
     }
   }
@@ -1557,25 +1981,29 @@ const exportAllocationCSV = o
       .orderBy(months.year, months.month)
       .all();
     const allFeatures = await db.select().from(features).all();
+    const allEpics = await db.select().from(epics).all();
     const allMembers = await db.select().from(members).all();
     const maRows = await db.select().from(memberMonthAllocations).all();
 
-    const featureById = new Map(allFeatures.map((f) => [f.id, f.name]));
+    const featureById = new Map(allFeatures.map((f) => [f.id, f]));
+    const epicById = new Map(allEpics.map((epic) => [epic.id, epic.name]));
     const memberById = new Map(allMembers.map((m) => [m.id, m.name]));
     const monthById = new Map(allMonths.map((m) => [m.id, m]));
 
-    const header = ["機能", "担当者", "キャパシティ", "月"].join(",");
+    const header = ["Epic", "機能", "担当者", "キャパシティ", "月"].join(",");
     const rows = maRows
       .filter((r) => r.capacity > 0)
       .flatMap((r) => {
-        const featureName = featureById.get(r.featureId) ?? "";
+        const feature = featureById.get(r.featureId);
+        const featureName = feature?.name ?? "";
         const memberName = memberById.get(r.memberId) ?? "";
         const month = monthById.get(r.monthId);
         if (!month) return [];
         return [
           [
-            featureName,
-            memberName,
+            csvCell(feature ? (epicById.get(feature.epicId) ?? "") : ""),
+            csvCell(featureName),
+            csvCell(memberName),
             r.capacity,
             monthLabel(month.year, month.month),
           ].join(","),
@@ -1594,12 +2022,42 @@ const exportFeatureMetadataCSV = o
   .input(z.object({}))
   .handler(async ({ context }) => {
     const allFeatures = await context.db.select().from(features).all();
+    const allEpics = await context.db.select().from(epics).all();
+    const epicById = new Map(allEpics.map((epic) => [epic.id, epic.name]));
     const rows = await Promise.all(
       allFeatures.map(async (feature) => {
         const links = await getFeatureLinks(context.db, feature.id);
         return [
+          csvCell(epicById.get(feature.epicId) ?? ""),
           csvCell(feature.name),
           csvCell(feature.description ?? ""),
+          csvCell(
+            JSON.stringify(
+              links.map((link) => ({ title: link.title, url: link.url })),
+            ),
+          ),
+        ].join(",");
+      }),
+    );
+    return [["epic", "name", "description", "links"].join(","), ...rows].join(
+      "\n",
+    );
+  });
+
+const exportEpicMetadataCSV = o
+  .input(z.object({}))
+  .handler(async ({ context }) => {
+    const allEpics = await context.db
+      .select()
+      .from(epics)
+      .orderBy(asc(epics.position), asc(epics.id))
+      .all();
+    const rows = await Promise.all(
+      allEpics.map(async (epic) => {
+        const links = await getEpicLinks(context.db, epic.id);
+        return [
+          csvCell(epic.name),
+          csvCell(epic.description ?? ""),
           csvCell(
             JSON.stringify(
               links.map((link) => ({ title: link.title, url: link.url })),
@@ -1699,6 +2157,7 @@ type ImportRowError = { row: number; message: string };
 
 type FeatureMetadataImportRow = {
   row: number;
+  epic: string | null | undefined;
   name: string;
   description: string | null;
   links: NormalizedFeatureLinkInput[];
@@ -1753,6 +2212,7 @@ const csvImport = o
     const colMember = headers.indexOf("担当者");
     const colCapacity = headers.indexOf("キャパシティ");
     const colMonth = headers.indexOf("月");
+    const colEpic = headers.indexOf("Epic");
 
     if ([colFeature, colMember, colCapacity, colMonth].includes(-1)) {
       throw new ORPCError("BAD_REQUEST", {
@@ -1766,11 +2226,12 @@ const csvImport = o
     const errors: ImportRowError[] = [];
 
     // Preload caches
-    const featureCache = new Map<string, number>();
+    const featureCache = new Map<string, { id: number; epicId: number }>();
     const memberCache = new Map<string, number>();
     const monthCache = new Map<string, number>();
+    const defaultEpicId = await getDefaultEpicId(db);
     for (const f of await db.select().from(features).all())
-      featureCache.set(f.name, f.id);
+      featureCache.set(f.name, { id: f.id, epicId: f.epicId });
     for (const m of await db.select().from(members).all())
       memberCache.set(m.name, m.id);
     for (const m of await db.select().from(months).all())
@@ -1786,6 +2247,7 @@ const csvImport = o
       const memberName = (cols[colMember] ?? "").trim();
       const capacityStr = (cols[colCapacity] ?? "").trim();
       const monthStr = (cols[colMonth] ?? "").trim();
+      const epicName = colEpic >= 0 ? (cols[colEpic] ?? "").trim() : undefined;
 
       if (!featureName) {
         errors.push({ row: rowNum, message: "機能名が空です" });
@@ -1829,15 +2291,37 @@ const csvImport = o
       }
 
       // Find or create feature
-      let featureId = featureCache.get(featureName);
+      const desiredEpicId =
+        colEpic >= 0 ? await getOrCreateEpicByName(db, epicName) : undefined;
+      let featureRecord = featureCache.get(featureName);
+      let featureId = featureRecord?.id;
       if (featureId === undefined) {
+        const epicId = desiredEpicId ?? defaultEpicId;
         const [newF] = await db
           .insert(features)
-          .values({ name: featureName })
+          .values({
+            name: featureName,
+            epicId,
+            position: await nextFeaturePosition(db, epicId),
+          })
           .returning();
         if (!newF) throw new Error(`Failed to create feature: ${featureName}`);
         featureId = newF.id;
-        featureCache.set(featureName, featureId);
+        featureRecord = { id: featureId, epicId: newF.epicId };
+        featureCache.set(featureName, featureRecord);
+      } else if (
+        desiredEpicId !== undefined &&
+        featureRecord &&
+        featureRecord.epicId !== desiredEpicId
+      ) {
+        await db
+          .update(features)
+          .set({
+            epicId: desiredEpicId,
+            position: await nextFeaturePosition(db, desiredEpicId),
+          })
+          .where(eq(features.id, featureId));
+        featureCache.set(featureName, { id: featureId, epicId: desiredEpicId });
       }
 
       // Find or create member
@@ -1920,6 +2404,7 @@ const featureMetadataCSVImport = o
     if (lines.length < 2) return { success: 0 };
 
     const headers = parseCSVLine(lines[0]!).map((h) => h.trim());
+    const colEpic = headers.indexOf("epic");
     const colName = headers.indexOf("name");
     const colDescription = headers.indexOf("description");
     const colLinks = headers.indexOf("links");
@@ -1934,6 +2419,12 @@ const featureMetadataCSVImport = o
     for (let i = 1; i < lines.length; i++) {
       const rowNum = i + 1;
       const cols = parseCSVLine(lines[i]!);
+      const epic =
+        colEpic < 0
+          ? undefined
+          : (cols[colEpic] ?? "").trim().length > 0
+            ? (cols[colEpic] ?? "").trim()
+            : null;
       const name = normalizeNameInput(cols[colName] ?? "", "feature");
       if (seenNames.has(name)) {
         throwFeatureMetadataError(
@@ -1950,6 +2441,7 @@ const featureMetadataCSVImport = o
       );
       rows.push({
         row: rowNum,
+        epic,
         name,
         description: description ?? null,
         links: links ?? [],
@@ -1958,13 +2450,26 @@ const featureMetadataCSVImport = o
 
     const existingFeatures = await db.select().from(features).all();
     const featureByName = new Map(existingFeatures.map((f) => [f.name, f]));
+    const defaultEpicId = await getDefaultEpicId(db);
 
     for (const row of rows) {
       const existing = featureByName.get(row.name);
+      const epicId =
+        row.epic === undefined
+          ? (existing?.epicId ?? defaultEpicId)
+          : row.epic !== null
+            ? await getOrCreateEpicByName(db, row.epic)
+            : defaultEpicId;
       if (existing) {
         const [updated] = await db
           .update(features)
-          .set({ description: row.description })
+          .set({
+            description: row.description,
+            epicId,
+            ...(existing.epicId !== epicId
+              ? { position: await nextFeaturePosition(db, epicId) }
+              : {}),
+          })
           .where(eq(features.id, existing.id))
           .returning();
         if (!updated) {
@@ -1977,7 +2482,12 @@ const featureMetadataCSVImport = o
       } else {
         const [created] = await db
           .insert(features)
-          .values({ name: row.name, description: row.description })
+          .values({
+            name: row.name,
+            description: row.description,
+            epicId,
+            position: await nextFeaturePosition(db, epicId),
+          })
           .returning();
         if (!created) {
           throw new Error(
@@ -1986,6 +2496,94 @@ const featureMetadataCSVImport = o
         }
         await saveFeatureLinks(db, created.id, row.links);
         featureByName.set(row.name, created);
+      }
+    }
+
+    return { success: rows.length };
+  });
+
+const epicMetadataCSVImport = o
+  .input(z.object({ csv: z.string() }))
+  .handler(async ({ input, context }) => {
+    const { db } = context;
+    const lines = input.csv
+      .split("\n")
+      .map((l) => l.trimEnd())
+      .filter((l) => l.trim().length > 0);
+
+    if (lines.length < 2) return { success: 0 };
+
+    const headers = parseCSVLine(lines[0]!).map((h) => h.trim());
+    const colName = headers.indexOf("name");
+    const colDescription = headers.indexOf("description");
+    const colLinks = headers.indexOf("links");
+    if ([colName, colDescription, colLinks].includes(-1)) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: "CSVヘッダーに name,description,links のカラムが必要です。",
+      });
+    }
+
+    const rows: Array<{
+      row: number;
+      name: string;
+      description: string | null;
+      links: NormalizedFeatureLinkInput[];
+    }> = [];
+    const seenNames = new Set<string>();
+    for (let i = 1; i < lines.length; i++) {
+      const rowNum = i + 1;
+      const cols = parseCSVLine(lines[i]!);
+      const name = normalizeNameInput(cols[colName] ?? "", "epic");
+      if (seenNames.has(name)) {
+        throwFeatureMetadataError(
+          `Epic metadata CSV内でEpic名が重複しています: ${name}`,
+        );
+      }
+      seenNames.add(name);
+      const description = normalizeFeatureDescriptionInput(
+        cols[colDescription] ?? "",
+      );
+      const links = normalizeFeatureLinksInput(
+        parseFeatureMetadataLinksCell(cols[colLinks] ?? ""),
+      );
+      rows.push({
+        row: rowNum,
+        name,
+        description: description ?? null,
+        links: links ?? [],
+      });
+    }
+
+    const existingEpics = await db.select().from(epics).all();
+    const epicByName = new Map(existingEpics.map((epic) => [epic.name, epic]));
+    for (const row of rows) {
+      const existing = epicByName.get(row.name);
+      if (existing) {
+        const [updated] = await db
+          .update(epics)
+          .set({ description: row.description })
+          .where(eq(epics.id, existing.id))
+          .returning();
+        if (!updated) {
+          throw new Error(`Failed to update epic metadata at row ${row.row}`);
+        }
+        await saveEpicLinks(db, existing.id, row.links);
+        epicByName.set(row.name, updated);
+      } else {
+        const [created] = await db
+          .insert(epics)
+          .values({
+            name: row.name,
+            description: row.description,
+            position: (await db.select().from(epics).all()).length,
+            isDefault: false,
+          })
+          .returning();
+        if (!created) {
+          throw new Error(`Failed to create epic metadata at row ${row.row}`);
+        }
+        await saveEpicLinks(db, created.id, row.links);
+        epicByName.set(row.name, created);
       }
     }
 
@@ -2001,11 +2599,19 @@ export const router = {
     snapshot: historySnapshot,
     restore: historyRestore,
   },
+  epics: {
+    list: epicsList,
+    create: epicsCreate,
+    rename: epicsRename,
+    delete: epicsDelete,
+    move: epicsMove,
+  },
   features: {
     list: featuresList,
     create: featuresCreate,
     rename: featuresRename,
     delete: featuresDelete,
+    move: featuresMove,
   },
   members: {
     list: membersList,
@@ -2034,10 +2640,12 @@ export const router = {
     memberCSV: exportMemberCSV,
     allocationCSV: exportAllocationCSV,
     featureMetadataCSV: exportFeatureMetadataCSV,
+    epicMetadataCSV: exportEpicMetadataCSV,
   },
   import: {
     csvImport,
     featureMetadataCSVImport,
+    epicMetadataCSVImport,
   },
 };
 

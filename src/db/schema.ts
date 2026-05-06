@@ -9,12 +9,61 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
+export const epics = sqliteTable(
+  "epics",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull(),
+    description: text("description"),
+    position: integer("position").notNull().default(0),
+    isDefault: integer("is_default", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => [
+    check("epics_name_trimmed_check", sql`${t.name} = trim(${t.name})`),
+    check("epics_name_not_empty_check", sql`length(${t.name}) > 0`),
+    check("epics_position_check", sql`${t.position} >= 0`),
+    uniqueIndex("epics_name_trim_unique").on(sql`trim(${t.name})`),
+    uniqueIndex("epics_default_unique")
+      .on(t.isDefault)
+      .where(sql`${t.isDefault} = 1`),
+  ],
+);
+
+export const epicLinks = sqliteTable(
+  "epic_links",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    epicId: integer("epic_id")
+      .notNull()
+      .references(() => epics.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    url: text("url").notNull(),
+    position: integer("position").notNull(),
+  },
+  (t) => [
+    unique().on(t.epicId, t.position),
+    unique().on(t.epicId, t.url),
+    check("epic_links_title_not_empty_check", sql`length(${t.title}) > 0`),
+    check("epic_links_url_not_empty_check", sql`length(${t.url}) > 0`),
+    check("epic_links_position_check", sql`${t.position} >= 0`),
+  ],
+);
+
 export const features = sqliteTable(
   "features",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     name: text("name").notNull(),
     description: text("description"),
+    epicId: integer("epic_id")
+      .notNull()
+      .references(() => epics.id, { onDelete: "restrict" }),
+    position: integer("position").notNull().default(0),
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .$defaultFn(() => new Date()),
@@ -22,7 +71,9 @@ export const features = sqliteTable(
   (t) => [
     check("features_name_trimmed_check", sql`${t.name} = trim(${t.name})`),
     check("features_name_not_empty_check", sql`length(${t.name}) > 0`),
+    check("features_position_check", sql`${t.position} >= 0`),
     uniqueIndex("features_name_trim_unique").on(sql`trim(${t.name})`),
+    unique().on(t.epicId, t.position),
   ],
 );
 

@@ -134,22 +134,34 @@ describe("DB migrations", () => {
       .run("Auth", now);
 
     runMigrations(sqlite);
+    const defaultEpic = sqlite
+      .prepare<{ id: number; name: string; is_default: number }, []>(
+        "SELECT id, name, is_default FROM epics WHERE is_default = 1",
+      )
+      .get();
+    expect(defaultEpic?.name).toBe("未分類");
 
     expectSqliteError(() => {
       sqlite
-        .prepare("INSERT INTO features (name, created_at) VALUES (?, ?)")
-        .run("Auth", now);
+        .prepare(
+          "INSERT INTO features (name, epic_id, position, created_at) VALUES (?, ?, ?, ?)",
+        )
+        .run("Auth", defaultEpic!.id, 1, now);
     }, "SQLITE_CONSTRAINT_UNIQUE");
 
     expectSqliteError(() => {
       sqlite
-        .prepare("INSERT INTO features (name, created_at) VALUES (?, ?)")
-        .run(" Auth ", now);
+        .prepare(
+          "INSERT INTO features (name, epic_id, position, created_at) VALUES (?, ?, ?, ?)",
+        )
+        .run(" Auth ", defaultEpic!.id, 1, now);
     }, "SQLITE_CONSTRAINT_CHECK");
 
     sqlite
-      .prepare("INSERT INTO features (name, created_at) VALUES (?, ?)")
-      .run("auth", now);
+      .prepare(
+        "INSERT INTO features (name, epic_id, position, created_at) VALUES (?, ?, ?, ?)",
+      )
+      .run("auth", defaultEpic!.id, 1, now);
     sqlite
       .prepare("INSERT INTO members (name, created_at) VALUES (?, ?)")
       .run("Auth", now);
@@ -164,11 +176,21 @@ describe("DB migrations", () => {
     runMigrations(sqlite);
 
     const feature = sqlite
-      .prepare<{ id: number; description: string | null }, []>(
-        "SELECT id, description FROM features WHERE name = 'Auth'",
+      .prepare<
+        {
+          id: number;
+          description: string | null;
+          epic_id: number;
+          position: number;
+        },
+        []
+      >(
+        "SELECT id, description, epic_id, position FROM features WHERE name = 'Auth'",
       )
       .get();
     expect(feature?.description).toBeNull();
+    expect(feature?.epic_id).toBeGreaterThan(0);
+    expect(feature?.position).toBe(0);
 
     sqlite
       .prepare(

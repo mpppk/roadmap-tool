@@ -1,8 +1,10 @@
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { type BunSQLiteDatabase, drizzle } from "drizzle-orm/bun-sqlite";
 import {
+  epicLinks,
+  epics,
   featureLinks,
   featureMonths,
   features,
@@ -14,6 +16,8 @@ import {
 import { router } from "./router";
 
 const testSchema = {
+  epics,
+  epicLinks,
   features,
   featureLinks,
   members,
@@ -29,15 +33,35 @@ function createTestDb() {
   const sqlite = new Database(":memory:");
   sqlite.exec("PRAGMA foreign_keys = ON;");
   sqlite.exec(`
+    CREATE TABLE epics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      description TEXT,
+      position INTEGER NOT NULL DEFAULT 0,
+      is_default INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      CONSTRAINT epics_name_trimmed_check CHECK (name = trim(name)),
+      CONSTRAINT epics_name_not_empty_check CHECK (length(name) > 0),
+      CONSTRAINT epics_position_check CHECK (position >= 0)
+    );
+    CREATE UNIQUE INDEX epics_name_trim_unique ON epics (trim(name));
+    CREATE UNIQUE INDEX epics_default_unique ON epics (is_default) WHERE is_default = 1;
+    CREATE TABLE epic_links (id INTEGER PRIMARY KEY AUTOINCREMENT, epic_id INTEGER NOT NULL REFERENCES epics(id) ON DELETE CASCADE, title TEXT NOT NULL, url TEXT NOT NULL, position INTEGER NOT NULL, CONSTRAINT epic_links_title_not_empty_check CHECK (length(title) > 0), CONSTRAINT epic_links_url_not_empty_check CHECK (length(url) > 0), CONSTRAINT epic_links_position_check CHECK (position >= 0), UNIQUE(epic_id, position), UNIQUE(epic_id, url));
+    INSERT INTO epics (name, position, is_default, created_at) VALUES ('未分類', 0, 1, 0);
+
     CREATE TABLE features (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       description TEXT,
+      epic_id INTEGER NOT NULL REFERENCES epics(id) ON DELETE RESTRICT,
+      position INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       CONSTRAINT features_name_trimmed_check CHECK (name = trim(name)),
-      CONSTRAINT features_name_not_empty_check CHECK (length(name) > 0)
+      CONSTRAINT features_name_not_empty_check CHECK (length(name) > 0),
+      CONSTRAINT features_position_check CHECK (position >= 0)
     );
     CREATE UNIQUE INDEX features_name_trim_unique ON features (trim(name));
+    CREATE UNIQUE INDEX features_epic_id_position_unique ON features (epic_id, position);
     CREATE TABLE feature_links (id INTEGER PRIMARY KEY AUTOINCREMENT, feature_id INTEGER NOT NULL REFERENCES features(id) ON DELETE CASCADE, title TEXT NOT NULL, url TEXT NOT NULL, position INTEGER NOT NULL, CONSTRAINT feature_links_title_not_empty_check CHECK (length(title) > 0), CONSTRAINT feature_links_url_not_empty_check CHECK (length(url) > 0), CONSTRAINT feature_links_position_check CHECK (position >= 0), UNIQUE(feature_id, position), UNIQUE(feature_id, url));
 
     CREATE TABLE members (
@@ -120,17 +144,18 @@ async function createQuarterWithMonths(
 }
 
 async function seedBase(db: TestDb) {
+  const epicId = 1;
   const [featureA] = await db
     .insert(features)
-    .values({ name: "A" })
+    .values({ name: "A", epicId, position: 0 })
     .returning();
   const [featureB] = await db
     .insert(features)
-    .values({ name: "B" })
+    .values({ name: "B", epicId, position: 1 })
     .returning();
   const [featureC] = await db
     .insert(features)
-    .values({ name: "C" })
+    .values({ name: "C", epicId, position: 2 })
     .returning();
   const [member] = await db
     .insert(members)
@@ -263,6 +288,96 @@ describe("router name validation", () => {
       "CONFLICT",
       "DUPLICATE_NAME",
     );
+  });
+});
+
+describe("epics", () => {
+  let state: ReturnType<typeof createTestDb>;
+
+  beforeEach(() => {
+    state = createTestDb();
+  });
+
+  afterEach(() => {
+    state.sqlite.close();
+  });
+
+  test("creates, updates, moves, and protects epics", async () => {
+    const listEpics = router.epics.list.callable({ context: { db: state.db } });
+    const createEpic = router.epics.create.callable({
+      context: { db: state.db },
+    });
+    const renameEpic = router.epics.rename.callable({
+      context: { db: state.db },
+    });
+    const moveEpic = router.epics.move.callable({ context: { db: state.db } });
+    const deleteEpic = router.epics.delete.callable({
+      context: { db: state.db },
+    });
+
+    const initial = await listEpics({});
+    expect(initial).toHaveLength(1);
+    expect(initial[0]?.isDefault).toBe(true);
+
+    const payments = await createEpic({ name: "Payments" });
+    const search = await createEpic({ name: "Search" });
+    await renameEpic({
+      id: payments!.id,
+      name: "Payments v2",
+      description: "Billing work",
+      links: [{ title: "Spec", url: "https://example.com/spec" }],
+    });
+    await moveEpic({ id: search!.id, beforeId: payments!.id });
+
+    const moved = await listEpics({});
+    expect(moved.map((epic) => epic.name)).toEqual([
+      "未分類",
+      "Search",
+      "Payments v2",
+    ]);
+    expect(moved.find((epic) => epic.id === payments!.id)?.links).toHaveLength(
+      1,
+    );
+
+    await expectBadRequest(deleteEpic({ id: initial[0]!.id }));
+    await deleteEpic({ id: search!.id });
+    expect((await listEpics({})).map((epic) => epic.name)).toEqual([
+      "未分類",
+      "Payments v2",
+    ]);
+  });
+
+  test("moves features between epics and rejects deleting non-empty epics", async () => {
+    const createEpic = router.epics.create.callable({
+      context: { db: state.db },
+    });
+    const deleteEpic = router.epics.delete.callable({
+      context: { db: state.db },
+    });
+    const createFeature = router.features.create.callable({
+      context: { db: state.db },
+    });
+    const moveFeature = router.features.move.callable({
+      context: { db: state.db },
+    });
+
+    const epic = await createEpic({ name: "Growth" });
+    const featureA = await createFeature({ name: "A" });
+    const featureB = await createFeature({ name: "B", epicId: epic!.id });
+
+    await moveFeature({
+      id: featureA!.id,
+      epicId: epic!.id,
+      beforeId: featureB!.id,
+    });
+    const rows = await state.db
+      .select()
+      .from(features)
+      .where(eq(features.epicId, epic!.id))
+      .orderBy(asc(features.position), asc(features.id));
+    expect(rows.map((row) => row.name)).toEqual(["A", "B"]);
+    expect(rows.map((row) => row.position)).toEqual([0, 1]);
+    await expectBadRequest(deleteEpic({ id: epic!.id }));
   });
 });
 

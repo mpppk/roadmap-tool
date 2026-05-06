@@ -2,6 +2,8 @@ import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import {
+  epicLinks,
+  epics,
   featureLinks,
   featureMonths,
   features,
@@ -16,6 +18,8 @@ function createTestDb() {
   sqlite.exec("PRAGMA foreign_keys = ON;");
   const db = drizzle(sqlite, {
     schema: {
+      epics,
+      epicLinks,
       features,
       featureLinks,
       members,
@@ -27,15 +31,46 @@ function createTestDb() {
   });
 
   sqlite.exec(`
+    CREATE TABLE epics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      description TEXT,
+      position INTEGER NOT NULL DEFAULT 0,
+      is_default INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      CONSTRAINT epics_name_trimmed_check CHECK (name = trim(name)),
+      CONSTRAINT epics_name_not_empty_check CHECK (length(name) > 0),
+      CONSTRAINT epics_position_check CHECK (position >= 0)
+    );
+    CREATE UNIQUE INDEX epics_name_trim_unique ON epics (trim(name));
+    CREATE UNIQUE INDEX epics_default_unique ON epics (is_default) WHERE is_default = 1;
+    CREATE TABLE epic_links (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      epic_id INTEGER NOT NULL REFERENCES epics(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      url TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      CONSTRAINT epic_links_title_not_empty_check CHECK (length(title) > 0),
+      CONSTRAINT epic_links_url_not_empty_check CHECK (length(url) > 0),
+      CONSTRAINT epic_links_position_check CHECK (position >= 0),
+      UNIQUE(epic_id, position),
+      UNIQUE(epic_id, url)
+    );
+    INSERT INTO epics (name, position, is_default, created_at) VALUES ('未分類', 0, 1, 0);
+
     CREATE TABLE features (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       description TEXT,
+      epic_id INTEGER NOT NULL REFERENCES epics(id) ON DELETE RESTRICT,
+      position INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       CONSTRAINT features_name_trimmed_check CHECK (name = trim(name)),
-      CONSTRAINT features_name_not_empty_check CHECK (length(name) > 0)
+      CONSTRAINT features_name_not_empty_check CHECK (length(name) > 0),
+      CONSTRAINT features_position_check CHECK (position >= 0)
     );
     CREATE UNIQUE INDEX features_name_trim_unique ON features (trim(name));
+    CREATE UNIQUE INDEX features_epic_id_position_unique ON features (epic_id, position);
 
     CREATE TABLE feature_links (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -122,6 +157,8 @@ describe("DB schema", () => {
       .values({
         name: "Auth",
         description: "Login and session management",
+        epicId: 1,
+        position: 0,
         createdAt: new Date(),
       })
       .returning();
@@ -132,7 +169,7 @@ describe("DB schema", () => {
   test("can insert ordered feature links and rejects duplicate urls", async () => {
     const [feature] = await state.db
       .insert(features)
-      .values({ name: "Auth", createdAt: new Date() })
+      .values({ name: "Auth", epicId: 1, position: 0, createdAt: new Date() })
       .returning();
     const [link] = await state.db
       .insert(featureLinks)
@@ -165,7 +202,12 @@ describe("DB schema", () => {
   test("can insert month and feature_month allocation", async () => {
     const [f] = await state.db
       .insert(features)
-      .values({ name: "Dashboard", createdAt: new Date() })
+      .values({
+        name: "Dashboard",
+        epicId: 1,
+        position: 0,
+        createdAt: new Date(),
+      })
       .returning();
     const [q] = await state.db
       .insert(quarters)
@@ -185,7 +227,7 @@ describe("DB schema", () => {
   test("can insert member month allocation", async () => {
     const [f] = await state.db
       .insert(features)
-      .values({ name: "Search", createdAt: new Date() })
+      .values({ name: "Search", epicId: 1, position: 0, createdAt: new Date() })
       .returning();
     const [q] = await state.db
       .insert(quarters)
@@ -217,28 +259,36 @@ describe("DB schema", () => {
   test("rejects duplicate, untrimmed, and blank names at DB level", () => {
     const now = Date.now();
     state.sqlite
-      .prepare("INSERT INTO features (name, created_at) VALUES (?, ?)")
-      .run("Auth", now);
+      .prepare(
+        "INSERT INTO features (name, epic_id, position, created_at) VALUES (?, ?, ?, ?)",
+      )
+      .run("Auth", 1, 0, now);
     state.sqlite
       .prepare("INSERT INTO members (name, created_at) VALUES (?, ?)")
       .run("Alice", now);
 
     expectSqliteError(() => {
       state.sqlite
-        .prepare("INSERT INTO features (name, created_at) VALUES (?, ?)")
-        .run("Auth", now);
+        .prepare(
+          "INSERT INTO features (name, epic_id, position, created_at) VALUES (?, ?, ?, ?)",
+        )
+        .run("Auth", 1, 1, now);
     }, "SQLITE_CONSTRAINT_UNIQUE");
 
     expectSqliteError(() => {
       state.sqlite
-        .prepare("INSERT INTO features (name, created_at) VALUES (?, ?)")
-        .run(" Auth ", now);
+        .prepare(
+          "INSERT INTO features (name, epic_id, position, created_at) VALUES (?, ?, ?, ?)",
+        )
+        .run(" Auth ", 1, 1, now);
     }, "SQLITE_CONSTRAINT_CHECK");
 
     expectSqliteError(() => {
       state.sqlite
-        .prepare("INSERT INTO features (name, created_at) VALUES (?, ?)")
-        .run("", now);
+        .prepare(
+          "INSERT INTO features (name, epic_id, position, created_at) VALUES (?, ?, ?, ?)",
+        )
+        .run("", 1, 1, now);
     }, "SQLITE_CONSTRAINT_CHECK");
 
     expectSqliteError(() => {
@@ -291,11 +341,15 @@ describe("DB schema", () => {
 
   test("allows case differences and feature/member cross-resource name matches", () => {
     state.sqlite
-      .prepare("INSERT INTO features (name, created_at) VALUES (?, ?)")
-      .run("Auth", Date.now());
+      .prepare(
+        "INSERT INTO features (name, epic_id, position, created_at) VALUES (?, ?, ?, ?)",
+      )
+      .run("Auth", 1, 0, Date.now());
     state.sqlite
-      .prepare("INSERT INTO features (name, created_at) VALUES (?, ?)")
-      .run("auth", Date.now());
+      .prepare(
+        "INSERT INTO features (name, epic_id, position, created_at) VALUES (?, ?, ?, ?)",
+      )
+      .run("auth", 1, 1, Date.now());
     state.sqlite
       .prepare("INSERT INTO members (name, created_at) VALUES (?, ?)")
       .run("Auth", Date.now());

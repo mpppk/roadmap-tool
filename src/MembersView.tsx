@@ -12,6 +12,7 @@ import { orpc } from "./orpc-client";
 // ── Types ──────────────────────────────────────────────────────────────────
 
 type ViewMode = "quarter" | "month";
+type CapacityAggMode = "total" | "average";
 type Month = { id: number; year: number; month: number; quarterId: number };
 type Quarter = { id: number; year: number; quarter: number; months: Month[] };
 type Member = { id: number; name: string; maxCapacity: number | null };
@@ -401,6 +402,8 @@ const COL_W = 148;
 
 export function MembersView() {
   const [viewMode, setViewMode] = useState<ViewMode>("quarter");
+  const [capacityAggMode, setCapacityAggMode] =
+    useState<CapacityAggMode>("total");
   const [quarters, setQuarters] = useState<Quarter[]>([]);
   const [memberRows, setMemberRows] = useState<MemberRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -464,6 +467,11 @@ export function MembersView() {
   }, []);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
+
+  const colDivisor = (column: PeriodColumn): number =>
+    capacityAggMode === "average" && column.type === "quarter"
+      ? column.monthIds.length
+      : 1;
 
   const getColumnData = (
     row: MemberRow,
@@ -624,6 +632,25 @@ export function MembersView() {
             Month
           </button>
         </fieldset>
+        {viewMode === "quarter" && (
+          <fieldset className="period-toggle">
+            <legend className="period-toggle-label">集計</legend>
+            <button
+              type="button"
+              className={`period-toggle-btn${capacityAggMode === "total" ? " active" : ""}`}
+              onClick={() => setCapacityAggMode("total")}
+            >
+              合計
+            </button>
+            <button
+              type="button"
+              className={`period-toggle-btn${capacityAggMode === "average" ? " active" : ""}`}
+              onClick={() => setCapacityAggMode("average")}
+            >
+              月平均
+            </button>
+          </fieldset>
+        )}
         {busy && (
           <span
             style={{ marginLeft: 8, fontSize: 11, color: "var(--cv-text-3)" }}
@@ -702,6 +729,7 @@ export function MembersView() {
                       const data = getColumnData(member, column);
                       const limit = columnMemberLimit(column, memberMaxCap);
                       const cellOv = data.totalCapacity > limit + 0.000001;
+                      const div = colDivisor(column);
                       return (
                         <td
                           key={column.key}
@@ -709,8 +737,8 @@ export function MembersView() {
                           style={{ width: COL_W, minWidth: COL_W }}
                         >
                           <ReadonlyHeatmapCell
-                            value={data.totalCapacity}
-                            maxVal={limit}
+                            value={data.totalCapacity / div}
+                            maxVal={limit / div}
                             rowHeight={42}
                             isOverflow={cellOv}
                           />
@@ -760,14 +788,19 @@ export function MembersView() {
                             const fa = data.featureAllocations.find(
                               (a) => a.featureId === featureId,
                             );
-                            const value = fa?.capacity ?? 0;
                             const limit = columnMemberLimit(
                               column,
                               memberMaxCap,
                             );
                             const cellOv =
                               data.totalCapacity > limit + 0.000001;
-                            const { bg, fg } = heatBg(value, limit);
+                            const div = colDivisor(column);
+                            const displayValue = (fa?.capacity ?? 0) / div;
+                            const displayLimit = limit / div;
+                            const { bg, fg } = heatBg(
+                              displayValue,
+                              displayLimit,
+                            );
                             return (
                               <td
                                 key={column.key}
@@ -787,14 +820,14 @@ export function MembersView() {
                                     className="hm-member-val"
                                     style={{
                                       color:
-                                        value === 0
+                                        displayValue === 0
                                           ? "transparent"
                                           : cellOv
                                             ? "#fff"
                                             : fg,
                                     }}
                                   >
-                                    {fmt(value)}
+                                    {fmt(displayValue)}
                                   </span>
                                 </div>
                               </td>

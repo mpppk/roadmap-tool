@@ -45,7 +45,9 @@ if (!resource || !command) usage();
 async function readImportSource(args: string[]): Promise<string> {
   const source = args[0];
   if (!source || args.length !== 1 || source.startsWith("--")) usage();
-  return source === "-" ? await Bun.stdin.text() : await Bun.file(source).text();
+  return source === "-"
+    ? await Bun.stdin.text()
+    : await Bun.file(source).text();
 }
 
 function parseFeatureMetadataFlags(args: string[]): {

@@ -198,6 +198,8 @@ bun src/cli.ts features add "認証機能" --epic-id <epic-id> --description "�
 bun src/cli.ts features rename <id> "認証機能 v2" --epic-id <epic-id> --description "説明" --link "Issue=https://example.com/issue"
 bun src/cli.ts features rename <id> "認証機能 v2" --clear-description --clear-links
 bun src/cli.ts features move <id> --epic-id <epic-id> --before <feature-id>
+bun src/cli.ts features import features.csv
+cat features.csv | bun src/cli.ts features import -
 
 # epics
 bun src/cli.ts epics list
@@ -205,6 +207,7 @@ bun src/cli.ts epics add "認証Epic" --description "説明" --link "Spec=https:
 bun src/cli.ts epics rename <id> "認証Epic v2" --clear-description --clear-links
 bun src/cli.ts epics move <id> --before <epic-id>
 bun src/cli.ts epics delete <id>
+bun src/cli.ts epics import epics.csv
 
 # members
 bun src/cli.ts members list

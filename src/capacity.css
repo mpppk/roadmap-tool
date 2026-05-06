@@ -466,7 +466,7 @@
   background: var(--cv-red-bg);
 }
 .td-member-label {
-  padding: 0 14px 0 32px;
+  padding: 0 14px 0 30px;
   position: sticky;
   left: 0;
   z-index: 5;
@@ -583,7 +583,7 @@
   border-bottom: 1px solid var(--border);
 }
 .td-unassigned-label {
-  padding: 0 14px 0 32px;
+  padding: 0 14px 0 30px;
   position: sticky;
   left: 0;
   z-index: 5;
@@ -747,7 +747,7 @@
   background: var(--surface);
 }
 .td-assign {
-  padding: 0 14px 0 32px;
+  padding: 0 14px 0 30px;
   position: sticky;
   left: 0;
   z-index: 5;

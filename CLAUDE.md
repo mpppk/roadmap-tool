@@ -1,124 +1,126 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+このファイルは、リポジトリ内のコードを操作する際に Claude Code（claude.ai/code）へのガイダンスを提供します。
 
-Default to using Bun instead of Node.js.
+Node.js の代わりに Bun を使用してください。
 
-- Use `bun <file>` instead of `node <file>` or `ts-node <file>`
-- Use `bun test` instead of `jest` or `vitest`
-- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`
-- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`
-- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`
-- Use `bunx <package> <command>` instead of `npx <package> <command>`
-- Bun automatically loads .env, so don't use dotenv.
+- `node <file>` や `ts-node <file>` の代わりに `bun <file>` を使用する
+- `jest` や `vitest` の代わりに `bun test` を使用する
+- `webpack` や `esbuild` の代わりに `bun build <file.html|file.ts|file.css>` を使用する
+- `npm install` や `yarn install`、`pnpm install` の代わりに `bun install` を使用する
+- `npm run <script>` や `yarn run <script>`、`pnpm run <script>` の代わりに `bun run <script>` を使用する
+- `npx <package> <command>` の代わりに `bunx <package> <command>` を使用する
+- Bun は `.env` を自動的に読み込むため、dotenv は使用しない
 
 ## APIs
 
-- `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
-- `bun:sqlite` for SQLite. Don't use `better-sqlite3`.
-- `Bun.redis` for Redis. Don't use `ioredis`.
-- `Bun.sql` for Postgres. Don't use `pg` or `postgres.js`.
-- `WebSocket` is built-in. Don't use `ws`.
-- Prefer `Bun.file` over `node:fs`'s readFile/writeFile
-- Bun.$`ls` instead of execa.
+- `Bun.serve()` は WebSocket、HTTPS、ルーティングをサポートする。`express` は使用しない。
+- SQLite には `bun:sqlite` を使用する。`better-sqlite3` は使用しない。
+- Redis には `Bun.redis` を使用する。`ioredis` は使用しない。
+- Postgres には `Bun.sql` を使用する。`pg` や `postgres.js` は使用しない。
+- `WebSocket` は組み込み済み。`ws` は使用しない。
+- `node:fs` の readFile/writeFile より `Bun.file` を優先する
+- execa の代わりに `Bun.$\`ls\`` を使用する
 
-## Development Commands
-
-```sh
-bun dev              # start dev server with HMR
-bun run typecheck    # TypeScript type check (no emit)
-bun run lint         # Biome lint src/
-bun run check        # Biome lint + format check
-bun run format       # Biome format src/ (writes)
-bun test             # run all tests
-bun test src/db/schema.test.ts  # run a single test file
-bun run build        # production build via build.ts
-```
-
-Database management (uses Drizzle Kit):
+## 開発コマンド
 
 ```sh
-bun run db:generate  # generate migration from schema changes
-bun run db:migrate   # apply pending migrations
-bun run db:push      # push schema directly (dev only)
-bun run db:studio    # open Drizzle Studio UI
+bun dev              # HMR 付き開発サーバーを起動
+bun run typecheck    # TypeScript 型チェック（emit なし）
+bun run lint         # Biome で src/ をリント
+bun run check        # Biome リント + フォーマットチェック
+bun run format       # Biome で src/ をフォーマット（書き込み）
+bun test             # 全テストを実行
+bun test src/db/schema.test.ts  # 単一テストファイルを実行
+bun run build        # build.ts による本番ビルド
 ```
 
-CI runs: `typecheck` → `lint` → `format:check` → `build`. All must pass before merging.
+データベース管理（Drizzle Kit を使用）:
 
-## Architecture
+```sh
+bun run db:generate  # スキーマ変更からマイグレーションを生成
+bun run db:migrate   # 未適用のマイグレーションを実行
+bun run db:push      # スキーマを直接プッシュ（開発環境のみ）
+bun run db:studio    # Drizzle Studio UI を起動
+```
 
-This is a **team resource allocation / roadmap planning tool**. Users create features (work items), team members, and quarters, then allocate monthly capacity (0–1) of each member's time to features. Quarter views aggregate the three monthly records in the quarter.
+CI では `typecheck` → `lint` → `format:check` → `build` の順に実行されます。マージ前にすべて通過する必要があります。
 
-### Stack
+## アーキテクチャ
 
-- **Runtime**: Bun with `Bun.serve()` — no Express, no Vite
-- **Frontend**: React 19 SPA, mounted from `src/index.html` → `src/frontend.tsx`
-- **Styling**: Tailwind CSS 4 via `bun-plugin-tailwind`; UI components from shadcn/ui (`src/components/ui/`)
-- **API layer**: [oRPC](https://orpc.unnoq.com/) for end-to-end type-safe RPC over HTTP (`/orpc/*`)
-- **Database**: SQLite via `bun:sqlite` + Drizzle ORM; schema in `src/db/schema.ts`
-- **Validation**: Zod 4
+これは**チームのリソース配分 / ロードマップ計画ツール**です。ユーザーはフィーチャー（作業項目）、チームメンバー、クォーターを作成し、各メンバーの月次キャパシティ（0、1）をフィーチャーに割り当てます。クォータービューでは、クォーター内の3ヶ月分のレコードを集計します。
 
-### Request Flow
+### スタック
+
+- **ランタイム**: `Bun.serve()` を使用した Bun — Express、Vite は不使用
+- **フロントエンド**: React 19 SPA。`src/index.html` → `src/frontend.tsx` からマウント
+- **スタイリング**: `bun-plugin-tailwind` 経由の Tailwind CSS 4。UI コンポーネントは shadcn/ui（`src/components/ui/`）
+- **API レイヤー**: HTTP 経由でエンドツーエンドの型安全 RPC を提供する [oRPC](https://orpc.unnoq.com/)（`/orpc/*`）
+- **データベース**: `bun:sqlite` + Drizzle ORM による SQLite。スキーマは `src/db/schema.ts`
+- **バリデーション**: Zod 4
+
+### リクエストフロー
 
 ```
 Browser → React (src/App.tsx)
        → orpc client (src/orpc-client.ts) → POST /orpc/<procedure>
        → Bun.serve (src/index.ts) → RPCHandler
-       → router procedure (src/router.ts) — Zod-validated input
-       → Drizzle ORM → SQLite (local file)
+        → router procedure (src/router.ts) — Zod バリデーション済み入力
+        → Drizzle ORM → SQLite (ローカルファイル)
 ```
 
-All API procedures live in a single file: `src/router.ts`. Procedures are grouped under `features`, `members`, `quarters`, `allocations`, and `export`. The exported `AppRouter` type is imported by the client for full type inference.
+すべての API プロシージャは `src/router.ts` の単一ファイルに集約されています。プロシージャは `features`、`members`、`quarters`、`allocations`、`export` にグループ化されています。エクスポートされた `AppRouter` 型はクライアントが完全な型推論のためにインポートします。
 
-### Database Schema
+### データベーススキーマ
 
-Five tables, all with integer PKs and cascade-on-delete foreign keys:
+5つのテーブル。すべて整数 PK と ON DELETE CASCADE の外部キーを持ちます:
 
-- `features` — work items (unique name)
-- `members` — team members (unique name)
-- `quarters` — quarter groups: `(year, quarter 1-4)` unique pair
-- `months` — planning periods: `(year, month 1-12)` unique pair, linked to a quarter
-- `feature_months` — total capacity (`totalCapacity`) budgeted for a feature in a month
-- `member_month_allocations` — individual member's monthly capacity (`capacity`, 0–1) allocated to a feature in a month
+- `features` — 作業項目（名前はユニーク）
+- `members` — チームメンバー（名前はユニーク）
+- `quarters` — クォーターグループ: `(year, quarter 1-4)` のユニークペア
+- `months` — 計画期間: `(year, month 1-12)` のユニークペア。クォーターに紐付く
+- `feature_months` — フィーチャーの月次予算キャパシティ（`totalCapacity`）
+- `member_month_allocations` — フィーチャーの月次に割り当てられた個々のメンバーキャパシティ（`capacity`、0、1）
 
-**Capacity unit**: capacity is stored monthly (0 = idle, 1 = full). Quarter display aggregates the three months in the quarter.
+**キャパシティの単位**: キャパシティは月次で保存（0 = アイドル、1 = フル）。クォーター表示ではクォーター内の3ヶ月を集計します。
 
-**Key constraint**: a member's total `capacity` across all features in a single month cannot exceed `1.0`. This is enforced in the `allocations.*` procedures in `router.ts`, not at the DB level.
+**主要な制約**: 1ヶ月内のすべてのフィーチャーにわたるメンバーの合計 `capacity` は `1.0` を超えることはできません。これは DB レベルではなく `router.ts` の `allocations.*` プロシージャで強制されます。
 
-### Allocation Business Logic
+### 割り当てビジネスロジック
 
-`allocations.updateTotal` — when a feature-month's total capacity changes, existing member allocations are **proportionally redistributed** (scaled by `newTotal / oldTotal`), then each is individually capped at the member's remaining monthly capacity. Quarter edits split the requested total across the three months, preserving existing month ratios or evenly distributing empty quarters.
+`allocations.updateTotal` — フィーチャー月次の合計キャパシティが変更された場合、既存のメンバー割り当ては**比例再配分**（`newTotal / oldTotal` でスケール）され、その後それぞれのメンバーの残余月次キャパシティで個別に上限が設定されます。クォーター編集では、要求された合計を３ヶ月に分割し、既存の月次比率を維持するか、空のクォーターは均等配分します。
 
-`allocations.updateMemberAllocation` — silently caps the requested value at `1.0 - usedElsewhere` for that member×month.
+`allocations.updateMemberAllocation` — 要求された値をそのメンバー×月に対して `1.0 - usedElsewhere` で暗黙的に上限設定します。
 
-`allocations.moveQuarter` — merges all feature-month data (total + member allocations) from one quarter into another month-by-month, respecting member monthly caps.
+`allocations.moveQuarter` — フィーチャー月次データ（合計 + メンバー割り当て）をあるクォーターから別のクォーターへ月ごとにマージします。メンバーの月次上限を考慮します。
 
-### Path Alias
+### パスエイリアス
 
-`@/*` resolves to `src/*` (configured in `tsconfig.json` and used throughout the codebase).
+`@/*` は `src/*` に解決されます（`tsconfig.json` で設定済み。コードベース全体で使用）。
 
 ### CLI
 
-`src/cli.ts` provides a thin oRPC client CLI for features and members. It connects to `ROADMAP_URL` (default `http://localhost:3000`) and requires the server to be running.
-
-```sh
-bun src/cli.ts features list
-bun src/cli.ts members add "Alice"
+`src/cli.ts` は、フィーチャーとメンバー向けの薄い oRPC クライアント CLI を提供します。`ROADMAP_URL`（デフォルト: `http://localhost:3000`）に接続し、サーバーの起動が必要です。
 ```
 
-### Testing
+### テスト
 
-Tests use `bun:test`. The only test file is `src/db/schema.test.ts`, which spins up an in-memory SQLite database via Drizzle to verify schema constraints.
+テストには `bun:test` を使用します。テストファイルは `src/db/schema.test.ts` のみで、Drizzle を介してインメモリ SQLite データベースを起動し、スキーマ制約を検証します。
 
-### Frontend
+### フロントエンド
 
-Use HTML imports with `Bun.serve()`. Don't use `vite`. HTML imports fully support React, CSS, Tailwind.
+`Bun.serve()` で HTML インポートを使用します。`vite` は使用しません。HTML インポートは React、CSS、Tailwind を完全サポートしています。
 
-`src/index.html` is imported directly into `src/index.ts` as a route handler — Bun's bundler transpiles and bundles `src/frontend.tsx` and CSS automatically. HMR is enabled in development via `import.meta.hot`.
+`src/index.html` は `src/index.ts` にルートハンドラーとして直接インポートされます — Bun のバンドラーが `src/frontend.tsx` と CSS を自動的にトランスパイル・バンドルします。開発環境では `import.meta.hot` を通じて HMR が有効です。
 
-For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+詳細については、`node_modules/bun-types/docs/**.mdx` にある Bun API ドキュメントを参照してください。
 
 ## ブラウザでの動作確認
 
 `bun dev` で開発サーバーを起動し、発行されたURL（例: `https://some-branch-name.roadmap-tool.localhost`）にブラウザでアクセスしてください
+
+## PRの作成
+
+* PRには実装プランの内容をdetailsタグで記載してください。
+* 可能な限りスクリーンショットやGIFを添付してください。
+* PRにはTest Planを記載してください。Test Planには、手動での動作確認の手順を記載してください。実際にブラウザで動作確認を行い、確認結果も記載してください。結果には可能な限りスクリーンショットやGIFを添付してください。

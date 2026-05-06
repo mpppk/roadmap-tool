@@ -76,6 +76,32 @@
   color: var(--cv-text);
   font-weight: 500;
 }
+.history-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+}
+.history-btn {
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--cv-text-2);
+  cursor: pointer;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 11px;
+}
+.history-btn:hover:not(:disabled) {
+  color: var(--cv-text);
+  border-color: var(--border-strong);
+}
+.history-btn:disabled {
+  color: var(--cv-text-3);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
 .period-toggle {
   display: flex;
   align-items: center;

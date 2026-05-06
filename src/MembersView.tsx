@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./capacity.css";
+import type { HistoryController } from "./history-client";
 import {
   getNameErrorMessage,
   NAME_ERROR_MESSAGES,
@@ -400,7 +401,7 @@ function MaxCapacityCell({
 
 const COL_W = 148;
 
-export function MembersView() {
+export function MembersView({ history }: { history: HistoryController }) {
   const [viewMode, setViewMode] = useState<ViewMode>("quarter");
   const [capacityAggMode, setCapacityAggMode] =
     useState<CapacityAggMode>("total");
@@ -417,54 +418,57 @@ export function MembersView() {
 
   // ── Initial load ────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      const [qs, ms] = await Promise.all([
-        orpc.quarters.list({}),
-        orpc.members.list({}),
-      ]);
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    const [qs, ms] = await Promise.all([
+      orpc.quarters.list({}),
+      orpc.members.list({}),
+    ]);
 
-      const sortedQs = [...qs]
-        .map((q) => ({
-          ...q,
-          months: [...q.months].sort((a, b) => a.month - b.month),
-        }))
-        .sort((a, b) => a.year - b.year || a.quarter - b.quarter);
+    const sortedQs = [...qs]
+      .map((q) => ({
+        ...q,
+        months: [...q.months].sort((a, b) => a.month - b.month),
+      }))
+      .sort((a, b) => a.year - b.year || a.quarter - b.quarter);
 
-      const memberViews = await Promise.all(
-        ms.map((m) => orpc.allocations.getMemberView({ memberId: m.id })),
-      );
+    const memberViews = await Promise.all(
+      ms.map((m) => orpc.allocations.getMemberView({ memberId: m.id })),
+    );
 
-      const rows: MemberRow[] = memberViews.map((mv) => {
-        const monthMap = new Map<number, MemberMonthData>();
-        for (const qd of mv.quarters) {
-          for (const md of qd.months) {
-            monthMap.set(md.month.id, {
-              totalCapacity: md.totalCapacity,
-              featureAllocations: md.featureAllocations.map((fa) => ({
-                featureId: fa.feature.id,
-                featureName: fa.feature.name,
-                capacity: fa.capacity,
-              })),
-            });
-          }
+    const rows: MemberRow[] = memberViews.map((mv) => {
+      const monthMap = new Map<number, MemberMonthData>();
+      for (const qd of mv.quarters) {
+        for (const md of qd.months) {
+          monthMap.set(md.month.id, {
+            totalCapacity: md.totalCapacity,
+            featureAllocations: md.featureAllocations.map((fa) => ({
+              featureId: fa.feature.id,
+              featureName: fa.feature.name,
+              capacity: fa.capacity,
+            })),
+          });
         }
-        const memberInfo = ms.find((m) => m.id === mv.member.id);
-        return {
-          id: mv.member.id,
-          name: mv.member.name,
-          maxCapacity: memberInfo?.maxCapacity ?? null,
-          expanded: false,
-          months: monthMap,
-        };
-      });
+      }
+      const memberInfo = ms.find((m) => m.id === mv.member.id);
+      return {
+        id: mv.member.id,
+        name: mv.member.name,
+        maxCapacity: memberInfo?.maxCapacity ?? null,
+        expanded: false,
+        months: monthMap,
+      };
+    });
 
-      setQuarters(sortedQs);
-      setMemberRows(rows);
-      setLoading(false);
-    })();
+    setQuarters(sortedQs);
+    setMemberRows(rows);
+    setLoading(false);
   }, []);
+
+  useEffect(() => {
+    void history.version;
+    void loadAll();
+  }, [loadAll, history.version]);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -492,11 +496,13 @@ export function MembersView() {
     setBusy(true);
     setActionWarning(null);
     try {
-      const m = await orpc.members.create({
-        name: nextAvailableGeneratedName(
-          "Member",
-          memberRows.map((row) => row.name),
-        ),
+      const m = await history.record("Memberを追加", async () => {
+        return orpc.members.create({
+          name: nextAvailableGeneratedName(
+            "Member",
+            memberRows.map((row) => row.name),
+          ),
+        });
       });
       if (!m) return;
       setMemberRows((rows) => [
@@ -518,40 +524,54 @@ export function MembersView() {
     }
   };
 
-  const renameMember = useCallback(async (id: number, name: string) => {
-    const m = await orpc.members.rename({ id, name });
-    if (!m) return name;
-    setMemberRows((rows) =>
-      rows.map((r) => (r.id === id ? { ...r, name: m.name } : r)),
-    );
-    return m.name;
-  }, []);
+  const renameMember = useCallback(
+    async (id: number, name: string) => {
+      const m = await history.record("Member名を変更", async () => {
+        return orpc.members.rename({ id, name });
+      });
+      if (!m) return name;
+      setMemberRows((rows) =>
+        rows.map((r) => (r.id === id ? { ...r, name: m.name } : r)),
+      );
+      return m.name;
+    },
+    [history],
+  );
 
-  const deleteMember = useCallback(async (id: number) => {
-    setBusy(true);
-    try {
-      await orpc.members.delete({ id });
-      setMemberRows((rows) => rows.filter((r) => r.id !== id));
-    } finally {
-      setBusy(false);
-    }
-  }, []);
+  const deleteMember = useCallback(
+    async (id: number) => {
+      setBusy(true);
+      try {
+        await history.record("Memberを削除", async () => {
+          await orpc.members.delete({ id });
+          setMemberRows((rows) => rows.filter((r) => r.id !== id));
+        });
+      } finally {
+        setBusy(false);
+      }
+    },
+    [history],
+  );
 
   const setMaxCapacity = useCallback(
     async (id: number, maxCapacity: number | null) => {
-      await orpc.members.setMaxCapacity({ id, maxCapacity });
-      setMemberRows((rows) =>
-        rows.map((r) => (r.id === id ? { ...r, maxCapacity } : r)),
-      );
+      await history.record("Max capacityを変更", async () => {
+        await orpc.members.setMaxCapacity({ id, maxCapacity });
+        setMemberRows((rows) =>
+          rows.map((r) => (r.id === id ? { ...r, maxCapacity } : r)),
+        );
+      });
     },
-    [],
+    [history],
   );
 
   const addQuarter = async () => {
     setBusy(true);
     try {
       const { year, quarter } = nextQuarterYQ(quarters);
-      const q = await orpc.quarters.create({ year, quarter });
+      const q = await history.record("Quarterを追加", async () => {
+        return orpc.quarters.create({ year, quarter });
+      });
       if (!q) return;
       setQuarters((qs) =>
         [
@@ -615,6 +635,7 @@ export function MembersView() {
             Members
           </button>
         </nav>
+        {history.controls}
         <fieldset className="period-toggle">
           <legend className="period-toggle-label">表示単位</legend>
           <button
@@ -862,9 +883,9 @@ export function MembersView() {
           >
             + Quarter
           </button>
-          {actionWarning && (
+          {(actionWarning || history.warning) && (
             <span className="name-action-warning" role="alert">
-              {actionWarning}
+              {actionWarning || history.warning}
             </span>
           )}
           <span className="hint-text">+ でFeature展開</span>

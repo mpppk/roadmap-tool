@@ -26,6 +26,61 @@ const capacityConflictResolutionSchema = z.enum([
   "rebalanceOthersProportionally",
 ]);
 
+const snapshotFeatureSchema = z.object({
+  id: z.number().int(),
+  name: z.string(),
+  description: z.string().nullable(),
+  createdAt: z.number().int(),
+});
+const snapshotFeatureLinkSchema = z.object({
+  id: z.number().int(),
+  featureId: z.number().int(),
+  title: z.string(),
+  url: z.string(),
+  position: z.number().int(),
+});
+const snapshotMemberSchema = z.object({
+  id: z.number().int(),
+  name: z.string(),
+  maxCapacity: z.number().nullable(),
+  createdAt: z.number().int(),
+});
+const snapshotQuarterSchema = z.object({
+  id: z.number().int(),
+  year: z.number().int(),
+  quarter: z.number().int(),
+});
+const snapshotMonthSchema = z.object({
+  id: z.number().int(),
+  year: z.number().int(),
+  month: z.number().int(),
+  quarterId: z.number().int(),
+});
+const snapshotFeatureMonthSchema = z.object({
+  id: z.number().int(),
+  featureId: z.number().int(),
+  monthId: z.number().int(),
+  totalCapacity: z.number(),
+});
+const snapshotMemberMonthAllocationSchema = z.object({
+  id: z.number().int(),
+  featureId: z.number().int(),
+  monthId: z.number().int(),
+  memberId: z.number().int(),
+  capacity: z.number(),
+});
+const roadmapSnapshotSchema = z.object({
+  features: z.array(snapshotFeatureSchema),
+  featureLinks: z.array(snapshotFeatureLinkSchema),
+  members: z.array(snapshotMemberSchema),
+  quarters: z.array(snapshotQuarterSchema),
+  months: z.array(snapshotMonthSchema),
+  featureMonths: z.array(snapshotFeatureMonthSchema),
+  memberMonthAllocations: z.array(snapshotMemberMonthAllocationSchema),
+});
+
+type RoadmapSnapshot = z.infer<typeof roadmapSnapshotSchema>;
+
 const DESCRIPTION_MAX_LENGTH = 2000;
 const FEATURE_LINK_TITLE_MAX_LENGTH = 100;
 const FEATURE_LINK_URL_MAX_LENGTH = 2048;
@@ -654,6 +709,165 @@ function splitTotalAcrossMonths(
   }
   return currentTotals.map((v) => (v / currentSum) * requestedTotal);
 }
+
+function snapshotTimestamp(value: Date | number | string): number {
+  if (value instanceof Date) return value.getTime();
+  return new Date(value).getTime();
+}
+
+function snapshotsEqual(a: RoadmapSnapshot, b: RoadmapSnapshot): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+async function getRoadmapSnapshot(db: typeof DbType): Promise<RoadmapSnapshot> {
+  const [
+    featureRows,
+    featureLinkRows,
+    memberRows,
+    quarterRows,
+    monthRows,
+    featureMonthRows,
+    memberMonthAllocationRows,
+  ] = await Promise.all([
+    db.select().from(features).orderBy(asc(features.id)).all(),
+    db.select().from(featureLinks).orderBy(asc(featureLinks.id)).all(),
+    db.select().from(members).orderBy(asc(members.id)).all(),
+    db.select().from(quarters).orderBy(asc(quarters.id)).all(),
+    db.select().from(months).orderBy(asc(months.id)).all(),
+    db.select().from(featureMonths).orderBy(asc(featureMonths.id)).all(),
+    db
+      .select()
+      .from(memberMonthAllocations)
+      .orderBy(asc(memberMonthAllocations.id))
+      .all(),
+  ]);
+
+  return {
+    features: featureRows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      createdAt: snapshotTimestamp(row.createdAt),
+    })),
+    featureLinks: featureLinkRows.map((row) => ({
+      id: row.id,
+      featureId: row.featureId,
+      title: row.title,
+      url: row.url,
+      position: row.position,
+    })),
+    members: memberRows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      maxCapacity: row.maxCapacity,
+      createdAt: snapshotTimestamp(row.createdAt),
+    })),
+    quarters: quarterRows.map((row) => ({
+      id: row.id,
+      year: row.year,
+      quarter: row.quarter,
+    })),
+    months: monthRows.map((row) => ({
+      id: row.id,
+      year: row.year,
+      month: row.month,
+      quarterId: row.quarterId,
+    })),
+    featureMonths: featureMonthRows.map((row) => ({
+      id: row.id,
+      featureId: row.featureId,
+      monthId: row.monthId,
+      totalCapacity: row.totalCapacity,
+    })),
+    memberMonthAllocations: memberMonthAllocationRows.map((row) => ({
+      id: row.id,
+      featureId: row.featureId,
+      monthId: row.monthId,
+      memberId: row.memberId,
+      capacity: row.capacity,
+    })),
+  };
+}
+
+async function restoreRoadmapSnapshot(
+  db: typeof DbType,
+  snapshot: RoadmapSnapshot,
+) {
+  await db.delete(memberMonthAllocations);
+  await db.delete(featureMonths);
+  await db.delete(featureLinks);
+  await db.delete(months);
+  await db.delete(quarters);
+  await db.delete(members);
+  await db.delete(features);
+
+  if (snapshot.features.length > 0) {
+    await db.insert(features).values(
+      snapshot.features.map((row) => ({
+        id: row.id,
+        name: row.name,
+        description: row.description,
+        createdAt: new Date(row.createdAt),
+      })),
+    );
+  }
+  if (snapshot.members.length > 0) {
+    await db.insert(members).values(
+      snapshot.members.map((row) => ({
+        id: row.id,
+        name: row.name,
+        maxCapacity: row.maxCapacity,
+        createdAt: new Date(row.createdAt),
+      })),
+    );
+  }
+  if (snapshot.quarters.length > 0) {
+    await db.insert(quarters).values(snapshot.quarters);
+  }
+  if (snapshot.months.length > 0) {
+    await db.insert(months).values(snapshot.months);
+  }
+  if (snapshot.featureLinks.length > 0) {
+    await db.insert(featureLinks).values(snapshot.featureLinks);
+  }
+  if (snapshot.featureMonths.length > 0) {
+    await db.insert(featureMonths).values(snapshot.featureMonths);
+  }
+  if (snapshot.memberMonthAllocations.length > 0) {
+    await db
+      .insert(memberMonthAllocations)
+      .values(snapshot.memberMonthAllocations);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// History
+// ---------------------------------------------------------------------------
+
+const historySnapshot = o.input(z.object({})).handler(async ({ context }) => {
+  return getRoadmapSnapshot(context.db);
+});
+
+const historyRestore = o
+  .input(
+    z.object({
+      expected: roadmapSnapshotSchema,
+      snapshot: roadmapSnapshotSchema,
+    }),
+  )
+  .handler(async ({ input, context }) => {
+    await context.db.transaction(async (tx) => {
+      const txDb = tx as unknown as typeof DbType;
+      const current = await getRoadmapSnapshot(txDb);
+      if (!snapshotsEqual(current, input.expected)) {
+        throw new ORPCError("CONFLICT", {
+          message:
+            "現在のデータが履歴作成時から変更されているため、undo/redoできませんでした。",
+        });
+      }
+      await restoreRoadmapSnapshot(txDb, input.snapshot);
+    });
+  });
 
 // ---------------------------------------------------------------------------
 // Features
@@ -1783,6 +1997,10 @@ const featureMetadataCSVImport = o
 // ---------------------------------------------------------------------------
 
 export const router = {
+  history: {
+    snapshot: historySnapshot,
+    restore: historyRestore,
+  },
   features: {
     list: featuresList,
     create: featuresCreate,

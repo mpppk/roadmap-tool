@@ -262,6 +262,9 @@
   gap: 8px;
   height: 100%;
 }
+.tr-feature .td-label-inner {
+  padding-left: 16px;
+}
 .toggle-btn {
   width: 18px;
   height: 18px;

@@ -2523,7 +2523,7 @@ export function CapacityView({ history }: { history: HistoryController }) {
                       key={`${feature.id}-assign`}
                       className="tr-assign-member"
                     >
-                      <td colSpan={1 + columns.length} className="td-assign">
+                      <td className="td-assign">
                         {assigningFeatureId === feature.id ? (
                           <select
                             className="assign-select"
@@ -2557,6 +2557,9 @@ export function CapacityView({ history }: { history: HistoryController }) {
                           </button>
                         )}
                       </td>
+                      {columns.map((column) => (
+                        <td key={column.key} />
+                      ))}
                     </tr>,
                   );
 

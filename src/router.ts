@@ -1941,7 +1941,14 @@ const exportMemberCSV = o.input(z.object({})).handler(async ({ context }) => {
   const epicById = new Map(allEpics.map((epic) => [epic.id, epic.name]));
 
   const qHeaders = allQuarters.map((q) => `${q.year}-Q${q.quarter}`);
-  const header = ["担当者", "member_id", "Epic", "機能", "feature_id", ...qHeaders].join(",");
+  const header = [
+    "担当者",
+    "member_id",
+    "Epic",
+    "機能",
+    "feature_id",
+    ...qHeaders,
+  ].join(",");
 
   const rows: string[] = [];
   for (const member of allMembers) {
@@ -1994,7 +2001,15 @@ const exportAllocationCSV = o
     const memberById = new Map(allMembers.map((m) => [m.id, m.name]));
     const monthById = new Map(allMonths.map((m) => [m.id, m]));
 
-    const header = ["Epic", "機能", "feature_id", "担当者", "member_id", "キャパシティ", "月"].join(",");
+    const header = [
+      "Epic",
+      "機能",
+      "feature_id",
+      "担当者",
+      "member_id",
+      "キャパシティ",
+      "月",
+    ].join(",");
     const rows = maRows
       .filter((r) => r.capacity > 0)
       .flatMap((r) => {
@@ -2046,9 +2061,10 @@ const exportFeatureMetadataCSV = o
         ].join(",");
       }),
     );
-    return [["epic", "feature_id", "name", "description", "links"].join(","), ...rows].join(
-      "\n",
-    );
+    return [
+      ["epic", "feature_id", "name", "description", "links"].join(","),
+      ...rows,
+    ].join("\n");
   });
 
 const exportEpicMetadataCSV = o
@@ -2267,8 +2283,10 @@ const csvImport = o
       const memberName = (cols[colMember] ?? "").trim();
       const capacityStr = (cols[colCapacity] ?? "").trim();
       const monthStr = (cols[colMonth] ?? "").trim();
-      const rawFeatureId = colFeatureId >= 0 ? (cols[colFeatureId] ?? "").trim() : "";
-      const rawMemberId = colMemberId >= 0 ? (cols[colMemberId] ?? "").trim() : "";
+      const rawFeatureId =
+        colFeatureId >= 0 ? (cols[colFeatureId] ?? "").trim() : "";
+      const rawMemberId =
+        colMemberId >= 0 ? (cols[colMemberId] ?? "").trim() : "";
       const epicName = colEpic >= 0 ? (cols[colEpic] ?? "").trim() : undefined;
 
       if (!featureName) {
@@ -2318,7 +2336,8 @@ const csvImport = o
       // ID lookup first, then name fallback
       const parsedFeatureId = rawFeatureId ? Number(rawFeatureId) : NaN;
       let featureRecord =
-        (!Number.isNaN(parsedFeatureId) && featureCacheById.get(parsedFeatureId)) ||
+        (!Number.isNaN(parsedFeatureId) &&
+          featureCacheById.get(parsedFeatureId)) ||
         featureCache.get(featureName);
       let featureId = featureRecord?.id;
       if (featureId === undefined) {
@@ -2357,7 +2376,8 @@ const csvImport = o
       // ID lookup first, then name fallback
       const parsedMemberId = rawMemberId ? Number(rawMemberId) : NaN;
       let memberId =
-        (!Number.isNaN(parsedMemberId) && memberCacheById.get(parsedMemberId)) ||
+        (!Number.isNaN(parsedMemberId) &&
+          memberCacheById.get(parsedMemberId)) ||
         memberCache.get(memberName);
       if (memberId === undefined) {
         const [newM] = await db
@@ -2487,8 +2507,10 @@ const tsvImport = o
       const memberName = (cols[colMember] ?? "").trim();
       const capacityStr = (cols[colCapacity] ?? "").trim();
       const monthStr = (cols[colMonth] ?? "").trim();
-      const rawFeatureId = colFeatureId >= 0 ? (cols[colFeatureId] ?? "").trim() : "";
-      const rawMemberId = colMemberId >= 0 ? (cols[colMemberId] ?? "").trim() : "";
+      const rawFeatureId =
+        colFeatureId >= 0 ? (cols[colFeatureId] ?? "").trim() : "";
+      const rawMemberId =
+        colMemberId >= 0 ? (cols[colMemberId] ?? "").trim() : "";
       const epicName = colEpic >= 0 ? (cols[colEpic] ?? "").trim() : undefined;
 
       if (!featureName) {
@@ -2538,7 +2560,8 @@ const tsvImport = o
       // ID lookup first, then name fallback
       const parsedFeatureId = rawFeatureId ? Number(rawFeatureId) : NaN;
       let featureRecord =
-        (!Number.isNaN(parsedFeatureId) && featureCacheById.get(parsedFeatureId)) ||
+        (!Number.isNaN(parsedFeatureId) &&
+          featureCacheById.get(parsedFeatureId)) ||
         featureCache.get(featureName);
       let featureId = featureRecord?.id;
       if (featureId === undefined) {
@@ -2577,7 +2600,8 @@ const tsvImport = o
       // ID lookup first, then name fallback
       const parsedMemberId = rawMemberId ? Number(rawMemberId) : NaN;
       let memberId =
-        (!Number.isNaN(parsedMemberId) && memberCacheById.get(parsedMemberId)) ||
+        (!Number.isNaN(parsedMemberId) &&
+          memberCacheById.get(parsedMemberId)) ||
         memberCache.get(memberName);
       if (memberId === undefined) {
         const [newM] = await db
@@ -2688,7 +2712,8 @@ const featureMetadataCSVImport = o
       }
       seenNames.add(name);
 
-      const rawFeatureId = colFeatureId >= 0 ? (cols[colFeatureId] ?? "").trim() : "";
+      const rawFeatureId =
+        colFeatureId >= 0 ? (cols[colFeatureId] ?? "").trim() : "";
       const featureId = rawFeatureId ? Number(rawFeatureId) : null;
 
       const description = normalizeFeatureDescriptionInput(
@@ -2700,7 +2725,8 @@ const featureMetadataCSVImport = o
       rows.push({
         row: rowNum,
         epic,
-        featureId: featureId !== null && !Number.isNaN(featureId) ? featureId : null,
+        featureId:
+          featureId !== null && !Number.isNaN(featureId) ? featureId : null,
         name,
         description: description ?? null,
         links: links ?? [],
@@ -2714,7 +2740,9 @@ const featureMetadataCSVImport = o
 
     for (const row of rows) {
       // ID lookup first, then name fallback
-      const existing = (row.featureId !== null && featureById.get(row.featureId)) || featureByName.get(row.name);
+      const existing =
+        (row.featureId !== null && featureById.get(row.featureId)) ||
+        featureByName.get(row.name);
       const epicId =
         row.epic === undefined
           ? (existing?.epicId ?? defaultEpicId)

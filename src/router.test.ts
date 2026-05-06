@@ -571,7 +571,10 @@ describe("feature metadata", () => {
     expect(result.success).toBe(1);
     expect(result.errors).toHaveLength(0);
 
-    const allocations = await state.db.select().from(memberMonthAllocations).all();
+    const allocations = await state.db
+      .select()
+      .from(memberMonthAllocations)
+      .all();
     expect(allocations).toHaveLength(1);
     expect(allocations[0]?.capacity).toBe(0.5);
   });
@@ -613,7 +616,10 @@ describe("feature metadata", () => {
     expect(result.success).toBe(1);
     expect(result.errors).toHaveLength(0);
 
-    const allocations = await state.db.select().from(memberMonthAllocations).all();
+    const allocations = await state.db
+      .select()
+      .from(memberMonthAllocations)
+      .all();
     expect(allocations).toHaveLength(1);
     expect(allocations[0]?.capacity).toBe(1);
   });
@@ -716,10 +722,7 @@ describe("feature metadata", () => {
 
     // Import using old name but correct id — ID should win
     const result = await importTsv({
-      tsv: [
-        "id\tname\tmax_capacity",
-        `${member!.id}\tAlice\t0.8`,
-      ].join("\n"),
+      tsv: ["id\tname\tmax_capacity", `${member!.id}\tAlice\t0.8`].join("\n"),
     });
 
     expect(result.success).toBe(1);

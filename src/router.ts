@@ -2396,6 +2396,204 @@ const csvImport = o
     return { success, skipped, errors };
   });
 
+const tsvImport = o
+  .input(z.object({ tsv: z.string() }))
+  .handler(async ({ input, context }) => {
+    const { db } = context;
+    const lines = input.tsv
+      .split("\n")
+      .map((l) => l.trimEnd())
+      .filter((l) => l.trim().length > 0);
+
+    if (lines.length < 2) {
+      return { success: 0, skipped: 0, errors: [] as ImportRowError[] };
+    }
+
+    const headers = parseTSVLine(lines[0]!).map((h) => h.trim());
+    const colFeature = headers.indexOf("機能");
+    const colMember = headers.indexOf("担当者");
+    const colCapacity = headers.indexOf("キャパシティ");
+    const colMonth = headers.indexOf("月");
+    const colEpic = headers.indexOf("Epic");
+
+    if ([colFeature, colMember, colCapacity, colMonth].includes(-1)) {
+      throw new ORPCError("BAD_REQUEST", {
+        message:
+          "TSVヘッダーに「機能」「担当者」「キャパシティ」「月」のカラムが必要です。",
+      });
+    }
+
+    let success = 0;
+    let skipped = 0;
+    const errors: ImportRowError[] = [];
+
+    // Preload caches
+    const featureCache = new Map<string, { id: number; epicId: number }>();
+    const memberCache = new Map<string, number>();
+    const monthCache = new Map<string, number>();
+    const defaultEpicId = await getDefaultEpicId(db);
+    for (const f of await db.select().from(features).all())
+      featureCache.set(f.name, { id: f.id, epicId: f.epicId });
+    for (const m of await db.select().from(members).all())
+      memberCache.set(m.name, m.id);
+    for (const m of await db.select().from(months).all())
+      monthCache.set(monthLabel(m.year, m.month), m.id);
+
+    const affectedPairs = new Set<string>();
+
+    for (let i = 1; i < lines.length; i++) {
+      const rowNum = i + 1;
+      const cols = parseTSVLine(lines[i]!);
+
+      const featureName = (cols[colFeature] ?? "").trim();
+      const memberName = (cols[colMember] ?? "").trim();
+      const capacityStr = (cols[colCapacity] ?? "").trim();
+      const monthStr = (cols[colMonth] ?? "").trim();
+      const epicName = colEpic >= 0 ? (cols[colEpic] ?? "").trim() : undefined;
+
+      if (!featureName) {
+        errors.push({ row: rowNum, message: "機能名が空です" });
+        skipped++;
+        continue;
+      }
+      if (!memberName) {
+        errors.push({ row: rowNum, message: "担当者名が空です" });
+        skipped++;
+        continue;
+      }
+
+      const capacity = Number(capacityStr);
+      if (!capacityStr || Number.isNaN(capacity) || capacity < 0) {
+        errors.push({
+          row: rowNum,
+          message: `キャパシティが不正な値です: "${capacityStr}"`,
+        });
+        skipped++;
+        continue;
+      }
+
+      const monthMatch = /^(\d{4})-(\d{2})$/.exec(monthStr);
+      if (!monthMatch) {
+        errors.push({
+          row: rowNum,
+          message: `月のフォーマットが不正です: "${monthStr}"`,
+        });
+        skipped++;
+        continue;
+      }
+      const year = Number(monthMatch[1]);
+      const monthNum = Number(monthMatch[2]);
+      if (monthNum < 1 || monthNum > 12) {
+        errors.push({
+          row: rowNum,
+          message: `月の値が不正です: "${monthStr}"`,
+        });
+        skipped++;
+        continue;
+      }
+
+      // Find or create feature
+      const desiredEpicId =
+        colEpic >= 0 ? await getOrCreateEpicByName(db, epicName) : undefined;
+      let featureRecord = featureCache.get(featureName);
+      let featureId = featureRecord?.id;
+      if (featureId === undefined) {
+        const epicId = desiredEpicId ?? defaultEpicId;
+        const [newF] = await db
+          .insert(features)
+          .values({
+            name: featureName,
+            epicId,
+            position: await nextFeaturePosition(db, epicId),
+          })
+          .returning();
+        if (!newF) throw new Error(`Failed to create feature: ${featureName}`);
+        featureId = newF.id;
+        featureRecord = { id: featureId, epicId: newF.epicId };
+        featureCache.set(featureName, featureRecord);
+      } else if (
+        desiredEpicId !== undefined &&
+        featureRecord &&
+        featureRecord.epicId !== desiredEpicId
+      ) {
+        await db
+          .update(features)
+          .set({
+            epicId: desiredEpicId,
+            position: await nextFeaturePosition(db, desiredEpicId),
+          })
+          .where(eq(features.id, featureId));
+        featureCache.set(featureName, { id: featureId, epicId: desiredEpicId });
+      }
+
+      // Find or create member
+      let memberId = memberCache.get(memberName);
+      if (memberId === undefined) {
+        const [newM] = await db
+          .insert(members)
+          .values({ name: memberName })
+          .returning();
+        if (!newM) throw new Error(`Failed to create member: ${memberName}`);
+        memberId = newM.id;
+        memberCache.set(memberName, memberId);
+      }
+
+      // Find or create month (and quarter if needed)
+      const monthId = await findOrCreateMonth(db, year, monthNum, monthCache);
+
+      // Ensure feature_months record exists without overwriting existing total
+      const existingFM = await getFeatureMonthRow(db, featureId, monthId);
+      if (!existingFM) {
+        await db
+          .insert(featureMonths)
+          .values({ featureId, monthId, totalCapacity: 0 });
+      }
+
+      // Additive upsert for member_month_allocations
+      const existingAlloc = await db
+        .select()
+        .from(memberMonthAllocations)
+        .where(
+          and(
+            eq(memberMonthAllocations.featureId, featureId),
+            eq(memberMonthAllocations.monthId, monthId),
+            eq(memberMonthAllocations.memberId, memberId),
+          ),
+        );
+
+      if (existingAlloc[0]) {
+        await db
+          .update(memberMonthAllocations)
+          .set({
+            capacity: normalizeCapacity(existingAlloc[0].capacity + capacity),
+          })
+          .where(eq(memberMonthAllocations.id, existingAlloc[0].id));
+      } else {
+        await db.insert(memberMonthAllocations).values({
+          featureId,
+          monthId,
+          memberId,
+          capacity: normalizeCapacity(capacity),
+        });
+      }
+
+      affectedPairs.add(`${featureId}:${monthId}`);
+      success++;
+    }
+
+    // Recalculate feature_months totals for all affected pairs
+    for (const pair of affectedPairs) {
+      const parts = pair.split(":");
+      await recalculateFeatureMonthTotal(
+        db,
+        Number(parts[0]),
+        Number(parts[1]),
+      );
+    }
+
+    return { success, skipped, errors };
+  });
+
 const featureMetadataCSVImport = o
   .input(z.object({ csv: z.string() }))
   .handler(async ({ input, context }) => {
@@ -2738,6 +2936,7 @@ export const router = {
   },
   import: {
     csvImport,
+    tsvImport,
     featureMetadataCSVImport,
     memberTSVImport,
     epicMetadataCSVImport,

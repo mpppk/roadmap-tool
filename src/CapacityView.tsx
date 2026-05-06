@@ -1306,7 +1306,7 @@ export function CapacityView({ history }: { history: HistoryController }) {
   const [busy, setBusy] = useState(false);
   const [actionWarning, setActionWarning] = useState<string | null>(null);
   const [importModalOpen, setImportModalOpen] = useState(false);
-  const [importCsv, setImportCsv] = useState("");
+  const [importTsv, setImportTsv] = useState("");
   const [importResult, setImportResult] = useState<{
     success: number;
     skipped: number;
@@ -2579,10 +2579,10 @@ export function CapacityView({ history }: { history: HistoryController }) {
     await navigator.clipboard.writeText(csv);
   }, []);
 
-  const runImportCSV = useCallback(async () => {
+  const runImportTSV = useCallback(async () => {
     setImporting(true);
     try {
-      const result = await orpc.import.csvImport({ csv: importCsv });
+      const result = await orpc.import.tsvImport({ tsv: importTsv });
       setImportResult(result);
       if (result.success > 0) {
         history.clear();
@@ -2591,7 +2591,7 @@ export function CapacityView({ history }: { history: HistoryController }) {
     } finally {
       setImporting(false);
     }
-  }, [importCsv, loadAll, history]);
+  }, [importTsv, loadAll, history]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -3362,14 +3362,14 @@ export function CapacityView({ history }: { history: HistoryController }) {
             type="button"
             className="btn-sm"
             onClick={() => {
-              setImportCsv("");
+              setImportTsv("");
               setImportResult(null);
               setImportModalOpen(true);
             }}
             disabled={busy}
-            title="CSVをインポート（機能,担当者,キャパシティ,月）"
+            title="TSVをインポート（機能\t担当者\tキャパシティ\t月）"
           >
-            CSVをインポート
+            TSVをインポート
           </button>
           {(pasteNotice || actionWarning || history.warning) && (
             <span className="name-action-warning" role="alert">
@@ -3392,19 +3392,18 @@ export function CapacityView({ history }: { history: HistoryController }) {
               if (e.key === "Escape" && !importing) setImportModalOpen(false);
             }}
           >
-            <p className="confirm-msg">CSVをインポート</p>
+            <p className="confirm-msg">TSVをインポート</p>
             <p className="import-hint">
-              ヘッダー行（機能,担当者,キャパシティ,月）を含むCSVを貼り付けてください。
+              ヘッダー行（機能・担当者・キャパシティ・月）を含むTSVを貼り付けてください。
+              スプレッドシートからのコピーをそのまま貼り付けられます。
               既存のキャパシティに加算されます。
             </p>
             {!importResult ? (
               <textarea
                 className="import-textarea"
-                value={importCsv}
-                onChange={(e) => setImportCsv(e.target.value)}
-                placeholder={
-                  "機能,担当者,キャパシティ,月\nFeature A,Alice,0.5,2026-04"
-                }
+                value={importTsv}
+                onChange={(e) => setImportTsv(e.target.value)}
+                placeholder={"機能\t担当者\tキャパシティ\t月\nFeature A\tAlice\t0.5\t2026-04"}
                 rows={8}
                 disabled={importing}
               />
@@ -3439,8 +3438,8 @@ export function CapacityView({ history }: { history: HistoryController }) {
                 <button
                   type="button"
                   className="btn-sm"
-                  onClick={runImportCSV}
-                  disabled={importing || !importCsv.trim()}
+                  onClick={runImportTSV}
+                  disabled={importing || !importTsv.trim()}
                 >
                   {importing ? "インポート中…" : "インポート"}
                 </button>

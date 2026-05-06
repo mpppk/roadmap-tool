@@ -3273,7 +3273,7 @@ export function CapacityView({ history }: { history: HistoryController }) {
                             </button>
                           )}
                         </td>
-                        <td colSpan={columns.length} />
+                        {columns.length > 0 && <td colSpan={columns.length} />}
                       </tr>,
                     );
 
@@ -3324,7 +3324,7 @@ export function CapacityView({ history }: { history: HistoryController }) {
                         + Feature
                       </button>
                     </td>
-                    <td colSpan={columns.length} />
+                    {columns.length > 0 && <td colSpan={columns.length} />}
                   </tr>,
                 );
 

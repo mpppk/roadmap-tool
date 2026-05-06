@@ -1357,6 +1357,32 @@ export function CapacityView({ history }: { history: HistoryController }) {
   } | null>(null);
   const didDragRef = useRef(false);
 
+  // ── Label column resize ──────────────────────────────────────────────────
+  const [labelWidth, setLabelWidth] = useState(220);
+  const colResizeRef = useRef<{ startX: number; startWidth: number } | null>(
+    null,
+  );
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!colResizeRef.current) return;
+      const delta = e.clientX - colResizeRef.current.startX;
+      setLabelWidth(Math.max(80, colResizeRef.current.startWidth + delta));
+    };
+    const onMouseUp = () => {
+      if (!colResizeRef.current) return;
+      colResizeRef.current = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
+
   const displayedQuarters = useMemo(() => {
     if (!rangeStart || !rangeEnd) return quarters;
     return quarters.filter((q) => isQuarterInRange(q, rangeStart, rangeEnd));
@@ -2624,7 +2650,10 @@ export function CapacityView({ history }: { history: HistoryController }) {
   }
 
   return (
-    <div className="cv-root">
+    <div
+      className="cv-root"
+      style={{ "--col-label": `${labelWidth}px` } as React.CSSProperties}
+    >
       <header className="cv-header">
         <h1>Roadmap</h1>
         <span className="sep">›</span>
@@ -2784,7 +2813,23 @@ export function CapacityView({ history }: { history: HistoryController }) {
           <table className="cv-table">
             <thead>
               <tr>
-                <th className="th-label">Feature</th>
+                <th className="th-label">
+                  Feature
+                  <button
+                    type="button"
+                    aria-label="Resize label column"
+                    className="col-resize-handle"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      colResizeRef.current = {
+                        startX: e.clientX,
+                        startWidth: labelWidth,
+                      };
+                      document.body.style.cursor = "col-resize";
+                      document.body.style.userSelect = "none";
+                    }}
+                  />
+                </th>
                 {columns.map((column) => (
                   <th
                     key={column.key}

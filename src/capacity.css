@@ -196,6 +196,19 @@
   background: var(--surface);
   border-right: 1px solid var(--border);
 }
+.col-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 5px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 12;
+}
+.col-resize-handle:hover {
+  background: var(--cv-accent);
+  opacity: 0.4;
+}
 .th-quarter {
   text-align: center;
   padding: 0 8px;

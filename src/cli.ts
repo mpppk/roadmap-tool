@@ -8,8 +8,7 @@ const BASE_URL = process.env.ROADMAP_URL ?? "http://localhost:3000";
 const link = new RPCLink({ url: `${BASE_URL}/orpc` });
 const orpc = createORPCClient<RouterClient<AppRouter>>(link);
 
-function usage(): never {
-  console.error(`Usage:
+const HELP_TEXT = `Usage:
   bun cli.ts features list
   bun cli.ts features add <name> [--description <text>] [--link <title=url> ...]
   bun cli.ts features rename <id> <name> [--description <text>] [--link <title=url> ...] [--clear-description] [--clear-links]
@@ -17,12 +16,21 @@ function usage(): never {
   bun cli.ts members list
   bun cli.ts members add <name>
   bun cli.ts members rename <id> <name>
-`);
+`;
+
+function help(): never {
+  console.log(HELP_TEXT);
+  process.exit(0);
+}
+
+function usage(): never {
+  console.error(HELP_TEXT);
   process.exit(1);
 }
 
 const [, , resource, command, ...args] = process.argv;
 
+if (resource === "help" || resource === "--help" || resource === "-h") help();
 if (!resource || !command) usage();
 
 function parseFeatureMetadataFlags(args: string[]): {

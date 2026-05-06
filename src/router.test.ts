@@ -498,6 +498,39 @@ describe("feature metadata", () => {
     expect(csv).toContain("https://example.com/spec");
     expect(csv).toContain("Search");
   });
+
+  test("imports allocation tsv", async () => {
+    const createQuarter = router.quarters.create.callable({
+      context: { db: state.db },
+    });
+    const importTsv = router.import.tsvImport.callable({
+      context: { db: state.db },
+    });
+    const listFeatures = router.features.list.callable({
+      context: { db: state.db },
+    });
+    const listMembers = router.members.list.callable({
+      context: { db: state.db },
+    });
+
+    await createQuarter({ year: 2026, quarter: 2 });
+
+    const result = await importTsv({
+      tsv: ["機能\t担当者\tキャパシティ\t月", "Auth\tAlice\t0.5\t2026-04"].join(
+        "\n",
+      ),
+    });
+
+    expect(result.success).toBe(1);
+    expect(result.skipped).toBe(0);
+    expect(result.errors).toHaveLength(0);
+
+    const features = await listFeatures({});
+    expect(features.some((f) => f.name === "Auth")).toBe(true);
+
+    const members = await listMembers({});
+    expect(members.some((m) => m.name === "Alice")).toBe(true);
+  });
 });
 
 describe("history snapshots", () => {

@@ -2920,7 +2920,7 @@ export function CapacityView({ history }: { history: HistoryController }) {
                   rows.push(
                     <tr
                       key={feature.id}
-                      className="tr-feature"
+                      className="tr-feature tr-capacity-feature"
                       onDragOver={(e) => {
                         if (dragItem) e.preventDefault();
                       }}

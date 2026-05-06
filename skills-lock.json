@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "gyazo-cli": {
+      "source": "mpppk/gyazo-cli",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "ab1f16368718f12de2162ef62b6dfffa9fa916377c8495843dd5d85ebd90d6d3"
+    },
     "portless": {
       "source": "vercel-labs/portless",
       "sourceType": "github",

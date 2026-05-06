@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CapacityView } from "./CapacityView";
 import type { HistoryController, RoadmapSnapshot } from "./history-client";
 import { MembersView } from "./MembersView";
@@ -41,6 +41,8 @@ export function App() {
   const [historyBusy, setHistoryBusy] = useState(false);
   const [historyWarning, setHistoryWarning] = useState<string | null>(null);
   const [historyVersion, setHistoryVersion] = useState(0);
+  const historyQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const historyPendingRef = useRef(0);
 
   useEffect(() => {
     const handler = () => setPath(window.location.pathname);
@@ -55,10 +57,14 @@ export function App() {
   }, []);
 
   const recordHistoryOperation = useCallback(
-    async <T,>(label: string, operation: () => Promise<T>): Promise<T> => {
+    <T,>(label: string, operation: () => Promise<T>): Promise<T> => {
+      // Mark busy immediately so buttons disable before the task actually starts.
+      historyPendingRef.current++;
       setHistoryBusy(true);
       setHistoryWarning(null);
-      try {
+
+      // Chain onto the existing queue so concurrent calls are serialised.
+      const task = historyQueueRef.current.then(async (): Promise<T> => {
         const before = await orpc.history.snapshot({});
         let result: T;
         let operationError: unknown;
@@ -68,7 +74,17 @@ export function App() {
           operationError = error;
         }
 
-        const after = await orpc.history.snapshot({});
+        // P2: if the post-op snapshot fails, the mutation already succeeded on
+        // the server — return the result without recording a history entry
+        // rather than surfacing a spurious error to the caller.
+        let after: RoadmapSnapshot;
+        try {
+          after = await orpc.history.snapshot({});
+        } catch {
+          if (operationError) throw operationError;
+          return result!;
+        }
+
         if (!snapshotsEqual(before, after)) {
           const entry: HistoryEntry = { label, before, after };
           setUndoStack((stack) => [...stack, entry].slice(-HISTORY_LIMIT));
@@ -77,9 +93,22 @@ export function App() {
 
         if (operationError) throw operationError;
         return result!;
-      } finally {
-        setHistoryBusy(false);
-      }
+      });
+
+      // Update the queue tail; clear busy only when *all* enqueued tasks finish.
+      const cleanup = task.then(
+        () => {
+          historyPendingRef.current--;
+          if (historyPendingRef.current === 0) setHistoryBusy(false);
+        },
+        () => {
+          historyPendingRef.current--;
+          if (historyPendingRef.current === 0) setHistoryBusy(false);
+        },
+      );
+      historyQueueRef.current = cleanup;
+
+      return task;
     },
     [],
   );

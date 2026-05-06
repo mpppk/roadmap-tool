@@ -385,6 +385,117 @@ describe("feature metadata", () => {
   });
 });
 
+describe("history snapshots", () => {
+  let state: ReturnType<typeof createTestDb>;
+
+  beforeEach(() => {
+    state = createTestDb();
+  });
+
+  afterEach(() => {
+    state.sqlite.close();
+  });
+
+  test("restores deleted features, members, quarters, links, and allocations with stable ids", async () => {
+    const snapshot = router.history.snapshot.callable({
+      context: { db: state.db },
+    });
+    const restore = router.history.restore.callable({
+      context: { db: state.db },
+    });
+    const createFeature = router.features.create.callable({
+      context: { db: state.db },
+    });
+    const deleteFeature = router.features.delete.callable({
+      context: { db: state.db },
+    });
+    const createMember = router.members.create.callable({
+      context: { db: state.db },
+    });
+    const deleteMember = router.members.delete.callable({
+      context: { db: state.db },
+    });
+    const setMaxCapacity = router.members.setMaxCapacity.callable({
+      context: { db: state.db },
+    });
+    const createQuarter = router.quarters.create.callable({
+      context: { db: state.db },
+    });
+    const deleteQuarter = router.quarters.delete.callable({
+      context: { db: state.db },
+    });
+    const updateAllocation = router.allocations.updateMemberAllocation.callable(
+      {
+        context: { db: state.db },
+      },
+    );
+
+    const feature = await createFeature({
+      name: "Auth",
+      description: "Login",
+      links: [{ title: "Spec", url: "https://example.com/spec" }],
+    });
+    const member = await createMember({ name: "Alice" });
+    await setMaxCapacity({ id: member!.id, maxCapacity: 0.6 });
+    const quarter = await createQuarter({ year: 2026, quarter: 1 });
+    await updateAllocation({
+      featureId: feature!.id,
+      memberId: member!.id,
+      periodType: "month",
+      monthId: quarter!.months[0]!.id,
+      capacity: 0.4,
+    });
+
+    const before = await snapshot({});
+    await deleteFeature({ id: feature!.id });
+    await deleteMember({ id: member!.id });
+    await deleteQuarter({ id: quarter!.id });
+    const afterDelete = await snapshot({});
+
+    await restore({ expected: afterDelete, snapshot: before });
+
+    const restored = await snapshot({});
+    expect(restored).toEqual(before);
+    expect(restored.features[0]?.id).toBe(feature!.id);
+    expect(restored.featureLinks[0]?.featureId).toBe(feature!.id);
+    expect(restored.members[0]?.id).toBe(member!.id);
+    expect(restored.members[0]?.maxCapacity).toBe(0.6);
+    expect(restored.quarters[0]?.id).toBe(quarter!.id);
+    expect(restored.months).toHaveLength(3);
+    expect(restored.featureMonths[0]?.totalCapacity).toBeCloseTo(0.4);
+    expect(restored.memberMonthAllocations[0]?.capacity).toBeCloseTo(0.4);
+  });
+
+  test("rejects restore when current data differs from the expected snapshot", async () => {
+    const snapshot = router.history.snapshot.callable({
+      context: { db: state.db },
+    });
+    const restore = router.history.restore.callable({
+      context: { db: state.db },
+    });
+    const createFeature = router.features.create.callable({
+      context: { db: state.db },
+    });
+    const createMember = router.members.create.callable({
+      context: { db: state.db },
+    });
+
+    const before = await snapshot({});
+    await createFeature({ name: "Auth" });
+    const expected = await snapshot({});
+    await createMember({ name: "Alice" });
+
+    try {
+      await restore({ expected, snapshot: before });
+    } catch (error) {
+      expect((error as { code?: string }).code).toBe("CONFLICT");
+      expect((await snapshot({})).members).toHaveLength(1);
+      return;
+    }
+    throw new Error("Expected CONFLICT restore error");
+  });
+});
+
 describe("allocation capacity conflicts", () => {
   let sqlite: Database | null = null;
 

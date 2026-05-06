@@ -20,9 +20,9 @@ test("/features shows features capacity view", async ({ page }) => {
 
   await expect(page.locator(".cv-nav-link.active")).toHaveText("Features");
   await expect(page.locator("th.th-label")).toHaveText("Feature");
-  await expect(page.getByRole("button", { name: "Quarter" })).toHaveClass(
-    /active/,
-  );
+  await expect(
+    page.getByRole("button", { name: "Quarter", exact: true }),
+  ).toHaveClass(/active/);
 });
 
 test("/members shows members capacity view", async ({ page }) => {
@@ -31,9 +31,9 @@ test("/members shows members capacity view", async ({ page }) => {
 
   await expect(page.locator(".cv-nav-link.active")).toHaveText("Members");
   await expect(page.locator("th.th-label")).toHaveText("Member");
-  await expect(page.getByRole("button", { name: "Quarter" })).toHaveClass(
-    /active/,
-  );
+  await expect(
+    page.getByRole("button", { name: "Quarter", exact: true }),
+  ).toHaveClass(/active/);
 });
 
 test("period toggle switches between quarter and month columns", async ({
@@ -47,10 +47,10 @@ test("period toggle switches between quarter and month columns", async ({
     /active/,
   );
 
-  await page.getByRole("button", { name: "Quarter" }).click();
-  await expect(page.getByRole("button", { name: "Quarter" })).toHaveClass(
-    /active/,
-  );
+  await page.getByRole("button", { name: "Quarter", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Quarter", exact: true }),
+  ).toHaveClass(/active/);
 });
 
 test("+ Quarter adds three columns in month view", async ({ page }) => {
@@ -99,7 +99,9 @@ test("/members shows member rows with expand toggle", async ({ page }) => {
 
   if (count === 0) {
     // No members yet — toolbar should have + Member button
-    await expect(page.locator(".cv-toolbar .btn-sm", { hasText: "+ Member" })).toBeVisible();
+    await expect(
+      page.locator(".cv-toolbar .btn-sm", { hasText: "+ Member" }),
+    ).toBeVisible();
     return;
   }
 
@@ -122,7 +124,9 @@ test("/features shows feature rows with expand toggle", async ({ page }) => {
   const count = await rows.count();
 
   if (count === 0) {
-    await expect(page.locator(".cv-toolbar .btn-sm", { hasText: "+ Feature" })).toBeVisible();
+    await expect(
+      page.locator(".cv-toolbar .btn-sm", { hasText: "+ Feature" }),
+    ).toBeVisible();
     return;
   }
 

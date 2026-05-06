@@ -10,6 +10,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./capacity.css";
 import { parseCapacityTSV } from "./capacity-clipboard";
+import type { HistoryController } from "./history-client";
 import {
   getNameErrorMessage,
   NAME_ERROR_MESSAGES,
@@ -1055,7 +1056,7 @@ function PasteConflictDialog({
 const FEATURE_MAX_VAL = 3;
 const COL_W = 148;
 
-export function CapacityView() {
+export function CapacityView({ history }: { history: HistoryController }) {
   const [viewMode, setViewMode] = useState<ViewMode>("quarter");
   const [capacityAggMode, setCapacityAggMode] =
     useState<CapacityAggMode>("total");
@@ -1273,8 +1274,9 @@ export function CapacityView() {
   }, []);
 
   useEffect(() => {
+    void history.version;
     loadAll();
-  }, [loadAll]);
+  }, [loadAll, history.version]);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -1419,19 +1421,21 @@ export function CapacityView() {
     async (featureId: number, column: PeriodColumn, totalCapacity: number) => {
       setBusy(true);
       try {
-        const result = await orpc.allocations.updateTotal({
-          featureId,
-          totalCapacity,
-          periodType: column.type,
-          monthId: column.monthId,
-          quarterId: column.quarterId,
+        await history.record("Capacityを変更", async () => {
+          const result = await orpc.allocations.updateTotal({
+            featureId,
+            totalCapacity,
+            periodType: column.type,
+            monthId: column.monthId,
+            quarterId: column.quarterId,
+          });
+          applyFeatureMonthUpdates([{ featureId, months: result.months }]);
         });
-        applyFeatureMonthUpdates([{ featureId, months: result.months }]);
       } finally {
         setBusy(false);
       }
     },
-    [applyFeatureMonthUpdates],
+    [applyFeatureMonthUpdates, history],
   );
 
   const updateMemberAllocation = useCallback(
@@ -1498,21 +1502,23 @@ export function CapacityView() {
           return;
         }
 
-        const result = await orpc.allocations.updateMemberAllocation({
-          featureId,
-          memberId,
-          capacity,
-          periodType: column.type,
-          monthId: column.monthId,
-          quarterId: column.quarterId,
-          capacityConflictResolution: "fitWithinLimit",
+        await history.record("Member capacityを変更", async () => {
+          const result = await orpc.allocations.updateMemberAllocation({
+            featureId,
+            memberId,
+            capacity,
+            periodType: column.type,
+            monthId: column.monthId,
+            quarterId: column.quarterId,
+            capacityConflictResolution: "fitWithinLimit",
+          });
+          applyFeatureMonthUpdates(result.updatedFeatures);
         });
-        applyFeatureMonthUpdates(result.updatedFeatures);
       } finally {
         setBusy(false);
       }
     },
-    [applyFeatureMonthUpdates, members, getMemberMaxCap, featureRows],
+    [applyFeatureMonthUpdates, members, getMemberMaxCap, featureRows, history],
   );
 
   const resolveCapacityConflict = useCallback(
@@ -1520,22 +1526,24 @@ export function CapacityView() {
       if (!capacityConflict) return;
       setBusy(true);
       try {
-        const result = await orpc.allocations.updateMemberAllocation({
-          featureId: capacityConflict.featureId,
-          periodType: capacityConflict.periodType,
-          monthId: capacityConflict.monthId,
-          quarterId: capacityConflict.quarterId,
-          memberId: capacityConflict.memberId,
-          capacity: capacityConflict.requestedCapacity,
-          capacityConflictResolution: resolution,
+        await history.record("Capacity競合を解決", async () => {
+          const result = await orpc.allocations.updateMemberAllocation({
+            featureId: capacityConflict.featureId,
+            periodType: capacityConflict.periodType,
+            monthId: capacityConflict.monthId,
+            quarterId: capacityConflict.quarterId,
+            memberId: capacityConflict.memberId,
+            capacity: capacityConflict.requestedCapacity,
+            capacityConflictResolution: resolution,
+          });
+          applyFeatureMonthUpdates(result.updatedFeatures);
         });
-        applyFeatureMonthUpdates(result.updatedFeatures);
         setCapacityConflict(null);
       } finally {
         setBusy(false);
       }
     },
-    [applyFeatureMonthUpdates, capacityConflict],
+    [applyFeatureMonthUpdates, capacityConflict, history],
   );
 
   const resolveMaxCapacityOverflow = useCallback(
@@ -1543,22 +1551,24 @@ export function CapacityView() {
       if (!maxCapacityOverflow) return;
       setBusy(true);
       try {
-        const result = await orpc.allocations.updateMemberAllocation({
-          featureId: maxCapacityOverflow.featureId,
-          periodType: maxCapacityOverflow.periodType,
-          monthId: maxCapacityOverflow.monthId,
-          quarterId: maxCapacityOverflow.quarterId,
-          memberId: maxCapacityOverflow.memberId,
-          capacity: maxCapacityOverflow.requestedCapacity,
-          capacityConflictResolution: resolution,
+        await history.record("Max capacity超過を解決", async () => {
+          const result = await orpc.allocations.updateMemberAllocation({
+            featureId: maxCapacityOverflow.featureId,
+            periodType: maxCapacityOverflow.periodType,
+            monthId: maxCapacityOverflow.monthId,
+            quarterId: maxCapacityOverflow.quarterId,
+            memberId: maxCapacityOverflow.memberId,
+            capacity: maxCapacityOverflow.requestedCapacity,
+            capacityConflictResolution: resolution,
+          });
+          applyFeatureMonthUpdates(result.updatedFeatures);
         });
-        applyFeatureMonthUpdates(result.updatedFeatures);
         setMaxCapacityOverflow(null);
       } finally {
         setBusy(false);
       }
     },
-    [applyFeatureMonthUpdates, maxCapacityOverflow],
+    [applyFeatureMonthUpdates, maxCapacityOverflow, history],
   );
 
   // ── Copy / Paste logic ────────────────────────────────────────────────────
@@ -1714,34 +1724,36 @@ export function CapacityView() {
     async (ops: PasteOp[], allowOverflow: boolean) => {
       setBusy(true);
       try {
-        for (const op of ops) {
-          const div = colDivisor(op.column);
-          if (op.kind === "feature") {
-            const result = await orpc.allocations.updateTotal({
-              featureId: op.featureId,
-              totalCapacity: op.value * div,
-              periodType: op.column.type,
-              monthId: op.column.monthId,
-              quarterId: op.column.quarterId,
-            });
-            applyFeatureMonthUpdates([
-              { featureId: op.featureId, months: result.months },
-            ]);
-          } else {
-            const result = await orpc.allocations.updateMemberAllocation({
-              featureId: op.featureId,
-              memberId: op.memberId,
-              capacity: op.value * div,
-              periodType: op.column.type,
-              monthId: op.column.monthId,
-              quarterId: op.column.quarterId,
-              capacityConflictResolution: allowOverflow
-                ? "allowOverflow"
-                : "fitWithinLimit",
-            });
-            applyFeatureMonthUpdates(result.updatedFeatures);
+        await history.record("Capacityを貼り付け", async () => {
+          for (const op of ops) {
+            const div = colDivisor(op.column);
+            if (op.kind === "feature") {
+              const result = await orpc.allocations.updateTotal({
+                featureId: op.featureId,
+                totalCapacity: op.value * div,
+                periodType: op.column.type,
+                monthId: op.column.monthId,
+                quarterId: op.column.quarterId,
+              });
+              applyFeatureMonthUpdates([
+                { featureId: op.featureId, months: result.months },
+              ]);
+            } else {
+              const result = await orpc.allocations.updateMemberAllocation({
+                featureId: op.featureId,
+                memberId: op.memberId,
+                capacity: op.value * div,
+                periodType: op.column.type,
+                monthId: op.column.monthId,
+                quarterId: op.column.quarterId,
+                capacityConflictResolution: allowOverflow
+                  ? "allowOverflow"
+                  : "fitWithinLimit",
+              });
+              applyFeatureMonthUpdates(result.updatedFeatures);
+            }
           }
-        }
+        });
       } finally {
         setBusy(false);
         setPasteConflict(null);
@@ -1750,7 +1762,7 @@ export function CapacityView() {
         clearSelection();
       }
     },
-    [applyFeatureMonthUpdates, clearSelection, colDivisor],
+    [applyFeatureMonthUpdates, clearSelection, colDivisor, history],
   );
 
   const handleGridPaste = useCallback(
@@ -1870,11 +1882,13 @@ export function CapacityView() {
     setBusy(true);
     setActionWarning(null);
     try {
-      const f = await orpc.features.create({
-        name: nextAvailableGeneratedName(
-          "Feature",
-          featureRows.map((row) => row.name),
-        ),
+      const f = await history.record("Featureを追加", async () => {
+        return orpc.features.create({
+          name: nextAvailableGeneratedName(
+            "Feature",
+            featureRows.map((row) => row.name),
+          ),
+        });
       });
       if (!f) return;
       setFeatureRows((rows) => [
@@ -1897,18 +1911,23 @@ export function CapacityView() {
     }
   };
 
-  const renameFeature = useCallback(async (id: number, name: string) => {
-    const f = await orpc.features.rename({ id, name });
-    if (!f) return name;
-    setFeatureRows((rows) =>
-      rows.map((r) =>
-        r.id === id
-          ? { ...r, name: f.name, description: f.description, links: f.links }
-          : r,
-      ),
-    );
-    return f.name;
-  }, []);
+  const renameFeature = useCallback(
+    async (id: number, name: string) => {
+      const f = await history.record("Feature名を変更", async () => {
+        return orpc.features.rename({ id, name });
+      });
+      if (!f) return name;
+      setFeatureRows((rows) =>
+        rows.map((r) =>
+          r.id === id
+            ? { ...r, name: f.name, description: f.description, links: f.links }
+            : r,
+        ),
+      );
+      return f.name;
+    },
+    [history],
+  );
 
   const saveFeatureDetails = useCallback(
     async (
@@ -1919,7 +1938,9 @@ export function CapacityView() {
         links: Array<{ title: string; url: string }>;
       },
     ) => {
-      const f = await orpc.features.rename({ id, ...input });
+      const f = await history.record("Feature詳細を変更", async () => {
+        return orpc.features.rename({ id, ...input });
+      });
       if (!f) return;
       setFeatureRows((rows) =>
         rows.map((r) =>
@@ -1939,28 +1960,35 @@ export function CapacityView() {
           : current,
       );
     },
-    [],
+    [history],
   );
 
-  const deleteFeature = useCallback(async (id: number) => {
-    setBusy(true);
-    try {
-      await orpc.features.delete({ id });
-      setFeatureRows((rows) => rows.filter((r) => r.id !== id));
-    } finally {
-      setBusy(false);
-    }
-  }, []);
+  const deleteFeature = useCallback(
+    async (id: number) => {
+      setBusy(true);
+      try {
+        await history.record("Featureを削除", async () => {
+          await orpc.features.delete({ id });
+          setFeatureRows((rows) => rows.filter((r) => r.id !== id));
+        });
+      } finally {
+        setBusy(false);
+      }
+    },
+    [history],
+  );
 
   const addMember = async () => {
     setBusy(true);
     setActionWarning(null);
     try {
-      const m = await orpc.members.create({
-        name: nextAvailableGeneratedName(
-          "Member",
-          members.map((member) => member.name),
-        ),
+      const m = await history.record("Memberを追加", async () => {
+        return orpc.members.create({
+          name: nextAvailableGeneratedName(
+            "Member",
+            members.map((member) => member.name),
+          ),
+        });
       });
       if (!m) return;
       setMembers((ms) => [...ms, m]);
@@ -1977,7 +2005,9 @@ export function CapacityView() {
     setBusy(true);
     try {
       const { year, quarter } = nextQuarterYQ(quarters);
-      const q = await orpc.quarters.create({ year, quarter });
+      const q = await history.record("Quarterを追加", async () => {
+        return orpc.quarters.create({ year, quarter });
+      });
       if (!q) return;
       setQuarters((qs) =>
         [
@@ -2024,26 +2054,33 @@ export function CapacityView() {
     async (featureId: number, memberId: number) => {
       setBusy(true);
       try {
-        await orpc.allocations.assignMember({ featureId, memberId });
-        await refreshFeatureRow(featureId);
+        await history.record("MemberをFeatureに割り当て", async () => {
+          await orpc.allocations.assignMember({ featureId, memberId });
+          await refreshFeatureRow(featureId);
+        });
       } finally {
         setBusy(false);
       }
     },
-    [refreshFeatureRow],
+    [refreshFeatureRow, history],
   );
 
   const removeMemberFromFeature = useCallback(
     async (featureId: number, memberId: number) => {
       setBusy(true);
       try {
-        await orpc.allocations.removeMemberFromFeature({ featureId, memberId });
-        await refreshFeatureRow(featureId);
+        await history.record("MemberをFeatureから削除", async () => {
+          await orpc.allocations.removeMemberFromFeature({
+            featureId,
+            memberId,
+          });
+          await refreshFeatureRow(featureId);
+        });
       } finally {
         setBusy(false);
       }
     },
-    [refreshFeatureRow],
+    [refreshFeatureRow, history],
   );
 
   const copyAllocationCSV = useCallback(async () => {
@@ -2057,12 +2094,13 @@ export function CapacityView() {
       const result = await orpc.import.csvImport({ csv: importCsv });
       setImportResult(result);
       if (result.success > 0) {
+        history.clear();
         await loadAll();
       }
     } finally {
       setImporting(false);
     }
-  }, [importCsv, loadAll]);
+  }, [importCsv, loadAll, history]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -2115,6 +2153,7 @@ export function CapacityView() {
             Members
           </button>
         </nav>
+        {history.controls}
         <fieldset className="period-toggle">
           <legend className="period-toggle-label">表示単位</legend>
           <button
@@ -2608,9 +2647,9 @@ export function CapacityView() {
           >
             CSVをインポート
           </button>
-          {(pasteNotice || actionWarning) && (
+          {(pasteNotice || actionWarning || history.warning) && (
             <span className="name-action-warning" role="alert">
-              {pasteNotice || actionWarning}
+              {pasteNotice || actionWarning || history.warning}
             </span>
           )}
           <span className="hint-text">

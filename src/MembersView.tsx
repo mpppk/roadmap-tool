@@ -650,7 +650,6 @@ export function MembersView({ history }: { history: HistoryController }) {
             orpc.quarters.create({ year: yq.year, quarter: yq.quarter }),
           ),
         ),
-
       );
       if (!created) return;
       const valid = created.filter(Boolean);

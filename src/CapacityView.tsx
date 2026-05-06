@@ -3239,7 +3239,10 @@ export function CapacityView({ history }: { history: HistoryController }) {
                         key={`${feature.id}-assign`}
                         className="tr-assign-member"
                       >
-                        <td colSpan={1 + columns.length} className="td-assign td-assign-member">
+                        <td
+                          colSpan={1 + columns.length}
+                          className="td-assign td-assign-member"
+                        >
                           {assigningFeatureId === feature.id ? (
                             <select
                               className="assign-select"

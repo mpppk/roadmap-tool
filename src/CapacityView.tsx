@@ -722,21 +722,6 @@ function FeatureDetailsDialog({
       >
         <div className="feature-details-header">
           <p className="confirm-msg">Feature詳細</p>
-          <button
-            type="button"
-            className="feature-details-icon-btn"
-            onClick={() =>
-              setLinks((current) => [
-                ...current,
-                { title: "", url: "", clientKey: crypto.randomUUID() },
-              ])
-            }
-            disabled={saving || links.length >= 20}
-            title="リンクを追加"
-            aria-label="リンクを追加"
-          >
-            <Plus size={14} />
-          </button>
         </div>
 
         <label className="feature-details-label">
@@ -827,6 +812,23 @@ function FeatureDetailsDialog({
             </div>
           ))}
         </div>
+
+        <button
+          type="button"
+          className="feature-details-add-link-btn"
+          onClick={() =>
+            setLinks((current) => [
+              ...current,
+              { title: "", url: "", clientKey: crypto.randomUUID() },
+            ])
+          }
+          disabled={saving || links.length >= 20}
+          title="リンクを追加"
+          aria-label="リンクを追加"
+        >
+          <Plus size={14} />
+          リンクを追加
+        </button>
 
         {error && (
           <span className="name-warning feature-details-error" role="alert">

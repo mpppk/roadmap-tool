@@ -819,7 +819,6 @@
 .feature-details-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
 }
 .feature-details-label {
@@ -849,7 +848,27 @@
 .feature-details-links {
   display: grid;
   gap: 6px;
+}
+.feature-details-add-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   margin-bottom: 12px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--cv-text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.feature-details-add-link-btn:hover:not(:disabled) {
+  background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+  color: var(--cv-text);
+}
+.feature-details-add-link-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 .feature-details-link-row {
   display: grid;

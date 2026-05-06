@@ -1,4 +1,4 @@
-export type NameResource = "feature" | "member";
+export type NameResource = "feature" | "member" | "epic";
 export type NameErrorCode = "DUPLICATE_NAME" | "BLANK_NAME";
 
 export const NAME_ERROR_MESSAGES: Record<NameResource, string> & {
@@ -6,6 +6,7 @@ export const NAME_ERROR_MESSAGES: Record<NameResource, string> & {
 } = {
   feature: "Feature名は重複できません。別の名前を入力してください。",
   member: "Member名は重複できません。別の名前を入力してください。",
+  epic: "Epic名は重複できません。別の名前を入力してください。",
   blank: "名前は空にできません。",
 };
 
@@ -14,7 +15,7 @@ export function trimSqliteSpaces(value: string): string {
 }
 
 export function nextAvailableGeneratedName(
-  prefix: "Feature" | "Member",
+  prefix: "Feature" | "Member" | "Epic",
   existingNames: Iterable<string>,
 ): string {
   const used = new Set(existingNames);
@@ -37,6 +38,7 @@ function isNameErrorCode(value: unknown): value is NameErrorCode {
 function resourceMessage(resource: unknown): string | null {
   if (resource === "feature") return NAME_ERROR_MESSAGES.feature;
   if (resource === "member") return NAME_ERROR_MESSAGES.member;
+  if (resource === "epic") return NAME_ERROR_MESSAGES.epic;
   return null;
 }
 
@@ -57,7 +59,8 @@ export function getNameErrorMessage(error: unknown): string | null {
   if (
     message === NAME_ERROR_MESSAGES.blank ||
     message === NAME_ERROR_MESSAGES.feature ||
-    message === NAME_ERROR_MESSAGES.member
+    message === NAME_ERROR_MESSAGES.member ||
+    message === NAME_ERROR_MESSAGES.epic
   ) {
     return message;
   }

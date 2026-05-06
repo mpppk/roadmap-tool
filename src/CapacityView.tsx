@@ -2,6 +2,7 @@ import {
   ArrowDown,
   ArrowUp,
   ExternalLink,
+  GripVertical,
   Info,
   Link as LinkIcon,
   Plus,
@@ -46,9 +47,21 @@ type FeatureRow = {
   id: number;
   name: string;
   description: string | null;
+  epicId: number;
+  position: number;
   links: FeatureLink[];
   expanded: boolean;
   months: Map<number, MonthData>;
+};
+
+type EpicRow = {
+  id: number;
+  name: string;
+  description: string | null;
+  position: number;
+  isDefault: boolean;
+  links: FeatureLink[];
+  collapsed: boolean;
 };
 
 type PeriodColumn = {
@@ -149,6 +162,10 @@ type PasteConflictState = {
   opsForCapped: PasteOp[];
   opsForOverflow: PasteOp[];
 };
+
+type DragItem =
+  | { type: "epic"; epicId: number }
+  | { type: "feature"; featureId: number; epicId: number };
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -656,18 +673,22 @@ function FeatureNameCell({
 
 function FeatureDetailsDialog({
   feature,
+  epics,
   onSave,
   onClose,
 }: {
   feature: FeatureRow;
+  epics: EpicRow[];
   onSave: (input: {
     name: string;
+    epicId: number;
     description: string | null;
     links: Array<{ title: string; url: string }>;
   }) => Promise<void>;
   onClose: () => void;
 }) {
   const [name, setName] = useState(feature.name);
+  const [epicId, setEpicId] = useState(feature.epicId);
   const [description, setDescription] = useState(feature.description ?? "");
   const [links, setLinks] = useState<FeatureLink[]>(
     feature.links.length > 0
@@ -717,6 +738,7 @@ function FeatureDetailsDialog({
     try {
       await onSave({
         name: trimmedName,
+        epicId,
         description: description.trim().length > 0 ? description : null,
         links: links.map((link) => ({ title: link.title, url: link.url })),
       });
@@ -757,6 +779,22 @@ function FeatureDetailsDialog({
               setError(null);
             }}
           />
+        </label>
+
+        <label className="feature-details-label">
+          <span>Epic</span>
+          <select
+            className="feature-details-input"
+            value={epicId}
+            disabled={saving}
+            onChange={(e) => setEpicId(Number(e.target.value))}
+          >
+            {epics.map((epic) => (
+              <option key={epic.id} value={epic.id}>
+                {epic.name}
+              </option>
+            ))}
+          </select>
         </label>
 
         <label className="feature-details-label">
@@ -858,6 +896,179 @@ function FeatureDetailsDialog({
           </span>
         )}
 
+        <div className="confirm-btns">
+          <button
+            type="button"
+            className="btn-sm"
+            onClick={onClose}
+            disabled={saving}
+          >
+            キャンセル
+          </button>
+          <button
+            type="button"
+            className="btn-sm"
+            onClick={() => void save()}
+            disabled={saving}
+          >
+            {saving ? "保存中…" : "保存"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EpicDetailsDialog({
+  epic,
+  onSave,
+  onClose,
+}: {
+  epic: EpicRow;
+  onSave: (input: {
+    name: string;
+    description: string | null;
+    links: Array<{ title: string; url: string }>;
+  }) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(epic.name);
+  const [description, setDescription] = useState(epic.description ?? "");
+  const [links, setLinks] = useState<FeatureLink[]>(
+    epic.links.length > 0
+      ? epic.links.map((link) => ({
+          ...link,
+          clientKey: `saved-${link.id ?? crypto.randomUUID()}`,
+        }))
+      : [{ title: "", url: "", clientKey: crypto.randomUUID() }],
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    const trimmedName = trimSqliteSpaces(name);
+    if (trimmedName.length === 0) {
+      setError(NAME_ERROR_MESSAGES.blank);
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave({
+        name: trimmedName,
+        description: description.trim().length > 0 ? description : null,
+        links: links.map((link) => ({ title: link.title, url: link.url })),
+      });
+      onClose();
+    } catch (error) {
+      setError(
+        getNameErrorMessage(error) ??
+          (error instanceof Error ? error.message : null) ??
+          "保存できませんでした。",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="confirm-overlay">
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="confirm-dialog feature-details-dialog"
+      >
+        <div className="feature-details-header">
+          <p className="confirm-msg">Epic詳細</p>
+          <button
+            type="button"
+            className="feature-details-icon-btn"
+            onClick={() =>
+              setLinks((current) => [
+                ...current,
+                { title: "", url: "", clientKey: crypto.randomUUID() },
+              ])
+            }
+            disabled={saving || links.length >= 20}
+            title="リンクを追加"
+            aria-label="リンクを追加"
+          >
+            <Plus size={14} />
+          </button>
+        </div>
+        <label className="feature-details-label">
+          <span>名前</span>
+          <input
+            className="feature-details-input"
+            value={name}
+            disabled={saving}
+            onChange={(e) => {
+              setName(e.target.value);
+              setError(null);
+            }}
+          />
+        </label>
+        <label className="feature-details-label">
+          <span>説明</span>
+          <textarea
+            className="feature-details-textarea"
+            value={description}
+            disabled={saving}
+            maxLength={2000}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </label>
+        <div className="feature-details-links">
+          {links.map((link, index) => (
+            <div className="feature-details-link-row" key={link.clientKey}>
+              <input
+                className="feature-details-input"
+                value={link.title}
+                disabled={saving}
+                maxLength={100}
+                placeholder="リンク名"
+                onChange={(e) =>
+                  setLinks((current) =>
+                    current.map((item, i) =>
+                      i === index ? { ...item, title: e.target.value } : item,
+                    ),
+                  )
+                }
+              />
+              <input
+                className="feature-details-input"
+                value={link.url}
+                disabled={saving}
+                maxLength={2048}
+                placeholder="https://example.com"
+                onChange={(e) =>
+                  setLinks((current) =>
+                    current.map((item, i) =>
+                      i === index ? { ...item, url: e.target.value } : item,
+                    ),
+                  )
+                }
+              />
+              <button
+                type="button"
+                className="feature-details-icon-btn danger"
+                onClick={() =>
+                  setLinks((current) => current.filter((_, i) => i !== index))
+                }
+                disabled={saving}
+                title="削除"
+                aria-label="削除"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+        {error && (
+          <span className="name-warning feature-details-error" role="alert">
+            {error}
+          </span>
+        )}
         <div className="confirm-btns">
           <button
             type="button"
@@ -1089,6 +1300,7 @@ export function CapacityView({ history }: { history: HistoryController }) {
   const [rangeEnd, setRangeEnd] = useState<QuarterYQ | null>(null);
   const rangeInitializedRef = useRef(false);
   const [members, setMembers] = useState<Member[]>([]);
+  const [epicRows, setEpicRows] = useState<EpicRow[]>([]);
   const [featureRows, setFeatureRows] = useState<FeatureRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -1106,6 +1318,10 @@ export function CapacityView({ history }: { history: HistoryController }) {
   );
   const [editingFeatureDetails, setEditingFeatureDetails] =
     useState<FeatureRow | null>(null);
+  const [editingEpicDetails, setEditingEpicDetails] = useState<EpicRow | null>(
+    null,
+  );
+  const [dragItem, setDragItem] = useState<DragItem | null>(null);
   const [removeConfirm, setRemoveConfirm] = useState<{
     featureId: number;
     memberId: number;
@@ -1161,9 +1377,14 @@ export function CapacityView({ history }: { history: HistoryController }) {
   // Flat list of selectable rows in visual order
   const selectableRows = useMemo<SelectableRow[]>(() => {
     const rows: SelectableRow[] = [];
-    for (const feature of featureRows) {
-      rows.push({ type: "feature", featureId: feature.id });
-      if (feature.expanded) {
+    for (const epic of epicRows) {
+      if (epic.collapsed) continue;
+      const epicFeatures = featureRows
+        .filter((feature) => feature.epicId === epic.id)
+        .sort((a, b) => a.position - b.position || a.id - b.id);
+      for (const feature of epicFeatures) {
+        rows.push({ type: "feature", featureId: feature.id });
+        if (!feature.expanded) continue;
         const assignedMemberIds = new Set<number>();
         for (const monthData of feature.months.values()) {
           for (const a of monthData.memberAllocations) {
@@ -1182,7 +1403,7 @@ export function CapacityView({ history }: { history: HistoryController }) {
       }
     }
     return rows;
-  }, [featureRows, members]);
+  }, [epicRows, featureRows, members]);
 
   // Map from row key → index in selectableRows
   const rowIndexByKey = useMemo(() => {
@@ -1260,8 +1481,9 @@ export function CapacityView({ history }: { history: HistoryController }) {
 
   const loadAll = useCallback(async () => {
     setLoading(true);
-    const [qs, fs, ms] = await Promise.all([
+    const [qs, eps, fs, ms] = await Promise.all([
       orpc.quarters.list({}),
+      orpc.epics.list({}),
       orpc.features.list({}),
       orpc.members.list({}),
     ]);
@@ -1295,6 +1517,8 @@ export function CapacityView({ history }: { history: HistoryController }) {
         id: fv.feature.id,
         name: fv.feature.name,
         description: fv.feature.description,
+        epicId: fv.feature.epicId,
+        position: fv.feature.position,
         links: fv.feature.links.map((link) => ({
           id: link.id,
           title: link.title,
@@ -1323,6 +1547,24 @@ export function CapacityView({ history }: { history: HistoryController }) {
       }
     }
     setMembers(ms);
+    setEpicRows(
+      eps
+        .map((epic) => ({
+          id: epic.id,
+          name: epic.name,
+          description: epic.description,
+          position: epic.position,
+          isDefault: epic.isDefault,
+          links: epic.links.map((link) => ({
+            id: link.id,
+            title: link.title,
+            url: link.url,
+            position: link.position,
+          })),
+          collapsed: false,
+        }))
+        .sort((a, b) => a.position - b.position || a.id - b.id),
+    );
     setFeatureRows(rows);
     setLoading(false);
   }, []);
@@ -1344,6 +1586,18 @@ export function CapacityView({ history }: { history: HistoryController }) {
 
   const getColumnData = (row: FeatureRow, column: PeriodColumn): MonthData =>
     aggregateMonthData(row.months, column.monthIds);
+
+  const getEpicColumnData = (epicId: number, column: PeriodColumn): MonthData =>
+    featureRows
+      .filter((feature) => feature.epicId === epicId)
+      .reduce<MonthData>((sum, feature) => {
+        const data = getColumnData(feature, column);
+        return {
+          totalCapacity: sum.totalCapacity + data.totalCapacity,
+          unassignedCapacity: sum.unassignedCapacity + data.unassignedCapacity,
+          memberAllocations: [],
+        };
+      }, emptyMonthData());
 
   const getMemberColumnTotal = (
     memberId: number,
@@ -1407,6 +1661,14 @@ export function CapacityView({ history }: { history: HistoryController }) {
     setFeatureRows((rows) =>
       rows.map((r) =>
         r.id === featureId ? { ...r, expanded: !r.expanded } : r,
+      ),
+    );
+  };
+
+  const toggleEpicCollapse = (epicId: number) => {
+    setEpicRows((rows) =>
+      rows.map((row) =>
+        row.id === epicId ? { ...row, collapsed: !row.collapsed } : row,
       ),
     );
   };
@@ -1932,12 +2194,45 @@ export function CapacityView({ history }: { history: HistoryController }) {
 
   // ── Feature actions ────────────────────────────────────────────────────────
 
-  const addFeature = async () => {
+  const addEpic = async () => {
+    setBusy(true);
+    setActionWarning(null);
+    try {
+      const epic = await orpc.epics.create({
+        name: nextAvailableGeneratedName(
+          "Epic",
+          epicRows.map((row) => row.name),
+        ),
+      });
+      if (!epic) return;
+      setEpicRows((rows) => [
+        ...rows,
+        {
+          id: epic.id,
+          name: epic.name,
+          description: epic.description,
+          position: epic.position,
+          isDefault: epic.isDefault,
+          links: epic.links,
+          collapsed: false,
+        },
+      ]);
+    } catch (error) {
+      const message = getNameErrorMessage(error);
+      if (message) setActionWarning(message);
+      else throw error;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addFeature = async (epicId: number) => {
     setBusy(true);
     setActionWarning(null);
     try {
       const f = await history.record("Featureを追加", async () => {
         return orpc.features.create({
+          epicId,
           name: nextAvailableGeneratedName(
             "Feature",
             featureRows.map((row) => row.name),
@@ -1951,6 +2246,8 @@ export function CapacityView({ history }: { history: HistoryController }) {
           id: f.id,
           name: f.name,
           description: f.description,
+          epicId: f.epicId,
+          position: f.position,
           links: f.links,
           expanded: false,
           months: new Map(),
@@ -1965,6 +2262,24 @@ export function CapacityView({ history }: { history: HistoryController }) {
     }
   };
 
+  const renameEpic = useCallback(async (id: number, name: string) => {
+    const epic = await orpc.epics.rename({ id, name });
+    if (!epic) return name;
+    setEpicRows((rows) =>
+      rows.map((row) =>
+        row.id === id
+          ? {
+              ...row,
+              name: epic.name,
+              description: epic.description,
+              links: epic.links,
+            }
+          : row,
+      ),
+    );
+    return epic.name;
+  }, []);
+
   const renameFeature = useCallback(
     async (id: number, name: string) => {
       const f = await history.record("Feature名を変更", async () => {
@@ -1974,7 +2289,14 @@ export function CapacityView({ history }: { history: HistoryController }) {
       setFeatureRows((rows) =>
         rows.map((r) =>
           r.id === id
-            ? { ...r, name: f.name, description: f.description, links: f.links }
+            ? {
+                ...r,
+                name: f.name,
+                description: f.description,
+                epicId: f.epicId,
+                position: f.position,
+                links: f.links,
+              }
             : r,
         ),
       );
@@ -1988,6 +2310,7 @@ export function CapacityView({ history }: { history: HistoryController }) {
       id: number,
       input: {
         name: string;
+        epicId: number;
         description: string | null;
         links: Array<{ title: string; url: string }>;
       },
@@ -1999,7 +2322,14 @@ export function CapacityView({ history }: { history: HistoryController }) {
       setFeatureRows((rows) =>
         rows.map((r) =>
           r.id === id
-            ? { ...r, name: f.name, description: f.description, links: f.links }
+            ? {
+                ...r,
+                name: f.name,
+                description: f.description,
+                epicId: f.epicId,
+                position: f.position,
+                links: f.links,
+              }
             : r,
         ),
       );
@@ -2008,6 +2338,8 @@ export function CapacityView({ history }: { history: HistoryController }) {
           ? {
               ...current,
               name: f.name,
+              epicId: f.epicId,
+              position: f.position,
               description: f.description,
               links: f.links,
             }
@@ -2015,6 +2347,43 @@ export function CapacityView({ history }: { history: HistoryController }) {
       );
     },
     [history],
+  );
+
+  const saveEpicDetails = useCallback(
+    async (
+      id: number,
+      input: {
+        name: string;
+        description: string | null;
+        links: Array<{ title: string; url: string }>;
+      },
+    ) => {
+      const epic = await orpc.epics.rename({ id, ...input });
+      if (!epic) return;
+      setEpicRows((rows) =>
+        rows.map((row) =>
+          row.id === id
+            ? {
+                ...row,
+                name: epic.name,
+                description: epic.description,
+                links: epic.links,
+              }
+            : row,
+        ),
+      );
+      setEditingEpicDetails((current) =>
+        current?.id === id
+          ? {
+              ...current,
+              name: epic.name,
+              description: epic.description,
+              links: epic.links,
+            }
+          : current,
+      );
+    },
+    [],
   );
 
   const deleteFeature = useCallback(
@@ -2030,6 +2399,51 @@ export function CapacityView({ history }: { history: HistoryController }) {
       }
     },
     [history],
+  );
+
+  const deleteEpic = useCallback(async (id: number) => {
+    setBusy(true);
+    setActionWarning(null);
+    try {
+      await orpc.epics.delete({ id });
+      setEpicRows((rows) => rows.filter((row) => row.id !== id));
+    } catch (error) {
+      setActionWarning(
+        error instanceof Error ? error.message : "Epicを削除できませんでした。",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const moveEpic = useCallback(async (epicId: number, beforeId: number) => {
+    if (epicId === beforeId) return;
+    const updated = await orpc.epics.move({ id: epicId, beforeId });
+    setEpicRows((rows) => {
+      const collapsedById = new Map(rows.map((row) => [row.id, row.collapsed]));
+      return updated.map((epic) => ({
+        id: epic.id,
+        name: epic.name,
+        description: epic.description,
+        position: epic.position,
+        isDefault: epic.isDefault,
+        links: epic.links,
+        collapsed: collapsedById.get(epic.id) ?? false,
+      }));
+    });
+  }, []);
+
+  const moveFeature = useCallback(
+    async (featureId: number, epicId: number, beforeId?: number) => {
+      const moved = await orpc.features.move({
+        id: featureId,
+        epicId,
+        beforeId,
+      });
+      if (!moved) return;
+      await loadAll();
+    },
+    [loadAll],
   );
 
   const addMember = async () => {
@@ -2117,6 +2531,8 @@ export function CapacityView({ history }: { history: HistoryController }) {
               ...r,
               name: fv.feature.name,
               description: fv.feature.description,
+              epicId: fv.feature.epicId,
+              position: fv.feature.position,
               links: fv.feature.links,
               months: monthMap,
             }
@@ -2381,49 +2797,74 @@ export function CapacityView({ history }: { history: HistoryController }) {
               </tr>
             </thead>
             <tbody>
-              {featureRows.map((feature, fi) => {
-                const hasOverflow = columns.some(
-                  (column) =>
-                    (getColumnData(feature, column).unassignedCapacity ?? 0) >
-                    0,
-                );
-                const featureRowIndex =
-                  rowIndexByKey.get(`f-${feature.id}`) ?? -1;
+              {epicRows.flatMap((epic, epicIndex) => {
                 const rows: React.ReactNode[] = [];
-
-                if (fi > 0) {
+                const epicFeatures = featureRows
+                  .filter((feature) => feature.epicId === epic.id)
+                  .sort((a, b) => a.position - b.position || a.id - b.id);
+                const epicHasOverflow = columns.some(
+                  (column) =>
+                    getEpicColumnData(epic.id, column).unassignedCapacity > 0,
+                );
+                if (epicIndex > 0) {
                   rows.push(
-                    <tr key={`sep-${feature.id}`} className="cv-section-sep">
+                    <tr key={`epic-sep-${epic.id}`} className="cv-section-sep">
                       <td colSpan={columns.length + 1} />
                     </tr>,
                   );
                 }
-
                 rows.push(
-                  <tr key={feature.id} className="tr-feature">
+                  <tr
+                    key={`epic-${epic.id}`}
+                    className="tr-epic"
+                    onDragOver={(e) => {
+                      if (dragItem) e.preventDefault();
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (dragItem?.type === "feature") {
+                        void moveFeature(dragItem.featureId, epic.id);
+                      }
+                      if (dragItem?.type === "epic") {
+                        void moveEpic(dragItem.epicId, epic.id);
+                      }
+                      setDragItem(null);
+                    }}
+                  >
                     <td className="td-label">
                       <div className="td-label-inner">
                         <button
                           type="button"
-                          className="toggle-btn"
-                          onClick={() => toggleExpand(feature.id)}
-                          title={feature.expanded ? "折りたたむ" : "詳細を展開"}
+                          className="drag-handle"
+                          draggable
+                          onDragStart={() =>
+                            setDragItem({ type: "epic", epicId: epic.id })
+                          }
+                          onDragEnd={() => setDragItem(null)}
+                          title="Epicを移動"
+                          aria-label="Epicを移動"
                         >
-                          {feature.expanded ? "−" : "+"}
+                          <GripVertical size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="toggle-btn"
+                          onClick={() => toggleEpicCollapse(epic.id)}
+                          title={epic.collapsed ? "展開" : "折りたたむ"}
+                        >
+                          {epic.collapsed ? "+" : "−"}
                         </button>
                         <FeatureNameCell
-                          name={feature.name}
+                          name={epic.name}
                           hasDescription={
-                            (feature.description?.trim().length ?? 0) > 0
+                            (epic.description?.trim().length ?? 0) > 0
                           }
-                          linkCount={feature.links.length}
-                          onRename={(name) => renameFeature(feature.id, name)}
-                          onDelete={() => deleteFeature(feature.id)}
-                          onEditDetails={() =>
-                            setEditingFeatureDetails(feature)
-                          }
+                          linkCount={epic.links.length}
+                          onRename={(name) => renameEpic(epic.id, name)}
+                          onDelete={() => deleteEpic(epic.id)}
+                          onEditDetails={() => setEditingEpicDetails(epic)}
                         />
-                        {hasOverflow && (
+                        {epicHasOverflow && (
                           <span
                             className="overflow-dot"
                             title="未アサインあり"
@@ -2431,328 +2872,459 @@ export function CapacityView({ history }: { history: HistoryController }) {
                         )}
                       </div>
                     </td>
-                    {columns.map((column, ci) => {
-                      const data = getColumnData(feature, column);
-                      const selected = isCellInSel(
-                        featureRowIndex,
-                        ci,
-                        "feature",
-                      );
-                      const copied = isCellInClipSrc(
-                        featureRowIndex,
-                        ci,
-                        "feature",
+                    {columns.map((column) => {
+                      const data = getEpicColumnData(epic.id, column);
+                      const div = colDivisor(column);
+                      const { bg, fg } = heatBg(
+                        data.totalCapacity / div,
+                        FEATURE_MAX_VAL / div,
                       );
                       return (
                         <td
                           key={column.key}
-                          className="td-quarter"
-                          style={{ width: COL_W, minWidth: COL_W }}
+                          className="td-quarter epic-total-cell"
+                          style={{
+                            width: COL_W,
+                            minWidth: COL_W,
+                            background: bg,
+                          }}
                         >
-                          <HeatmapCell
-                            value={data.totalCapacity / colDivisor(column)}
-                            unassigned={
-                              data.unassignedCapacity / colDivisor(column)
-                            }
-                            maxVal={FEATURE_MAX_VAL / colDivisor(column)}
-                            onCommit={(v) =>
-                              updateTotal(
-                                feature.id,
-                                column,
-                                v * colDivisor(column),
-                              )
-                            }
-                            rowHeight={42}
-                            isSelected={selected}
-                            isCopied={copied}
-                            editCancelToken={editCancelToken}
-                            onCellMouseDown={() =>
-                              handleCellMouseDown(
-                                featureRowIndex,
-                                ci,
-                                "feature",
-                              )
-                            }
-                            onCellMouseEnter={() =>
-                              handleCellMouseEnter(
-                                featureRowIndex,
-                                ci,
-                                "feature",
-                              )
-                            }
-                          />
+                          <span
+                            className="hm-val"
+                            style={{
+                              color:
+                                data.totalCapacity === 0 ? "transparent" : fg,
+                            }}
+                          >
+                            {fmt(data.totalCapacity / div)}
+                          </span>
+                          {data.unassignedCapacity > 0 && (
+                            <span className="epic-overflow-dot" />
+                          )}
                         </td>
                       );
                     })}
                   </tr>,
                 );
+                if (epic.collapsed) return rows;
 
-                if (feature.expanded) {
-                  const assignedMemberIds = new Set<number>();
-                  for (const monthData of feature.months.values()) {
-                    for (const a of monthData.memberAllocations) {
-                      assignedMemberIds.add(a.memberId);
-                    }
-                  }
-                  const assignedMembers = members.filter((m) =>
-                    assignedMemberIds.has(m.id),
+                for (const feature of epicFeatures) {
+                  const hasOverflow = columns.some(
+                    (column) =>
+                      (getColumnData(feature, column).unassignedCapacity ?? 0) >
+                      0,
                   );
+                  const featureRowIndex =
+                    rowIndexByKey.get(`f-${feature.id}`) ?? -1;
 
-                  for (const member of assignedMembers) {
-                    const memberRowIndex =
-                      rowIndexByKey.get(`m-${feature.id}-${member.id}`) ?? -1;
-                    const isOverflow = columns.some((column) => {
-                      return (
-                        isMemberColumnOverflow(member.id, column) ||
-                        (capacityConflict?.featureId === feature.id &&
-                          capacityConflict.memberId === member.id &&
-                          capacityConflict.periodType === column.type &&
-                          capacityConflict.monthId === column.monthId &&
-                          capacityConflict.quarterId === column.quarterId)
-                      );
-                    });
-
-                    rows.push(
-                      <tr
-                        key={`${feature.id}-${member.id}`}
-                        className={`tr-member${isOverflow ? " is-overflow" : ""}`}
-                      >
-                        <td className="td-label td-member-label">
-                          <div className="member-label-row">
-                            <span className="member-name">{member.name}</span>
-                            <button
-                              type="button"
-                              className="del-member-btn"
-                              onClick={() =>
-                                setRemoveConfirm({
-                                  featureId: feature.id,
-                                  memberId: member.id,
-                                  memberName: member.name,
-                                  featureName: feature.name,
-                                })
-                              }
-                              title="このFeatureから削除"
-                            >
-                              ×
-                            </button>
-                          </div>
-                        </td>
-                        {columns.map((column, ci) => {
-                          const data = getColumnData(feature, column);
-                          const alloc = data.memberAllocations.find(
-                            (a) => a.memberId === member.id,
-                          );
-                          const matchingCapacityConflict =
-                            capacityConflict &&
-                            capacityConflict.featureId === feature.id &&
-                            capacityConflict.periodType === column.type &&
-                            capacityConflict.monthId === column.monthId &&
-                            capacityConflict.quarterId === column.quarterId &&
-                            capacityConflict.memberId === member.id
-                              ? capacityConflict
-                              : null;
-                          const matchingMaxCapacityOverflow =
-                            maxCapacityOverflow &&
-                            maxCapacityOverflow.featureId === feature.id &&
-                            maxCapacityOverflow.periodType === column.type &&
-                            maxCapacityOverflow.monthId === column.monthId &&
-                            maxCapacityOverflow.quarterId ===
-                              column.quarterId &&
-                            maxCapacityOverflow.memberId === member.id
-                              ? maxCapacityOverflow
-                              : null;
-                          const limit = columnMemberLimit(
-                            column,
-                            getMemberMaxCap(member.id),
-                          );
-                          const rawValue =
-                            matchingMaxCapacityOverflow?.requestedCapacity ??
-                            matchingCapacityConflict?.requestedCapacity ??
-                            alloc?.capacity ??
-                            0;
-                          const div = colDivisor(column);
-                          const value = rawValue / div;
-                          const displayLimit = limit / div;
-                          const cellOv =
-                            !!matchingCapacityConflict ||
-                            !!matchingMaxCapacityOverflow ||
-                            isMemberColumnOverflow(member.id, column);
-                          const selected = isCellInSel(
-                            memberRowIndex,
-                            ci,
-                            "member",
-                          );
-                          const copied = isCellInClipSrc(
-                            memberRowIndex,
-                            ci,
-                            "member",
-                          );
-                          return (
-                            <td
-                              key={column.key}
-                              className="td-member-val"
-                              style={{ width: COL_W, padding: 0 }}
-                            >
-                              <HeatmapMemberCell
-                                value={value}
-                                maxVal={displayLimit}
-                                isOverflow={cellOv}
-                                onCommit={(v) =>
-                                  updateMemberAllocation(
-                                    feature.id,
-                                    column,
-                                    member.id,
-                                    v * div,
-                                  )
-                                }
-                                isSelected={selected}
-                                isCopied={copied}
-                                editCancelToken={editCancelToken}
-                                onCellMouseDown={() =>
-                                  handleCellMouseDown(
-                                    memberRowIndex,
-                                    ci,
-                                    "member",
-                                  )
-                                }
-                                onCellMouseEnter={() =>
-                                  handleCellMouseEnter(
-                                    memberRowIndex,
-                                    ci,
-                                    "member",
-                                  )
-                                }
-                              />
-                              {matchingMaxCapacityOverflow && (
-                                <MaxCapacityOverflowPopover
-                                  memberName={
-                                    matchingMaxCapacityOverflow.memberName
-                                  }
-                                  limit={matchingMaxCapacityOverflow.limit}
-                                  requestedCapacity={
-                                    matchingMaxCapacityOverflow.requestedCapacity
-                                  }
-                                  usedElsewhere={
-                                    matchingMaxCapacityOverflow.usedElsewhere
-                                  }
-                                  onResolve={resolveMaxCapacityOverflow}
-                                  onCancel={() => setMaxCapacityOverflow(null)}
-                                  displayDivisor={colDivisor(column)}
-                                />
-                              )}
-                              {matchingCapacityConflict && (
-                                <CapacityConflictPopover
-                                  memberName={
-                                    matchingCapacityConflict.memberName
-                                  }
-                                  usedElsewhere={
-                                    matchingCapacityConflict.usedElsewhere
-                                  }
-                                  assignableCapacity={
-                                    matchingCapacityConflict.assignableCapacity
-                                  }
-                                  requestedCapacity={
-                                    matchingCapacityConflict.requestedCapacity
-                                  }
-                                  rebalancePreview={getRebalancePreview(
-                                    matchingCapacityConflict.memberId,
-                                    column,
-                                    matchingCapacityConflict.featureId,
-                                    matchingCapacityConflict.requestedCapacity,
-                                  )}
-                                  onResolve={resolveCapacityConflict}
-                                  onCancel={() => setCapacityConflict(null)}
-                                  displayDivisor={colDivisor(column)}
-                                />
-                              )}
-                            </td>
-                          );
-                        })}
-                      </tr>,
-                    );
-                  }
-
-                  const unassignedMembers = members.filter(
-                    (m) => !assignedMemberIds.has(m.id),
-                  );
                   rows.push(
                     <tr
-                      key={`${feature.id}-assign`}
-                      className="tr-assign-member"
+                      key={feature.id}
+                      className="tr-feature"
+                      onDragOver={(e) => {
+                        if (dragItem) e.preventDefault();
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        if (dragItem?.type === "feature") {
+                          void moveFeature(
+                            dragItem.featureId,
+                            feature.epicId,
+                            feature.id,
+                          );
+                        }
+                        if (dragItem?.type === "epic") {
+                          void moveEpic(dragItem.epicId, epic.id);
+                        }
+                        setDragItem(null);
+                      }}
                     >
-                      <td className="td-assign">
-                        {assigningFeatureId === feature.id ? (
-                          <select
-                            className="assign-select"
-                            // biome-ignore lint/a11y/noAutofocus: intentional focus for inline dropdown
-                            autoFocus
-                            defaultValue=""
-                            onChange={(e) => {
-                              const id = Number(e.target.value);
-                              if (id) assignMemberToFeature(feature.id, id);
-                              setAssigningFeatureId(null);
-                            }}
-                            onBlur={() => setAssigningFeatureId(null)}
-                          >
-                            <option value="" disabled>
-                              -- メンバーを選択 --
-                            </option>
-                            {unassignedMembers.map((m) => (
-                              <option key={m.id} value={m.id}>
-                                {m.name}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
+                      <td className="td-label">
+                        <div className="td-label-inner">
                           <button
                             type="button"
-                            className="btn-assign"
-                            disabled={busy || unassignedMembers.length === 0}
-                            onClick={() => setAssigningFeatureId(feature.id)}
+                            className="drag-handle"
+                            draggable
+                            onDragStart={() =>
+                              setDragItem({
+                                type: "feature",
+                                featureId: feature.id,
+                                epicId: feature.epicId,
+                              })
+                            }
+                            onDragEnd={() => setDragItem(null)}
+                            title="Featureを移動"
+                            aria-label="Featureを移動"
                           >
-                            + メンバーを割り当て
+                            <GripVertical size={14} />
                           </button>
-                        )}
+                          <button
+                            type="button"
+                            className="toggle-btn"
+                            onClick={() => toggleExpand(feature.id)}
+                            title={
+                              feature.expanded ? "折りたたむ" : "詳細を展開"
+                            }
+                          >
+                            {feature.expanded ? "−" : "+"}
+                          </button>
+                          <FeatureNameCell
+                            name={feature.name}
+                            hasDescription={
+                              (feature.description?.trim().length ?? 0) > 0
+                            }
+                            linkCount={feature.links.length}
+                            onRename={(name) => renameFeature(feature.id, name)}
+                            onDelete={() => deleteFeature(feature.id)}
+                            onEditDetails={() =>
+                              setEditingFeatureDetails(feature)
+                            }
+                          />
+                          {hasOverflow && (
+                            <span
+                              className="overflow-dot"
+                              title="未アサインあり"
+                            />
+                          )}
+                        </div>
                       </td>
-                      {columns.map((column) => (
-                        <td key={column.key} />
-                      ))}
+                      {columns.map((column, ci) => {
+                        const data = getColumnData(feature, column);
+                        const selected = isCellInSel(
+                          featureRowIndex,
+                          ci,
+                          "feature",
+                        );
+                        const copied = isCellInClipSrc(
+                          featureRowIndex,
+                          ci,
+                          "feature",
+                        );
+                        return (
+                          <td
+                            key={column.key}
+                            className="td-quarter"
+                            style={{ width: COL_W, minWidth: COL_W }}
+                          >
+                            <HeatmapCell
+                              value={data.totalCapacity / colDivisor(column)}
+                              unassigned={
+                                data.unassignedCapacity / colDivisor(column)
+                              }
+                              maxVal={FEATURE_MAX_VAL / colDivisor(column)}
+                              onCommit={(v) =>
+                                updateTotal(
+                                  feature.id,
+                                  column,
+                                  v * colDivisor(column),
+                                )
+                              }
+                              rowHeight={42}
+                              isSelected={selected}
+                              isCopied={copied}
+                              editCancelToken={editCancelToken}
+                              onCellMouseDown={() =>
+                                handleCellMouseDown(
+                                  featureRowIndex,
+                                  ci,
+                                  "feature",
+                                )
+                              }
+                              onCellMouseEnter={() =>
+                                handleCellMouseEnter(
+                                  featureRowIndex,
+                                  ci,
+                                  "feature",
+                                )
+                              }
+                            />
+                          </td>
+                        );
+                      })}
                     </tr>,
                   );
 
-                  if (hasOverflow) {
+                  if (feature.expanded) {
+                    const assignedMemberIds = new Set<number>();
+                    for (const monthData of feature.months.values()) {
+                      for (const a of monthData.memberAllocations) {
+                        assignedMemberIds.add(a.memberId);
+                      }
+                    }
+                    const assignedMembers = members.filter((m) =>
+                      assignedMemberIds.has(m.id),
+                    );
+
+                    for (const member of assignedMembers) {
+                      const memberRowIndex =
+                        rowIndexByKey.get(`m-${feature.id}-${member.id}`) ?? -1;
+                      const isOverflow = columns.some((column) => {
+                        return (
+                          isMemberColumnOverflow(member.id, column) ||
+                          (capacityConflict?.featureId === feature.id &&
+                            capacityConflict.memberId === member.id &&
+                            capacityConflict.periodType === column.type &&
+                            capacityConflict.monthId === column.monthId &&
+                            capacityConflict.quarterId === column.quarterId)
+                        );
+                      });
+
+                      rows.push(
+                        <tr
+                          key={`${feature.id}-${member.id}`}
+                          className={`tr-member${isOverflow ? " is-overflow" : ""}`}
+                        >
+                          <td className="td-label td-member-label">
+                            <div className="member-label-row">
+                              <span className="member-name">{member.name}</span>
+                              <button
+                                type="button"
+                                className="del-member-btn"
+                                onClick={() =>
+                                  setRemoveConfirm({
+                                    featureId: feature.id,
+                                    memberId: member.id,
+                                    memberName: member.name,
+                                    featureName: feature.name,
+                                  })
+                                }
+                                title="このFeatureから削除"
+                              >
+                                ×
+                              </button>
+                            </div>
+                          </td>
+                          {columns.map((column, ci) => {
+                            const data = getColumnData(feature, column);
+                            const alloc = data.memberAllocations.find(
+                              (a) => a.memberId === member.id,
+                            );
+                            const matchingCapacityConflict =
+                              capacityConflict &&
+                              capacityConflict.featureId === feature.id &&
+                              capacityConflict.periodType === column.type &&
+                              capacityConflict.monthId === column.monthId &&
+                              capacityConflict.quarterId === column.quarterId &&
+                              capacityConflict.memberId === member.id
+                                ? capacityConflict
+                                : null;
+                            const matchingMaxCapacityOverflow =
+                              maxCapacityOverflow &&
+                              maxCapacityOverflow.featureId === feature.id &&
+                              maxCapacityOverflow.periodType === column.type &&
+                              maxCapacityOverflow.monthId === column.monthId &&
+                              maxCapacityOverflow.quarterId ===
+                                column.quarterId &&
+                              maxCapacityOverflow.memberId === member.id
+                                ? maxCapacityOverflow
+                                : null;
+                            const limit = columnMemberLimit(
+                              column,
+                              getMemberMaxCap(member.id),
+                            );
+                            const rawValue =
+                              matchingMaxCapacityOverflow?.requestedCapacity ??
+                              matchingCapacityConflict?.requestedCapacity ??
+                              alloc?.capacity ??
+                              0;
+                            const div = colDivisor(column);
+                            const value = rawValue / div;
+                            const displayLimit = limit / div;
+                            const cellOv =
+                              !!matchingCapacityConflict ||
+                              !!matchingMaxCapacityOverflow ||
+                              isMemberColumnOverflow(member.id, column);
+                            const selected = isCellInSel(
+                              memberRowIndex,
+                              ci,
+                              "member",
+                            );
+                            const copied = isCellInClipSrc(
+                              memberRowIndex,
+                              ci,
+                              "member",
+                            );
+                            return (
+                              <td
+                                key={column.key}
+                                className="td-member-val"
+                                style={{ width: COL_W, padding: 0 }}
+                              >
+                                <HeatmapMemberCell
+                                  value={value}
+                                  maxVal={displayLimit}
+                                  isOverflow={cellOv}
+                                  onCommit={(v) =>
+                                    updateMemberAllocation(
+                                      feature.id,
+                                      column,
+                                      member.id,
+                                      v * div,
+                                    )
+                                  }
+                                  isSelected={selected}
+                                  isCopied={copied}
+                                  editCancelToken={editCancelToken}
+                                  onCellMouseDown={() =>
+                                    handleCellMouseDown(
+                                      memberRowIndex,
+                                      ci,
+                                      "member",
+                                    )
+                                  }
+                                  onCellMouseEnter={() =>
+                                    handleCellMouseEnter(
+                                      memberRowIndex,
+                                      ci,
+                                      "member",
+                                    )
+                                  }
+                                />
+                                {matchingMaxCapacityOverflow && (
+                                  <MaxCapacityOverflowPopover
+                                    memberName={
+                                      matchingMaxCapacityOverflow.memberName
+                                    }
+                                    limit={matchingMaxCapacityOverflow.limit}
+                                    requestedCapacity={
+                                      matchingMaxCapacityOverflow.requestedCapacity
+                                    }
+                                    usedElsewhere={
+                                      matchingMaxCapacityOverflow.usedElsewhere
+                                    }
+                                    onResolve={resolveMaxCapacityOverflow}
+                                    onCancel={() =>
+                                      setMaxCapacityOverflow(null)
+                                    }
+                                    displayDivisor={colDivisor(column)}
+                                  />
+                                )}
+                                {matchingCapacityConflict && (
+                                  <CapacityConflictPopover
+                                    memberName={
+                                      matchingCapacityConflict.memberName
+                                    }
+                                    usedElsewhere={
+                                      matchingCapacityConflict.usedElsewhere
+                                    }
+                                    assignableCapacity={
+                                      matchingCapacityConflict.assignableCapacity
+                                    }
+                                    requestedCapacity={
+                                      matchingCapacityConflict.requestedCapacity
+                                    }
+                                    rebalancePreview={getRebalancePreview(
+                                      matchingCapacityConflict.memberId,
+                                      column,
+                                      matchingCapacityConflict.featureId,
+                                      matchingCapacityConflict.requestedCapacity,
+                                    )}
+                                    onResolve={resolveCapacityConflict}
+                                    onCancel={() => setCapacityConflict(null)}
+                                    displayDivisor={colDivisor(column)}
+                                  />
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>,
+                      );
+                    }
+
+                    const unassignedMembers = members.filter(
+                      (m) => !assignedMemberIds.has(m.id),
+                    );
                     rows.push(
                       <tr
-                        key={`${feature.id}-ua`}
-                        className="tr-unassigned-member"
+                        key={`${feature.id}-assign`}
+                        className="tr-assign-member"
                       >
-                        <td className="td-label td-unassigned-label">
-                          <span className="unassigned-name">未アサイン</span>
-                        </td>
-                        {columns.map((column) => {
-                          const uv =
-                            getColumnData(feature, column).unassignedCapacity /
-                            colDivisor(column);
-                          return (
-                            <td
-                              key={column.key}
-                              className="td-member-val"
-                              style={{ width: COL_W, background: "#fff8f8" }}
+                        <td colSpan={1 + columns.length} className="td-assign">
+                          {assigningFeatureId === feature.id ? (
+                            <select
+                              className="assign-select"
+                              // biome-ignore lint/a11y/noAutofocus: intentional focus for inline dropdown
+                              autoFocus
+                              defaultValue=""
+                              onChange={(e) => {
+                                const id = Number(e.target.value);
+                                if (id) assignMemberToFeature(feature.id, id);
+                                setAssigningFeatureId(null);
+                              }}
+                              onBlur={() => setAssigningFeatureId(null)}
                             >
-                              {uv > 0 ? (
-                                <span className="unassigned-val">
-                                  +{fmt(uv)}
-                                </span>
-                              ) : (
-                                <span className="mval-dash">—</span>
-                              )}
-                            </td>
-                          );
-                        })}
+                              <option value="" disabled>
+                                -- メンバーを選択 --
+                              </option>
+                              {unassignedMembers.map((m) => (
+                                <option key={m.id} value={m.id}>
+                                  {m.name}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn-assign"
+                              disabled={busy || unassignedMembers.length === 0}
+                              onClick={() => setAssigningFeatureId(feature.id)}
+                            >
+                              + メンバーを割り当て
+                            </button>
+                          )}
+                        </td>
                       </tr>,
                     );
+
+                    if (hasOverflow) {
+                      rows.push(
+                        <tr
+                          key={`${feature.id}-ua`}
+                          className="tr-unassigned-member"
+                        >
+                          <td className="td-label td-unassigned-label">
+                            <span className="unassigned-name">未アサイン</span>
+                          </td>
+                          {columns.map((column) => {
+                            const uv =
+                              getColumnData(feature, column)
+                                .unassignedCapacity / colDivisor(column);
+                            return (
+                              <td
+                                key={column.key}
+                                className="td-member-val"
+                                style={{ width: COL_W, background: "#fff8f8" }}
+                              >
+                                {uv > 0 ? (
+                                  <span className="unassigned-val">
+                                    +{fmt(uv)}
+                                  </span>
+                                ) : (
+                                  <span className="mval-dash">—</span>
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>,
+                      );
+                    }
                   }
                 }
+
+                rows.push(
+                  <tr key={`epic-${epic.id}-add`} className="tr-assign-member">
+                    <td colSpan={1 + columns.length} className="td-assign">
+                      <button
+                        type="button"
+                        className="btn-assign"
+                        disabled={busy}
+                        onClick={() => addFeature(epic.id)}
+                      >
+                        + Feature
+                      </button>
+                    </td>
+                  </tr>,
+                );
 
                 return rows;
               })}
@@ -2764,10 +3336,10 @@ export function CapacityView({ history }: { history: HistoryController }) {
           <button
             type="button"
             className="btn-sm"
-            onClick={addFeature}
+            onClick={addEpic}
             disabled={busy}
           >
-            + Feature
+            + Epic
           </button>
           <button
             type="button"
@@ -2881,10 +3453,19 @@ export function CapacityView({ history }: { history: HistoryController }) {
       {editingFeatureDetails && (
         <FeatureDetailsDialog
           feature={editingFeatureDetails}
+          epics={epicRows}
           onSave={(input) =>
             saveFeatureDetails(editingFeatureDetails.id, input)
           }
           onClose={() => setEditingFeatureDetails(null)}
+        />
+      )}
+
+      {editingEpicDetails && (
+        <EpicDetailsDialog
+          epic={editingEpicDetails}
+          onSave={(input) => saveEpicDetails(editingEpicDetails.id, input)}
+          onClose={() => setEditingEpicDetails(null)}
         />
       )}
 

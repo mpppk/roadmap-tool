@@ -23,6 +23,7 @@ type MemberMonthData = {
   featureAllocations: Array<{
     featureId: number;
     featureName: string;
+    epicName: string | null;
     capacity: number;
   }>;
 };
@@ -66,6 +67,13 @@ function monthLabel(month: Month): string {
   return `${month.year}-${String(month.month).padStart(2, "0")}`;
 }
 
+function nextQuarterYQ(qs: Quarter[]): { year: number; quarter: number } {
+  const last = qs[qs.length - 1];
+  if (!last) return { year: new Date().getFullYear(), quarter: 1 };
+  if (last.quarter === 4) return { year: last.year + 1, quarter: 1 };
+  return { year: last.year, quarter: last.quarter + 1 };
+}
+
 type QuarterYQ = { year: number; quarter: number };
 
 function quartersInRange(start: QuarterYQ, end: QuarterYQ): QuarterYQ[] {
@@ -105,7 +113,7 @@ function aggregateMemberMonthData(
 ): MemberMonthData {
   const featureTotals = new Map<
     number,
-    { featureName: string; capacity: number }
+    { featureName: string; epicName: string | null; capacity: number }
   >();
   let totalCapacity = 0;
 
@@ -115,10 +123,12 @@ function aggregateMemberMonthData(
     for (const allocation of data.featureAllocations) {
       const current = featureTotals.get(allocation.featureId) ?? {
         featureName: allocation.featureName,
+        epicName: allocation.epicName,
         capacity: 0,
       };
       featureTotals.set(allocation.featureId, {
         featureName: allocation.featureName,
+        epicName: allocation.epicName,
         capacity: current.capacity + allocation.capacity,
       });
     }
@@ -129,6 +139,7 @@ function aggregateMemberMonthData(
     featureAllocations: [...featureTotals].map(([featureId, data]) => ({
       featureId,
       featureName: data.featureName,
+      epicName: data.epicName,
       capacity: data.capacity,
     })),
   };
@@ -490,6 +501,7 @@ export function MembersView({ history }: { history: HistoryController }) {
             featureAllocations: md.featureAllocations.map((fa) => ({
               featureId: fa.feature.id,
               featureName: fa.feature.name,
+              epicName: fa.feature.epic?.name ?? null,
               capacity: fa.capacity,
             })),
           });
@@ -521,6 +533,7 @@ export function MembersView({ history }: { history: HistoryController }) {
         setRangeEnd({ year: yr, quarter: q });
       }
     }
+
     setMemberRows(rows);
     setLoading(false);
   }, []);
@@ -639,7 +652,9 @@ export function MembersView({ history }: { history: HistoryController }) {
           {
             row: 0,
             message:
-              error instanceof Error ? error.message : "インポートに失敗しました",
+              error instanceof Error
+                ? error.message
+                : "インポートに失敗しました",
           },
         ],
       });
@@ -682,6 +697,25 @@ export function MembersView({ history }: { history: HistoryController }) {
           ].sort((a, b) => a.year - b.year || a.quarter - b.quarter),
         );
       }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addQuarter = async () => {
+    setBusy(true);
+    try {
+      const { year, quarter } = nextQuarterYQ(quarters);
+      const q = await history.record("Quarterを追加", async () => {
+        return orpc.quarters.create({ year, quarter });
+      });
+      if (!q) return;
+      setQuarters((qs) =>
+        [
+          ...qs,
+          { ...q, months: [...q.months].sort((a, b) => a.month - b.month) },
+        ].sort((a, b) => a.year - b.year || a.quarter - b.quarter),
+      );
     } finally {
       setBusy(false);
     }
@@ -955,10 +989,16 @@ export function MembersView({ history }: { history: HistoryController }) {
                 );
 
                 if (member.expanded) {
-                  const featureMap = new Map<number, string>();
+                  const featureMap = new Map<
+                    number,
+                    { featureName: string; epicName: string | null }
+                  >();
                   for (const monthData of member.months.values()) {
                     for (const fa of monthData.featureAllocations) {
-                      featureMap.set(fa.featureId, fa.featureName);
+                      featureMap.set(fa.featureId, {
+                        featureName: fa.featureName,
+                        epicName: fa.epicName,
+                      });
                     }
                   }
 
@@ -979,14 +1019,21 @@ export function MembersView({ history }: { history: HistoryController }) {
                       </tr>,
                     );
                   } else {
-                    for (const [featureId, featureName] of featureMap) {
+                    for (const [featureId, featureInfo] of featureMap) {
                       rows.push(
                         <tr
                           key={`${member.id}-${featureId}`}
                           className="tr-member"
                         >
                           <td className="td-label td-member-label">
-                            <span className="member-name">{featureName}</span>
+                            <span className="member-name">
+                              {featureInfo.featureName}
+                              {featureInfo.epicName && (
+                                <span className="member-feature-epic">
+                                  {featureInfo.epicName}
+                                </span>
+                              )}
+                            </span>
                           </td>
                           <td style={{ width: 80, minWidth: 80 }} />
                           {columns.map((column) => {
@@ -1072,6 +1119,15 @@ export function MembersView({ history }: { history: HistoryController }) {
           >
             TSVをインポート
           </button>
+          <button
+            type="button"
+            className="btn-sm"
+            onClick={addQuarter}
+            disabled={busy}
+          >
+            + Quarter
+          </button>
+
           {(actionWarning || history.warning) && (
             <span className="name-action-warning" role="alert">
               {actionWarning || history.warning}

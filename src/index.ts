@@ -1,29 +1,3 @@
-import { RPCHandler } from "@orpc/server/fetch";
-import { serve } from "bun";
-import { db } from "./db/index";
-import index from "./index.html";
-import { router } from "./router";
+import { startServer } from "./server";
 
-const rpcHandler = new RPCHandler(router);
-const port = Number(process.env.PORT ?? "3000");
-
-const server = serve({
-  port,
-  routes: {
-    "/orpc/*": async (req) => {
-      const result = await rpcHandler.handle(req, {
-        prefix: "/orpc",
-        context: { db },
-      });
-      if (result.matched) return result.response;
-      return new Response("Not found", { status: 404 });
-    },
-    "/*": index,
-  },
-  development: process.env.NODE_ENV !== "production" && {
-    hmr: true,
-    console: true,
-  },
-});
-
-console.log(`Server running at ${server.url}`);
+await startServer();

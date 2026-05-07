@@ -100,7 +100,7 @@ Browser → React (src/App.tsx)
 
 ### CLI
 
-`src/cli.ts` は、フィーチャーとメンバー向けの薄い oRPC クライアント CLI を提供します。`ROADMAP_URL`（デフォルト: `http://localhost:3000`）に接続し、サーバーの起動が必要です。
+`src/cli.ts` は、フィーチャーとメンバー向けの薄い oRPC クライアント CLI を提供します。`PORT`（デフォルト: `3000`）から `http://localhost:<PORT>` に接続し、サーバーの起動が必要です。
 
 ### テスト
 

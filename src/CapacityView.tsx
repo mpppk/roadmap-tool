@@ -2812,7 +2812,10 @@ export function CapacityView({ history }: { history: HistoryController }) {
 
       <div className="cv-body">
         <div className="cv-table-wrapper">
-          <table className="cv-table">
+          <table
+            className="cv-table"
+            style={{ width: labelWidth + columns.length * COL_W }}
+          >
             <thead>
               <tr>
                 <th className="th-label">

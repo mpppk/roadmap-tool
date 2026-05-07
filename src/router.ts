@@ -2039,6 +2039,63 @@ function csvCell(value: string): string {
   return `"${value.replaceAll('"', '""')}"`;
 }
 
+function tsvCell(value: string): string {
+  if (!/["\t\n\r]/.test(value)) return value;
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+const exportAllocationTSV = o
+  .input(z.object({}))
+  .handler(async ({ context }) => {
+    const { db } = context;
+    const allMonths = await db
+      .select()
+      .from(months)
+      .orderBy(months.year, months.month)
+      .all();
+    const allFeatures = await db.select().from(features).all();
+    const allEpics = await db.select().from(epics).all();
+    const allMembers = await db.select().from(members).all();
+    const maRows = await db.select().from(memberMonthAllocations).all();
+
+    const featureById = new Map(allFeatures.map((f) => [f.id, f]));
+    const epicById = new Map(allEpics.map((epic) => [epic.id, epic.name]));
+    const memberById = new Map(allMembers.map((m) => [m.id, m.name]));
+    const monthById = new Map(allMonths.map((m) => [m.id, m]));
+
+    const header = [
+      "Epic",
+      "機能",
+      "feature_id",
+      "担当者",
+      "member_id",
+      "キャパシティ",
+      "月",
+    ].join("\t");
+    const rows = maRows
+      .filter((r) => r.capacity > 0)
+      .flatMap((r) => {
+        const feature = featureById.get(r.featureId);
+        const featureName = feature?.name ?? "";
+        const memberName = memberById.get(r.memberId) ?? "";
+        const month = monthById.get(r.monthId);
+        if (!month) return [];
+        return [
+          [
+            tsvCell(feature ? (epicById.get(feature.epicId) ?? "") : ""),
+            tsvCell(featureName),
+            r.featureId,
+            tsvCell(memberName),
+            r.memberId,
+            r.capacity,
+            monthLabel(month.year, month.month),
+          ].join("\t"),
+        ];
+      });
+
+    return [header, ...rows].join("\n");
+  });
+
 const exportFeatureMetadataCSV = o
   .input(z.object({}))
   .handler(async ({ context }) => {
@@ -3033,6 +3090,7 @@ export const router = {
     featureCSV: exportFeatureCSV,
     memberCSV: exportMemberCSV,
     allocationCSV: exportAllocationCSV,
+    allocationTSV: exportAllocationTSV,
     featureMetadataCSV: exportFeatureMetadataCSV,
     epicMetadataCSV: exportEpicMetadataCSV,
   },

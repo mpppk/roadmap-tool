@@ -854,6 +854,39 @@ describe("feature metadata", () => {
     expect(listed.find((m) => m.id === alice!.id)?.name).toBe("Alice");
     expect(listed.find((m) => m.id === bob!.id)?.name).toBe("Bob");
   });
+
+  test("memberTSVImport sync rejects missing explicit id before deleting same-name member", async () => {
+    const { featureA, member: alice, month } = await seedBase(state.db);
+    await addAllocation(state.db, {
+      featureId: featureA.id,
+      monthId: month.id,
+      memberId: alice.id,
+      capacity: 0.4,
+    });
+
+    const importTsv = router.import.memberTSVImport.callable({
+      context: { db: state.db },
+    });
+    const result = await importTsv({
+      tsv: ["id\tname\tmax_capacity", "99\tAlice\t0.8"].join("\n"),
+      mode: "sync",
+    });
+
+    expect(result.success).toBe(0);
+    expect(result.errors).toHaveLength(1);
+
+    const listed = await state.db.select().from(members).all();
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.id).toBe(alice.id);
+    expect(listed[0]?.name).toBe("Alice");
+
+    const allocations = await state.db
+      .select()
+      .from(memberMonthAllocations)
+      .all();
+    expect(allocations).toHaveLength(1);
+    expect(allocations[0]?.memberId).toBe(alice.id);
+  });
 });
 
 describe("history snapshots", () => {

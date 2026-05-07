@@ -3052,6 +3052,25 @@ const memberTSVImport = o
       };
 
       if (mode === "sync") {
+        for (const row of parsed.rows) {
+          if (row.id === null) continue;
+          const existingById = memberById.get(row.id);
+          const existingByName = memberByName.get(row.name);
+          if (!existingById && existingByName) {
+            failRow(
+              row.row,
+              `指定されたidは存在しませんが、同名のMemberが既に存在します（名前: ${row.name}）`,
+            );
+          }
+          if (
+            existingById &&
+            existingByName &&
+            existingByName.id !== existingById.id
+          ) {
+            failRow(row.row, `Member名は重複できません（名前: ${row.name}）`);
+          }
+        }
+
         const preRetainedMemberIds = new Set<number>();
         for (const row of parsed.rows) {
           if (row.id !== null) {

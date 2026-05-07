@@ -186,35 +186,35 @@ bun run db:studio    # Drizzle Studio を開く（GUI でデータ確認）
 
 ## CLI
 
-サーバーが起動している状態で、機能・メンバーの管理をコマンドラインから行えます。CLI は `PORT` で指定されたローカルサーバーに接続します（未指定時は `http://localhost:3000`）。
+サーバーが起動している状態で、機能・メンバーの管理をコマンドラインから行えます。CLI は `PORT` で指定されたローカルサーバーに接続します（未指定時は `http://localhost:3000`）。パッケージとして取得できる環境では `bunx roadmap-tool` で実行できます。
 
 ```sh
 # 接続先ポート（デフォルト: 3000）
 export PORT=3000
 
 # features
-bun src/cli.ts features list
-bun src/cli.ts features add "認証機能" --epic-id <epic-id> --description "説明" --link "Spec=https://example.com/spec"
-bun src/cli.ts features rename <id> "認証機能 v2" --epic-id <epic-id> --description "説明" --link "Issue=https://example.com/issue"
-bun src/cli.ts features rename <id> "認証機能 v2" --clear-description --clear-links
-bun src/cli.ts features move <id> --epic-id <epic-id> --before <feature-id>
-bun src/cli.ts features import features.csv
-cat features.csv | bun src/cli.ts features import -
+bunx roadmap-tool features list
+bunx roadmap-tool features add "認証機能" --epic-id <epic-id> --description "説明" --link "Spec=https://example.com/spec"
+bunx roadmap-tool features rename <id> "認証機能 v2" --epic-id <epic-id> --description "説明" --link "Issue=https://example.com/issue"
+bunx roadmap-tool features rename <id> "認証機能 v2" --clear-description --clear-links
+bunx roadmap-tool features move <id> --epic-id <epic-id> --before <feature-id>
+bunx roadmap-tool features import features.csv
+cat features.csv | bunx roadmap-tool features import -
 
 # epics
-bun src/cli.ts epics list
-bun src/cli.ts epics add "認証Epic" --description "説明" --link "Spec=https://example.com/spec"
-bun src/cli.ts epics rename <id> "認証Epic v2" --clear-description --clear-links
-bun src/cli.ts epics move <id> --before <epic-id>
-bun src/cli.ts epics delete <id>
-bun src/cli.ts epics import epics.csv
+bunx roadmap-tool epics list
+bunx roadmap-tool epics add "認証Epic" --description "説明" --link "Spec=https://example.com/spec"
+bunx roadmap-tool epics rename <id> "認証Epic v2" --clear-description --clear-links
+bunx roadmap-tool epics move <id> --before <epic-id>
+bunx roadmap-tool epics delete <id>
+bunx roadmap-tool epics import epics.csv
 
 # members
-bun src/cli.ts members list
-bun src/cli.ts members add "Alice"
-bun src/cli.ts members rename <id> "Bob"
-bun src/cli.ts members import members.tsv --mode append
-cat members.tsv | bun src/cli.ts members import - --mode sync
+bunx roadmap-tool members list
+bunx roadmap-tool members add "Alice"
+bunx roadmap-tool members rename <id> "Bob"
+bunx roadmap-tool members import members.tsv --mode append
+cat members.tsv | bunx roadmap-tool members import - --mode sync
 ```
 
 Feature metadata CSV は `epic,name,description,links` の4列です。Epic metadata CSV は `name,description,links` の3列です。`links` は `[{"title":"Spec","url":"https://example.com/spec"}]` のJSON文字列で、import時は同名Feature/Epicの説明・リンクをCSV内容で置き換えます。Member TSV は `name` 必須、`id` または `member_id` と `max_capacity` は任意です。`--mode append` は追記・更新、`--mode sync` はTSVに載っていないMemberを削除して同期します。

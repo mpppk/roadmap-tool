@@ -1,3 +1,5 @@
+#!/usr/bin/env bun
+
 async function openBrowser(url: string): Promise<void> {
   const command =
     process.platform === "darwin"

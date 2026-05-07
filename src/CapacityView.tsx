@@ -2602,9 +2602,9 @@ export function CapacityView({ history }: { history: HistoryController }) {
     [refreshFeatureRow, history],
   );
 
-  const copyAllocationCSV = useCallback(async () => {
-    const csv = await orpc.export.allocationCSV({});
-    await navigator.clipboard.writeText(csv);
+  const copyAllocationTSV = useCallback(async () => {
+    const tsv = await orpc.export.allocationTSV({});
+    await navigator.clipboard.writeText(tsv);
   }, []);
 
   const runImportTSV = useCallback(async () => {
@@ -3404,11 +3404,11 @@ export function CapacityView({ history }: { history: HistoryController }) {
           <button
             type="button"
             className="btn-sm"
-            onClick={copyAllocationCSV}
+            onClick={copyAllocationTSV}
             disabled={busy}
-            title="機能・担当者・キャパシティ・月次形式のCSVをコピー"
+            title="機能・担当者・キャパシティ・月次形式のTSVをコピー"
           >
-            CSVをコピー
+            TSVをコピー
           </button>
           <button
             type="button"

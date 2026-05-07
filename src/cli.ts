@@ -13,6 +13,7 @@ const HELP_TEXT = `Usage:
   bun cli.ts features add <name> [--epic-id <id>] [--description <text>] [--link <title=url> ...]
   bun cli.ts features rename <id> <name> [--epic-id <id>] [--description <text>] [--link <title=url> ...] [--clear-description] [--clear-links]
   bun cli.ts features move <id> --epic-id <id> [--before <feature-id>] [--after <feature-id>]
+  bun cli.ts features delete <id>
   bun cli.ts features import <path|->
 
   bun cli.ts epics list
@@ -25,6 +26,7 @@ const HELP_TEXT = `Usage:
   bun cli.ts members list
   bun cli.ts members add <name>
   bun cli.ts members rename <id> <name>
+  bun cli.ts members delete <id>
   bun cli.ts members import <path|-> [--mode append|sync]
 `;
 
@@ -223,6 +225,11 @@ async function run() {
       if (!id || !epicId) usage();
       const f = await orpc.features.move({ id, epicId, beforeId, afterId });
       console.log(`Moved: ${f!.id}\t${f!.name}`);
+    } else if (command === "delete") {
+      const id = Number(args[0]);
+      if (!id) usage();
+      await orpc.features.delete({ id });
+      console.log(`Deleted: ${id}`);
     } else if (command === "import") {
       const csv = await readImportSource(args);
       const result = await orpc.import.featureMetadataCSVImport({ csv });
@@ -296,6 +303,11 @@ async function run() {
       if (!id || !name) usage();
       const m = await orpc.members.rename({ id, name });
       console.log(`Renamed: ${m!.id}\t${m!.name}`);
+    } else if (command === "delete") {
+      const id = Number(args[0]);
+      if (!id) usage();
+      await orpc.members.delete({ id });
+      console.log(`Deleted: ${id}`);
     } else if (command === "import") {
       const { sourceArgs, mode } = parseMemberImportFlags(args);
       const tsv = await readImportSource(sourceArgs);

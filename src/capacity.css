@@ -272,6 +272,10 @@
   max-width: var(--col-label);
   overflow: hidden;
 }
+.td-label:has(.name-edit-row) {
+  overflow: visible;
+  z-index: 6;
+}
 .td-label-inner {
   display: flex;
   align-items: center;

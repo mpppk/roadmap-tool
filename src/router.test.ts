@@ -703,11 +703,8 @@ describe("feature metadata", () => {
     expect(updated?.name).toBe("Auth v2");
   });
 
-  test("memberTSVImport uses id column for rename tracking", async () => {
+  test("memberTSVImport append updates name and max_capacity by id", async () => {
     const createMember = router.members.create.callable({
-      context: { db: state.db },
-    });
-    const renameMember = router.members.rename.callable({
       context: { db: state.db },
     });
     const importTsv = router.import.memberTSVImport.callable({
@@ -718,20 +715,144 @@ describe("feature metadata", () => {
     });
 
     const member = await createMember({ name: "Alice" });
-    await renameMember({ id: member!.id, name: "Alice Smith" });
 
-    // Import using old name but correct id — ID should win
     const result = await importTsv({
-      tsv: ["id\tname\tmax_capacity", `${member!.id}\tAlice\t0.8`].join("\n"),
+      tsv: ["id\tname\tmax_capacity", `${member!.id}\tAlice Smith\t0.8`].join(
+        "\n",
+      ),
+      mode: "append",
     });
 
     expect(result.success).toBe(1);
+    expect(result.errors).toHaveLength(0);
 
     const listed = await listMembers({});
     const updated = listed.find((m) => m.id === member!.id);
     expect(updated?.maxCapacity).toBe(0.8);
-    // Name should not change — member was found by ID
     expect(updated?.name).toBe("Alice Smith");
+  });
+
+  test("memberTSVImport append updates same-name rows and creates new rows", async () => {
+    const createMember = router.members.create.callable({
+      context: { db: state.db },
+    });
+    const importTsv = router.import.memberTSVImport.callable({
+      context: { db: state.db },
+    });
+    const listMembers = router.members.list.callable({
+      context: { db: state.db },
+    });
+
+    const alice = await createMember({ name: "Alice" });
+    const result = await importTsv({
+      tsv: ["name\tmax_capacity", "Alice\t0.6", "Bob\t0.7"].join("\n"),
+      mode: "append",
+    });
+
+    expect(result.success).toBe(2);
+    expect(result.errors).toHaveLength(0);
+
+    const listed = await listMembers({});
+    expect(listed).toHaveLength(2);
+    expect(listed.find((m) => m.id === alice!.id)?.maxCapacity).toBe(0.6);
+    expect(listed.find((m) => m.name === "Bob")?.maxCapacity).toBe(0.7);
+  });
+
+  test("memberTSVImport append creates missing explicit member_id", async () => {
+    const importTsv = router.import.memberTSVImport.callable({
+      context: { db: state.db },
+    });
+    const listMembers = router.members.list.callable({
+      context: { db: state.db },
+    });
+
+    const result = await importTsv({
+      tsv: ["member_id\tname\tmax_capacity", "42\tCharlie\t1"].join("\n"),
+      mode: "append",
+    });
+
+    expect(result.success).toBe(1);
+    expect(result.errors).toHaveLength(0);
+    const listed = await listMembers({});
+    expect(listed.find((m) => m.id === 42)?.name).toBe("Charlie");
+  });
+
+  test("memberTSVImport sync deletes missing members and cascades allocations", async () => {
+    const { featureA, member: alice, month } = await seedBase(state.db);
+    const [bob] = await state.db
+      .insert(members)
+      .values({ name: "Bob" })
+      .returning();
+    await addAllocation(state.db, {
+      featureId: featureA.id,
+      monthId: month.id,
+      memberId: alice.id,
+      capacity: 0.4,
+    });
+    await state.db.insert(memberMonthAllocations).values({
+      featureId: featureA.id,
+      monthId: month.id,
+      memberId: bob!.id,
+      capacity: 0.2,
+    });
+
+    const importTsv = router.import.memberTSVImport.callable({
+      context: { db: state.db },
+    });
+    const result = await importTsv({
+      tsv: ["id\tname\tmax_capacity", `${alice.id}\tAlice Smith\t0.8`].join(
+        "\n",
+      ),
+      mode: "sync",
+    });
+
+    expect(result.success).toBe(1);
+    expect(result.errors).toHaveLength(0);
+
+    const listed = await state.db.select().from(members).all();
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.id).toBe(alice.id);
+    expect(listed[0]?.name).toBe("Alice Smith");
+    expect(listed[0]?.maxCapacity).toBe(0.8);
+
+    const allocations = await state.db
+      .select()
+      .from(memberMonthAllocations)
+      .all();
+    expect(allocations).toHaveLength(1);
+    expect(allocations[0]?.memberId).toBe(alice.id);
+  });
+
+  test("memberTSVImport sync does not mutate on input errors", async () => {
+    const createMember = router.members.create.callable({
+      context: { db: state.db },
+    });
+    const importTsv = router.import.memberTSVImport.callable({
+      context: { db: state.db },
+    });
+    const listMembers = router.members.list.callable({
+      context: { db: state.db },
+    });
+
+    const alice = await createMember({ name: "Alice" });
+    const bob = await createMember({ name: "Bob" });
+
+    const result = await importTsv({
+      tsv: [
+        "id\tname\tmax_capacity",
+        `${alice!.id}\tAlice\t0.8`,
+        "99\tAlice\t2",
+      ].join("\n"),
+      mode: "sync",
+    });
+
+    expect(result.success).toBe(0);
+    expect(result.errors.length).toBeGreaterThan(0);
+
+    const listed = await listMembers({});
+    expect(listed).toHaveLength(2);
+    expect(listed.find((m) => m.id === alice!.id)?.name).toBe("Alice");
+    expect(listed.find((m) => m.id === bob!.id)?.name).toBe("Bob");
   });
 });
 

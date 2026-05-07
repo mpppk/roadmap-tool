@@ -14,6 +14,7 @@ import { orpc } from "./orpc-client";
 
 type ViewMode = "quarter" | "month";
 type CapacityAggMode = "total" | "average";
+type ImportMode = "append" | "sync";
 type Month = { id: number; year: number; month: number; quarterId: number };
 type Quarter = { id: number; year: number; quarter: number; months: Month[] };
 type Member = { id: number; name: string; maxCapacity: number | null };
@@ -448,6 +449,7 @@ export function MembersView({ history }: { history: HistoryController }) {
   const [actionWarning, setActionWarning] = useState<string | null>(null);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importTsv, setImportTsv] = useState("");
+  const [importMode, setImportMode] = useState<ImportMode>("append");
   const [importResult, setImportResult] = useState<{
     success: number;
     skipped: number;
@@ -641,7 +643,11 @@ export function MembersView({ history }: { history: HistoryController }) {
   const runImportTSV = useCallback(async () => {
     setImporting(true);
     try {
-      const result = await orpc.import.memberTSVImport({ tsv: importTsv });
+      const result = await history.record(
+        importMode === "sync" ? "Member TSVを同期" : "Member TSVを追記",
+        async () =>
+          orpc.import.memberTSVImport({ tsv: importTsv, mode: importMode }),
+      );
       setImportResult(result);
       await loadAll();
     } catch (error) {
@@ -661,7 +667,7 @@ export function MembersView({ history }: { history: HistoryController }) {
     } finally {
       setImporting(false);
     }
-  }, [importTsv, loadAll]);
+  }, [history, importMode, importTsv, loadAll]);
 
   const applyRange = async (start: QuarterYQ, end: QuarterYQ) => {
     if (start.year * 4 + start.quarter > end.year * 4 + end.quarter) return;
@@ -1112,10 +1118,11 @@ export function MembersView({ history }: { history: HistoryController }) {
             className="btn-sm"
             onClick={() => {
               setImportTsv("");
+              setImportMode("append");
               setImportResult(null);
               setImportModalOpen(true);
             }}
-            title="TSVをインポート（name, max_capacity）"
+            title="TSVをインポート（id/member_id, name, max_capacity）"
           >
             TSVをインポート
           </button>
@@ -1149,16 +1156,42 @@ export function MembersView({ history }: { history: HistoryController }) {
           >
             <p className="confirm-msg">TSVをインポート</p>
             <p className="import-hint">
-              ヘッダー行（name, max_capacity）を含むTSVを貼り付けてください。
+              ヘッダー行（name、任意でid/member_id、max_capacity）を含むTSVを貼り付けてください。
             </p>
             {!importResult ? (
-              <textarea
-                className="import-textarea"
-                value={importTsv}
-                onChange={(e) => setImportTsv(e.target.value)}
-                placeholder={"name\tmax_capacity\nAlice\t0.8\nBob\t1"}
-                disabled={importing}
-              />
+              <>
+                <fieldset className="period-toggle">
+                  <legend className="period-toggle-label">
+                    インポートモード
+                  </legend>
+                  <button
+                    type="button"
+                    className={`period-toggle-btn${importMode === "append" ? " active" : ""}`}
+                    onClick={() => setImportMode("append")}
+                    disabled={importing}
+                  >
+                    追記
+                  </button>
+                  <button
+                    type="button"
+                    className={`period-toggle-btn${importMode === "sync" ? " active" : ""}`}
+                    onClick={() => setImportMode("sync")}
+                    disabled={importing}
+                    title="TSVに載っていないMemberを削除します"
+                  >
+                    同期
+                  </button>
+                </fieldset>
+                <textarea
+                  className="import-textarea"
+                  value={importTsv}
+                  onChange={(e) => setImportTsv(e.target.value)}
+                  placeholder={
+                    "id\tname\tmax_capacity\n1\tAlice\t0.8\n2\tBob\t1"
+                  }
+                  disabled={importing}
+                />
+              </>
             ) : (
               <div className="import-result">
                 <p>

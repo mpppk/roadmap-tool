@@ -213,9 +213,11 @@ bun src/cli.ts epics import epics.csv
 bun src/cli.ts members list
 bun src/cli.ts members add "Alice"
 bun src/cli.ts members rename <id> "Bob"
+bun src/cli.ts members import members.tsv --mode append
+cat members.tsv | bun src/cli.ts members import - --mode sync
 ```
 
-Feature metadata CSV は `epic,name,description,links` の4列です。Epic metadata CSV は `name,description,links` の3列です。`links` は `[{"title":"Spec","url":"https://example.com/spec"}]` のJSON文字列で、import時は同名Feature/Epicの説明・リンクをCSV内容で置き換えます。
+Feature metadata CSV は `epic,name,description,links` の4列です。Epic metadata CSV は `name,description,links` の3列です。`links` は `[{"title":"Spec","url":"https://example.com/spec"}]` のJSON文字列で、import時は同名Feature/Epicの説明・リンクをCSV内容で置き換えます。Member TSV は `name` 必須、`id` または `member_id` と `max_capacity` は任意です。`--mode append` は追記・更新、`--mode sync` はTSVに載っていないMemberを削除して同期します。
 
 Feature一覧のCLI出力はタブ区切りの ID・Epic ID・名前・説明・リンク件数です。Epic一覧のCLI出力はタブ区切りの ID・名前・説明・リンク件数・既定フラグです。Member一覧のCLI出力はタブ区切りの ID と名前です。
 

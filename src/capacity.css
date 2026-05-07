@@ -482,7 +482,7 @@
   background: var(--cv-red-bg);
 }
 .td-member-label {
-  padding: 0 14px 0 32px;
+  padding: 0 14px 0 48px;
   position: sticky;
   left: 0;
   z-index: 5;

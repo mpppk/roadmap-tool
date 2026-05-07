@@ -284,7 +284,8 @@ export async function runCli(
 
   if (resource === "features") {
     if (command === "list") {
-      if (args.includes("--help") || args.includes("-h")) helpForSubcommand(resource, command);
+      if (args.includes("--help") || args.includes("-h"))
+        helpForSubcommand(resource, command);
       const items = await orpc.features.list({});
       if (items.length === 0) {
         console.log("(no features)");
@@ -298,14 +299,16 @@ export async function runCli(
         }
       }
     } else if (command === "add") {
-      if (args.includes("--help") || args.includes("-h")) helpForSubcommand(resource, command);
+      if (args.includes("--help") || args.includes("-h"))
+        helpForSubcommand(resource, command);
       const { rest, metadata } = parseFeatureMetadataFlags(args);
       const name = rest[0];
       if (!name) usage();
       const f = await orpc.features.create({ name, ...metadata });
       console.log(`Created: ${f!.id}\t${f!.name}`);
     } else if (command === "rename") {
-      if (args.includes("--help") || args.includes("-h")) helpForSubcommand(resource, command);
+      if (args.includes("--help") || args.includes("-h"))
+        helpForSubcommand(resource, command);
       const { rest, metadata } = parseFeatureMetadataFlags(args);
       const id = Number(rest[0]);
       const name = rest[1];
@@ -313,7 +316,8 @@ export async function runCli(
       const f = await orpc.features.rename({ id, name, ...metadata });
       console.log(`Renamed: ${f!.id}\t${f!.name}`);
     } else if (command === "move") {
-      if (args.includes("--help") || args.includes("-h")) helpForSubcommand(resource, command);
+      if (args.includes("--help") || args.includes("-h"))
+        helpForSubcommand(resource, command);
       const { values: moveValues, positionals: movePositionals } = parseArgs({
         args,
         options: {
@@ -335,13 +339,15 @@ export async function runCli(
       const f = await orpc.features.move({ id, epicId, beforeId, afterId });
       console.log(`Moved: ${f!.id}\t${f!.name}`);
     } else if (command === "delete") {
-      if (args.includes("--help") || args.includes("-h")) helpForSubcommand(resource, command);
+      if (args.includes("--help") || args.includes("-h"))
+        helpForSubcommand(resource, command);
       const id = Number(args[0]);
       if (!id) usage();
       await orpc.features.delete({ id });
       console.log(`Deleted: ${id}`);
     } else if (command === "import") {
-      if (args.includes("--help") || args.includes("-h")) helpForSubcommand(resource, command);
+      if (args.includes("--help") || args.includes("-h"))
+        helpForSubcommand(resource, command);
       const csv = await readImportSource(args);
       const result = await orpc.import.featureMetadataCSVImport({ csv });
       console.log(`Imported: ${result.success}`);
@@ -350,7 +356,8 @@ export async function runCli(
     }
   } else if (resource === "epics") {
     if (command === "list") {
-      if (args.includes("--help") || args.includes("-h")) helpForSubcommand(resource, command);
+      if (args.includes("--help") || args.includes("-h"))
+        helpForSubcommand(resource, command);
       const items = await orpc.epics.list({});
       if (items.length === 0) {
         console.log("(no epics)");
@@ -364,7 +371,8 @@ export async function runCli(
         }
       }
     } else if (command === "add") {
-      if (args.includes("--help") || args.includes("-h")) helpForSubcommand(resource, command);
+      if (args.includes("--help") || args.includes("-h"))
+        helpForSubcommand(resource, command);
       const { rest, metadata } = parseFeatureMetadataFlags(args);
       const { epicId: _epicId, ...epicMetadata } = metadata;
       const name = rest[0];
@@ -372,7 +380,8 @@ export async function runCli(
       const epic = await orpc.epics.create({ name, ...epicMetadata });
       console.log(`Created: ${epic!.id}\t${epic!.name}`);
     } else if (command === "rename") {
-      if (args.includes("--help") || args.includes("-h")) helpForSubcommand(resource, command);
+      if (args.includes("--help") || args.includes("-h"))
+        helpForSubcommand(resource, command);
       const { rest, metadata } = parseFeatureMetadataFlags(args);
       const { epicId: _epicId, ...epicMetadata } = metadata;
       const id = Number(rest[0]);
@@ -381,13 +390,15 @@ export async function runCli(
       const epic = await orpc.epics.rename({ id, name, ...epicMetadata });
       console.log(`Renamed: ${epic!.id}\t${epic!.name}`);
     } else if (command === "delete") {
-      if (args.includes("--help") || args.includes("-h")) helpForSubcommand(resource, command);
+      if (args.includes("--help") || args.includes("-h"))
+        helpForSubcommand(resource, command);
       const id = Number(args[0]);
       if (!id) usage();
       await orpc.epics.delete({ id });
       console.log(`Deleted: ${id}`);
     } else if (command === "move") {
-      if (args.includes("--help") || args.includes("-h")) helpForSubcommand(resource, command);
+      if (args.includes("--help") || args.includes("-h"))
+        helpForSubcommand(resource, command);
       const { values: moveValues, positionals: movePositionals } = parseArgs({
         args,
         options: {
@@ -407,7 +418,8 @@ export async function runCli(
       await orpc.epics.move({ id, beforeId, afterId });
       console.log(`Moved: ${id}`);
     } else if (command === "import") {
-      if (args.includes("--help") || args.includes("-h")) helpForSubcommand(resource, command);
+      if (args.includes("--help") || args.includes("-h"))
+        helpForSubcommand(resource, command);
       const csv = await readImportSource(args);
       const result = await orpc.import.epicMetadataCSVImport({ csv });
       console.log(`Imported: ${result.success}`);
@@ -416,7 +428,8 @@ export async function runCli(
     }
   } else if (resource === "members") {
     if (command === "list") {
-      if (args.includes("--help") || args.includes("-h")) helpForSubcommand(resource, command);
+      if (args.includes("--help") || args.includes("-h"))
+        helpForSubcommand(resource, command);
       const items = await orpc.members.list({});
       if (items.length === 0) {
         console.log("(no members)");
@@ -424,26 +437,30 @@ export async function runCli(
         for (const m of items) console.log(`${m.id}\t${m.name}`);
       }
     } else if (command === "add") {
-      if (args.includes("--help") || args.includes("-h")) helpForSubcommand(resource, command);
+      if (args.includes("--help") || args.includes("-h"))
+        helpForSubcommand(resource, command);
       const name = args[0];
       if (!name) usage();
       const m = await orpc.members.create({ name });
       console.log(`Created: ${m!.id}\t${m!.name}`);
     } else if (command === "rename") {
-      if (args.includes("--help") || args.includes("-h")) helpForSubcommand(resource, command);
+      if (args.includes("--help") || args.includes("-h"))
+        helpForSubcommand(resource, command);
       const id = Number(args[0]);
       const name = args[1];
       if (!id || !name) usage();
       const m = await orpc.members.rename({ id, name });
       console.log(`Renamed: ${m!.id}\t${m!.name}`);
     } else if (command === "delete") {
-      if (args.includes("--help") || args.includes("-h")) helpForSubcommand(resource, command);
+      if (args.includes("--help") || args.includes("-h"))
+        helpForSubcommand(resource, command);
       const id = Number(args[0]);
       if (!id) usage();
       await orpc.members.delete({ id });
       console.log(`Deleted: ${id}`);
     } else if (command === "import") {
-      if (args.includes("--help") || args.includes("-h")) helpForSubcommand(resource, command);
+      if (args.includes("--help") || args.includes("-h"))
+        helpForSubcommand(resource, command);
       const { values: importValues, positionals: importPositionals } =
         parseArgs({
           args,

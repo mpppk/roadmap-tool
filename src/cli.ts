@@ -19,6 +19,7 @@ function createHelpText(commandName: string): string {
   ${commandName} features add <name> [--epic-id <id>] [--description <text>] [--link <title=url> ...]
   ${commandName} features rename <id> <name> [--epic-id <id>] [--description <text>] [--link <title=url> ...] [--clear-description] [--clear-links]
   ${commandName} features move <id> --epic-id <id> [--before <feature-id>] [--after <feature-id>]
+  ${commandName} features delete <id>
   ${commandName} features import <path|->
 
   ${commandName} epics list
@@ -31,6 +32,7 @@ function createHelpText(commandName: string): string {
   ${commandName} members list
   ${commandName} members add <name>
   ${commandName} members rename <id> <name>
+  ${commandName} members delete <id>
   ${commandName} members import <path|-> [--mode append|sync]
 `;
 }
@@ -243,6 +245,11 @@ export async function runCli(
       if (!id || !epicId) usage();
       const f = await orpc.features.move({ id, epicId, beforeId, afterId });
       console.log(`Moved: ${f!.id}\t${f!.name}`);
+    } else if (command === "delete") {
+      const id = Number(args[0]);
+      if (!id) usage();
+      await orpc.features.delete({ id });
+      console.log(`Deleted: ${id}`);
     } else if (command === "import") {
       const csv = await readImportSource(args);
       const result = await orpc.import.featureMetadataCSVImport({ csv });
@@ -316,6 +323,11 @@ export async function runCli(
       if (!id || !name) usage();
       const m = await orpc.members.rename({ id, name });
       console.log(`Renamed: ${m!.id}\t${m!.name}`);
+    } else if (command === "delete") {
+      const id = Number(args[0]);
+      if (!id) usage();
+      await orpc.members.delete({ id });
+      console.log(`Deleted: ${id}`);
     } else if (command === "import") {
       const { sourceArgs, mode } = parseMemberImportFlags(args);
       const tsv = await readImportSource(sourceArgs);

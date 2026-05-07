@@ -2238,6 +2238,24 @@ async function findOrCreateMonth(
 }
 
 type ImportRowError = { row: number; message: string };
+type ImportResult = {
+  success: number;
+  skipped: number;
+  errors: ImportRowError[];
+};
+type MemberTSVImportMode = "append" | "sync";
+type MemberTSVImportRow = {
+  row: number;
+  id: number | null;
+  name: string;
+  maxCapacity: number | null;
+};
+
+class MemberTSVImportAbort extends Error {
+  constructor(readonly result: ImportResult) {
+    super("Member TSV import aborted");
+  }
+}
 
 type FeatureMetadataImportRow = {
   row: number;
@@ -2247,6 +2265,129 @@ type FeatureMetadataImportRow = {
   description: string | null;
   links: NormalizedFeatureLinkInput[];
 };
+
+function parseOptionalMemberId(
+  raw: string,
+  row: number,
+  column: string,
+): { id: number | null; error?: ImportRowError } {
+  const value = raw.trim();
+  if (value.length === 0) return { id: null };
+  const id = Number(value);
+  if (!Number.isInteger(id) || id <= 0) {
+    return {
+      id: null,
+      error: {
+        row,
+        message: `${column} は正の整数を入力してください（値: ${value}）`,
+      },
+    };
+  }
+  return { id };
+}
+
+function parseMemberTSVRows(
+  lines: string[],
+  colId: number,
+  colMemberId: number,
+  colName: number,
+  colMaxCapacity: number,
+): { rows: MemberTSVImportRow[]; skipped: number; errors: ImportRowError[] } {
+  const rows: MemberTSVImportRow[] = [];
+  const errors: ImportRowError[] = [];
+  const seenIds = new Set<number>();
+  const seenNames = new Set<string>();
+  let skipped = 0;
+
+  for (let i = 1; i < lines.length; i++) {
+    const rowNum = i + 1;
+    const cols = parseTSVLine(lines[i]!);
+
+    const idValue =
+      colId >= 0
+        ? parseOptionalMemberId(cols[colId] ?? "", rowNum, "id")
+        : { id: null };
+    const memberIdValue =
+      colMemberId >= 0
+        ? parseOptionalMemberId(cols[colMemberId] ?? "", rowNum, "member_id")
+        : { id: null };
+
+    if (idValue.error) {
+      errors.push(idValue.error);
+      skipped++;
+      continue;
+    }
+    if (memberIdValue.error) {
+      errors.push(memberIdValue.error);
+      skipped++;
+      continue;
+    }
+    if (
+      idValue.id !== null &&
+      memberIdValue.id !== null &&
+      idValue.id !== memberIdValue.id
+    ) {
+      errors.push({
+        row: rowNum,
+        message: `id と member_id が一致していません（id: ${idValue.id}, member_id: ${memberIdValue.id}）`,
+      });
+      skipped++;
+      continue;
+    }
+
+    const id = idValue.id ?? memberIdValue.id;
+    if (id !== null) {
+      if (seenIds.has(id)) {
+        errors.push({
+          row: rowNum,
+          message: `TSV内でMember IDが重複しています: ${id}`,
+        });
+        skipped++;
+        continue;
+      }
+      seenIds.add(id);
+    }
+
+    let name: string;
+    try {
+      name = normalizeNameInput(cols[colName] ?? "", "member");
+    } catch {
+      errors.push({ row: rowNum, message: NAME_ERROR_MESSAGES.blank });
+      skipped++;
+      continue;
+    }
+    if (seenNames.has(name)) {
+      errors.push({
+        row: rowNum,
+        message: `TSV内でMember名が重複しています: ${name}`,
+      });
+      skipped++;
+      continue;
+    }
+    seenNames.add(name);
+
+    let maxCapacity: number | null = null;
+    if (colMaxCapacity !== -1) {
+      const rawCap = (cols[colMaxCapacity] ?? "").trim();
+      if (rawCap.length > 0) {
+        const parsed = Number(rawCap);
+        if (Number.isNaN(parsed) || parsed <= 0 || parsed > 1) {
+          errors.push({
+            row: rowNum,
+            message: `max_capacity は 0 より大きく 1 以下の値を入力してください（値: ${rawCap}）`,
+          });
+          skipped++;
+          continue;
+        }
+        maxCapacity = parsed;
+      }
+    }
+
+    rows.push({ row: rowNum, id, name, maxCapacity });
+  }
+
+  return { rows, skipped, errors };
+}
 
 function parseFeatureMetadataLinksCell(
   value: string,
@@ -2851,22 +2992,28 @@ const featureMetadataCSVImport = o
   });
 
 const memberTSVImport = o
-  .input(z.object({ tsv: z.string() }))
+  .input(
+    z.object({
+      tsv: z.string(),
+      mode: z.enum(["append", "sync"]).default("append"),
+    }),
+  )
   .handler(async ({ input, context }) => {
     const { db } = context;
+    const mode: MemberTSVImportMode = input.mode;
     const lines = input.tsv
       .split("\n")
       .map((l) => l.trimEnd())
       .filter((l) => l.trim().length > 0);
 
-    if (lines.length < 2) {
-      return { success: 0, skipped: 0, errors: [] as ImportRowError[] };
-    }
+    if (lines.length === 0) return { success: 0, skipped: 0, errors: [] };
 
     const headers = parseTSVLine(lines[0]!).map((h) => h.trim());
     const colId = headers.indexOf("id");
+    const colMemberId = headers.indexOf("member_id");
     const colName = headers.indexOf("name");
     const colMaxCapacity = headers.indexOf("max_capacity");
+    const hasMaxCapacityColumn = colMaxCapacity !== -1;
 
     if (colName === -1) {
       throw new ORPCError("BAD_REQUEST", {
@@ -2874,83 +3021,160 @@ const memberTSVImport = o
       });
     }
 
-    const errors: ImportRowError[] = [];
-    let success = 0;
-    let skipped = 0;
-
-    const existingMembers = await db.select().from(members).all();
-    const memberByName = new Map(existingMembers.map((m) => [m.name, m]));
-    const memberById = new Map(existingMembers.map((m) => [m.id, m]));
-
-    for (let i = 1; i < lines.length; i++) {
-      const rowNum = i + 1;
-      const cols = parseTSVLine(lines[i]!);
-      const rawName = cols[colName] ?? "";
-      let name: string;
-      try {
-        name = normalizeNameInput(rawName, "member");
-      } catch {
-        skipped++;
-        continue;
-      }
-      if (name.length === 0) {
-        skipped++;
-        continue;
-      }
-
-      let maxCapacity: number | null = null;
-      if (colMaxCapacity !== -1) {
-        const rawCap = (cols[colMaxCapacity] ?? "").trim();
-        if (rawCap.length > 0) {
-          const parsed = Number(rawCap);
-          if (Number.isNaN(parsed) || parsed <= 0 || parsed > 1) {
-            errors.push({
-              row: rowNum,
-              message: `max_capacity は 0 より大きく 1 以下の値を入力してください（値: ${rawCap}）`,
-            });
-            continue;
-          }
-          maxCapacity = parsed;
-        }
-      }
-
-      try {
-        // ID lookup first, then name fallback
-        const rawId = colId >= 0 ? (cols[colId] ?? "").trim() : "";
-        const parsedId = rawId ? Number(rawId) : NaN;
-        const existing =
-          (!Number.isNaN(parsedId) && memberById.get(parsedId)) ||
-          memberByName.get(name);
-        if (existing) {
-          const [updated] = await db
-            .update(members)
-            .set({ maxCapacity })
-            .where(eq(members.id, existing.id))
-            .returning();
-          if (updated) {
-            memberByName.set(existing.name, updated);
-            memberById.set(existing.id, updated);
-          }
-        } else {
-          const [created] = await db
-            .insert(members)
-            .values({ name, maxCapacity })
-            .returning();
-          if (created) {
-            memberByName.set(name, created);
-            memberById.set(created.id, created);
-          }
-        }
-        success++;
-      } catch (_error) {
-        errors.push({
-          row: rowNum,
-          message: `行 ${rowNum}: インポートに失敗しました`,
-        });
-      }
+    const parsed = parseMemberTSVRows(
+      lines,
+      colId,
+      colMemberId,
+      colName,
+      colMaxCapacity,
+    );
+    if (mode === "sync" && parsed.errors.length > 0) {
+      return { success: 0, skipped: parsed.skipped, errors: parsed.errors };
     }
 
-    return { success, skipped, errors };
+    async function applyRows(targetDb: typeof DbType): Promise<ImportResult> {
+      const result: ImportResult = {
+        success: 0,
+        skipped: parsed.skipped,
+        errors: [...parsed.errors],
+      };
+      const existingMembers = await targetDb.select().from(members).all();
+      let memberByName = new Map(existingMembers.map((m) => [m.name, m]));
+      let memberById = new Map(existingMembers.map((m) => [m.id, m]));
+      const retainedMemberIds = new Set<number>();
+
+      const failRow = (row: number, message: string) => {
+        result.errors.push({ row, message });
+        result.skipped++;
+        if (mode === "sync") {
+          throw new MemberTSVImportAbort({ ...result, success: 0 });
+        }
+      };
+
+      if (mode === "sync") {
+        for (const row of parsed.rows) {
+          if (row.id === null) continue;
+          const existingById = memberById.get(row.id);
+          const existingByName = memberByName.get(row.name);
+          if (!existingById && existingByName) {
+            failRow(
+              row.row,
+              `指定されたidは存在しませんが、同名のMemberが既に存在します（名前: ${row.name}）`,
+            );
+          }
+          if (
+            existingById &&
+            existingByName &&
+            existingByName.id !== existingById.id
+          ) {
+            failRow(row.row, `Member名は重複できません（名前: ${row.name}）`);
+          }
+        }
+
+        const preRetainedMemberIds = new Set<number>();
+        for (const row of parsed.rows) {
+          if (row.id !== null) {
+            preRetainedMemberIds.add(row.id);
+          } else {
+            const existing = memberByName.get(row.name);
+            if (existing) preRetainedMemberIds.add(existing.id);
+          }
+        }
+        for (const member of existingMembers) {
+          if (!preRetainedMemberIds.has(member.id)) {
+            await targetDb.delete(members).where(eq(members.id, member.id));
+          }
+        }
+        const currentMembers = await targetDb.select().from(members).all();
+        memberByName = new Map(currentMembers.map((m) => [m.name, m]));
+        memberById = new Map(currentMembers.map((m) => [m.id, m]));
+      }
+
+      for (const row of parsed.rows) {
+        const existing =
+          row.id !== null ? memberById.get(row.id) : memberByName.get(row.name);
+        const nameOwner = memberByName.get(row.name);
+
+        if (existing && nameOwner && nameOwner.id !== existing.id) {
+          failRow(row.row, `Member名は重複できません（名前: ${row.name}）`);
+          continue;
+        }
+        if (!existing && nameOwner) {
+          failRow(
+            row.row,
+            `指定されたidは存在しませんが、同名のMemberが既に存在します（名前: ${row.name}）`,
+          );
+          continue;
+        }
+
+        try {
+          if (existing) {
+            const values: { name: string; maxCapacity?: number | null } = {
+              name: row.name,
+            };
+            if (hasMaxCapacityColumn) values.maxCapacity = row.maxCapacity;
+            const [updated] = await targetDb
+              .update(members)
+              .set(values)
+              .where(eq(members.id, existing.id))
+              .returning();
+            if (!updated) {
+              failRow(row.row, `行 ${row.row}: インポートに失敗しました`);
+              continue;
+            }
+            memberByName.delete(existing.name);
+            memberByName.set(updated.name, updated);
+            memberById.set(updated.id, updated);
+            retainedMemberIds.add(updated.id);
+          } else {
+            const values: {
+              id?: number;
+              name: string;
+              maxCapacity?: number | null;
+            } = { name: row.name };
+            if (row.id !== null) values.id = row.id;
+            if (hasMaxCapacityColumn) values.maxCapacity = row.maxCapacity;
+            const [created] = await targetDb
+              .insert(members)
+              .values(values)
+              .returning();
+            if (!created) {
+              failRow(row.row, `行 ${row.row}: インポートに失敗しました`);
+              continue;
+            }
+            memberByName.set(created.name, created);
+            memberById.set(created.id, created);
+            retainedMemberIds.add(created.id);
+          }
+          result.success++;
+        } catch (_error) {
+          failRow(row.row, `行 ${row.row}: インポートに失敗しました`);
+        }
+      }
+
+      if (mode === "sync") {
+        const currentMembers = await targetDb.select().from(members).all();
+        for (const member of currentMembers) {
+          if (!retainedMemberIds.has(member.id)) {
+            await targetDb.delete(members).where(eq(members.id, member.id));
+          }
+        }
+      }
+
+      return result;
+    }
+
+    if (mode === "append") return applyRows(db);
+
+    try {
+      return await db.transaction(async (tx) => {
+        const txDb = tx as unknown as typeof DbType;
+        return applyRows(txDb);
+      });
+    } catch (error) {
+      if (error instanceof MemberTSVImportAbort) return error.result;
+      throw error;
+    }
   });
 
 const epicMetadataCSVImport = o

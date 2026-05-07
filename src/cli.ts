@@ -25,6 +25,7 @@ const HELP_TEXT = `Usage:
   bun cli.ts members list
   bun cli.ts members add <name>
   bun cli.ts members rename <id> <name>
+  bun cli.ts members import <path|-> [--mode append|sync]
 `;
 
 function help(): never {
@@ -151,6 +152,43 @@ function parseMoveFlags(args: string[]): {
   return { rest, epicId, beforeId, afterId };
 }
 
+function parseMemberImportFlags(args: string[]): {
+  sourceArgs: string[];
+  mode: "append" | "sync";
+} {
+  const sourceArgs: string[] = [];
+  let mode: "append" | "sync" = "append";
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === "--mode") {
+      const value = args[++i];
+      if (value !== "append" && value !== "sync") usage();
+      mode = value;
+      continue;
+    }
+    sourceArgs.push(arg);
+  }
+
+  return { sourceArgs, mode };
+}
+
+function printImportResult(result: {
+  success: number;
+  skipped: number;
+  errors: Array<{ row: number; message: string }>;
+}) {
+  console.log(`Imported: ${result.success}`);
+  if (result.skipped > 0) console.log(`Skipped: ${result.skipped}`);
+  if (result.errors.length > 0) {
+    console.error(`Errors: ${result.errors.length}`);
+    for (const error of result.errors) {
+      const row = error.row > 0 ? `row ${error.row}: ` : "";
+      console.error(`${row}${error.message}`);
+    }
+  }
+}
+
 async function run() {
   if (resource === "features") {
     if (command === "list") {
@@ -258,6 +296,11 @@ async function run() {
       if (!id || !name) usage();
       const m = await orpc.members.rename({ id, name });
       console.log(`Renamed: ${m!.id}\t${m!.name}`);
+    } else if (command === "import") {
+      const { sourceArgs, mode } = parseMemberImportFlags(args);
+      const tsv = await readImportSource(sourceArgs);
+      const result = await orpc.import.memberTSVImport({ tsv, mode });
+      printImportResult(result);
     } else {
       usage();
     }

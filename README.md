@@ -186,11 +186,11 @@ bun run db:studio    # Drizzle Studio を開く（GUI でデータ確認）
 
 ## CLI
 
-サーバーが起動している状態で、機能・メンバーの管理をコマンドラインから行えます。
+サーバーが起動している状態で、機能・メンバーの管理をコマンドラインから行えます。CLI は `PORT` で指定されたローカルサーバーに接続します（未指定時は `http://localhost:3000`）。
 
 ```sh
-# 接続先（デフォルト: http://localhost:3000）
-export ROADMAP_URL=http://localhost:3000
+# 接続先ポート（デフォルト: 3000）
+export PORT=3000
 
 # features
 bun src/cli.ts features list
@@ -220,6 +220,18 @@ cat members.tsv | bun src/cli.ts members import - --mode sync
 Feature metadata CSV は `epic,name,description,links` の4列です。Epic metadata CSV は `name,description,links` の3列です。`links` は `[{"title":"Spec","url":"https://example.com/spec"}]` のJSON文字列で、import時は同名Feature/Epicの説明・リンクをCSV内容で置き換えます。Member TSV は `name` 必須、`id` または `member_id` と `max_capacity` は任意です。`--mode append` は追記・更新、`--mode sync` はTSVに載っていないMemberを削除して同期します。
 
 Feature一覧のCLI出力はタブ区切りの ID・Epic ID・名前・説明・リンク件数です。Epic一覧のCLI出力はタブ区切りの ID・名前・説明・リンク件数・既定フラグです。Member一覧のCLI出力はタブ区切りの ID と名前です。
+
+## Single Binary
+
+```sh
+bun run build:binary
+
+./roadmap-tool                  # UIサーバーを起動してブラウザを開く
+./roadmap-tool features list    # CLIとして起動中サーバーへ接続する
+
+PORT=4000 ./roadmap-tool
+PORT=4000 ./roadmap-tool members list
+```
 
 ## テスト方針
 

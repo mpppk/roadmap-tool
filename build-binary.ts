@@ -1,7 +1,7 @@
 import tailwind from "bun-plugin-tailwind";
 
 const result = await Bun.build({
-  entrypoints: ["./src/index.ts"],
+  entrypoints: ["./src/binary.ts"],
   compile: {
     outfile: "./roadmap-tool",
   },

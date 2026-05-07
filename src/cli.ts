@@ -3,47 +3,54 @@ import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
 import { getNameErrorMessage } from "./name-errors";
 import type { AppRouter } from "./router";
+import { getLocalBaseUrl } from "./runtime-config";
 
-const BASE_URL = process.env.ROADMAP_URL ?? "http://localhost:3000";
-const link = new RPCLink({ url: `${BASE_URL}/orpc` });
-const orpc = createORPCClient<RouterClient<AppRouter>>(link);
+class CliExit extends Error {
+  constructor(readonly code: number) {
+    super(`CLI exited with code ${code}`);
+  }
+}
 
-const HELP_TEXT = `Usage:
-  bun cli.ts features list
-  bun cli.ts features add <name> [--epic-id <id>] [--description <text>] [--link <title=url> ...]
-  bun cli.ts features rename <id> <name> [--epic-id <id>] [--description <text>] [--link <title=url> ...] [--clear-description] [--clear-links]
-  bun cli.ts features move <id> --epic-id <id> [--before <feature-id>] [--after <feature-id>]
-  bun cli.ts features delete <id>
-  bun cli.ts features import <path|->
+let activeHelpText = "";
 
-  bun cli.ts epics list
-  bun cli.ts epics add <name> [--description <text>] [--link <title=url> ...]
-  bun cli.ts epics rename <id> <name> [--description <text>] [--link <title=url> ...] [--clear-description] [--clear-links]
-  bun cli.ts epics delete <id>
-  bun cli.ts epics move <id> [--before <epic-id>] [--after <epic-id>]
-  bun cli.ts epics import <path|->
+function createHelpText(commandName: string): string {
+  return `Usage:
+  ${commandName} features list
+  ${commandName} features add <name> [--epic-id <id>] [--description <text>] [--link <title=url> ...]
+  ${commandName} features rename <id> <name> [--epic-id <id>] [--description <text>] [--link <title=url> ...] [--clear-description] [--clear-links]
+  ${commandName} features move <id> --epic-id <id> [--before <feature-id>] [--after <feature-id>]
+  ${commandName} features delete <id>
+  ${commandName} features import <path|->
 
-  bun cli.ts members list
-  bun cli.ts members add <name>
-  bun cli.ts members rename <id> <name>
-  bun cli.ts members delete <id>
-  bun cli.ts members import <path|-> [--mode append|sync]
+  ${commandName} epics list
+  ${commandName} epics add <name> [--description <text>] [--link <title=url> ...]
+  ${commandName} epics rename <id> <name> [--description <text>] [--link <title=url> ...] [--clear-description] [--clear-links]
+  ${commandName} epics delete <id>
+  ${commandName} epics move <id> [--before <epic-id>] [--after <epic-id>]
+  ${commandName} epics import <path|->
+
+  ${commandName} members list
+  ${commandName} members add <name>
+  ${commandName} members rename <id> <name>
+  ${commandName} members delete <id>
+  ${commandName} members import <path|-> [--mode append|sync]
 `;
+}
+
+function createClient(baseUrl = getLocalBaseUrl()) {
+  const link = new RPCLink({ url: `${baseUrl}/orpc` });
+  return createORPCClient<RouterClient<AppRouter>>(link);
+}
 
 function help(): never {
-  console.log(HELP_TEXT);
-  process.exit(0);
+  console.log(activeHelpText);
+  throw new CliExit(0);
 }
 
 function usage(): never {
-  console.error(HELP_TEXT);
-  process.exit(1);
+  console.error(activeHelpText);
+  throw new CliExit(1);
 }
-
-const [, , resource, command, ...args] = process.argv;
-
-if (resource === "help" || resource === "--help" || resource === "-h") help();
-if (!resource || !command) usage();
 
 async function readImportSource(args: string[]): Promise<string> {
   const source = args[0];
@@ -191,7 +198,20 @@ function printImportResult(result: {
   }
 }
 
-async function run() {
+export async function runCli(
+  argv = process.argv.slice(2),
+  commandName = "roadmap-tool",
+) {
+  activeHelpText = createHelpText(commandName);
+  const [resource, command, ...args] = argv;
+
+  if (resource === "help" || resource === "--help" || resource === "-h") {
+    help();
+  }
+  if (!resource || !command) usage();
+
+  const orpc = createClient();
+
   if (resource === "features") {
     if (command === "list") {
       const items = await orpc.features.list({});
@@ -321,7 +341,11 @@ async function run() {
   }
 }
 
-run().catch((err) => {
+export function handleCliError(err: unknown): never {
+  if (err instanceof CliExit) {
+    process.exit(err.code);
+  }
+
   const nameErrorMessage = getNameErrorMessage(err);
   if (nameErrorMessage) {
     console.error(`警告: ${nameErrorMessage}`);
@@ -329,4 +353,8 @@ run().catch((err) => {
     console.error(err instanceof Error ? err.message : err);
   }
   process.exit(1);
-});
+}
+
+if (import.meta.main) {
+  runCli(process.argv.slice(2), "bun src/cli.ts").catch(handleCliError);
+}

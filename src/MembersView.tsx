@@ -1126,15 +1126,6 @@ export function MembersView({ history }: { history: HistoryController }) {
           >
             TSVをインポート
           </button>
-          <button
-            type="button"
-            className="btn-sm"
-            onClick={addQuarter}
-            disabled={busy}
-          >
-            + Quarter
-          </button>
-
           {(actionWarning || history.warning) && (
             <span className="name-action-warning" role="alert">
               {actionWarning || history.warning}

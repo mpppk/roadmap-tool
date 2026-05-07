@@ -1,6 +1,7 @@
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
+import { parseArgs } from "util";
 import { getNameErrorMessage } from "./name-errors";
 import type { AppRouter } from "./router";
 import { getLocalBaseUrl } from "./runtime-config";
@@ -68,53 +69,34 @@ function parseFeatureMetadataFlags(args: string[]): {
     links?: Array<{ title: string; url: string }>;
   };
 } {
-  const rest: string[] = [];
-  const links: Array<{ title: string; url: string }> = [];
-  let description: string | null | undefined;
-  let linksSpecified = false;
-  let clearDescription = false;
-  let clearLinks = false;
-  let epicId: number | undefined;
+  const { values, positionals: rest } = parseArgs({
+    args,
+    options: {
+      description: { type: "string" },
+      link: { type: "string", multiple: true },
+      "epic-id": { type: "string" },
+      "clear-description": { type: "boolean" },
+      "clear-links": { type: "boolean" },
+    },
+    strict: true,
+    allowPositionals: true,
+  });
 
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i]!;
-    if (arg === "--description") {
-      const value = args[++i];
-      if (value === undefined) usage();
-      description = value;
-      continue;
-    }
-    if (arg === "--link") {
-      const value = args[++i];
-      if (value === undefined) usage();
-      const sep = value.indexOf("=");
-      if (sep <= 0 || sep === value.length - 1) usage();
-      linksSpecified = true;
-      links.push({
-        title: value.slice(0, sep),
-        url: value.slice(sep + 1),
-      });
-      continue;
-    }
-    if (arg === "--epic-id") {
-      const value = Number(args[++i]);
-      if (!value) usage();
-      epicId = value;
-      continue;
-    }
-    if (arg === "--clear-description") {
-      clearDescription = true;
-      continue;
-    }
-    if (arg === "--clear-links") {
-      clearLinks = true;
-      continue;
-    }
-    rest.push(arg);
-  }
+  const clearDescription = values["clear-description"] ?? false;
+  const clearLinks = values["clear-links"] ?? false;
+  const description = values.description;
+  const rawLinks = values.link ?? [];
+  const linksSpecified = rawLinks.length > 0;
+  const epicId = values["epic-id"] ? Number(values["epic-id"]) : undefined;
 
   if (clearDescription && description !== undefined) usage();
   if (clearLinks && linksSpecified) usage();
+
+  const links = rawLinks.map((v: string) => {
+    const sep = v.indexOf("=");
+    if (sep <= 0 || sep === v.length - 1) usage();
+    return { title: v.slice(0, sep), url: v.slice(sep + 1) };
+  });
 
   return {
     rest,
@@ -126,60 +108,6 @@ function parseFeatureMetadataFlags(args: string[]): {
       ...(clearLinks ? { links: [] } : {}),
     },
   };
-}
-
-function parseMoveFlags(args: string[]): {
-  rest: string[];
-  epicId?: number;
-  beforeId?: number;
-  afterId?: number;
-} {
-  const rest: string[] = [];
-  let epicId: number | undefined;
-  let beforeId: number | undefined;
-  let afterId: number | undefined;
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i]!;
-    if (arg === "--epic-id") {
-      epicId = Number(args[++i]);
-      if (!epicId) usage();
-      continue;
-    }
-    if (arg === "--before") {
-      beforeId = Number(args[++i]);
-      if (!beforeId) usage();
-      continue;
-    }
-    if (arg === "--after") {
-      afterId = Number(args[++i]);
-      if (!afterId) usage();
-      continue;
-    }
-    rest.push(arg);
-  }
-  if (beforeId !== undefined && afterId !== undefined) usage();
-  return { rest, epicId, beforeId, afterId };
-}
-
-function parseMemberImportFlags(args: string[]): {
-  sourceArgs: string[];
-  mode: "append" | "sync";
-} {
-  const sourceArgs: string[] = [];
-  let mode: "append" | "sync" = "append";
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i]!;
-    if (arg === "--mode") {
-      const value = args[++i];
-      if (value !== "append" && value !== "sync") usage();
-      mode = value;
-      continue;
-    }
-    sourceArgs.push(arg);
-  }
-
-  return { sourceArgs, mode };
 }
 
 function printImportResult(result: {
@@ -240,9 +168,24 @@ export async function runCli(
       const f = await orpc.features.rename({ id, name, ...metadata });
       console.log(`Renamed: ${f!.id}\t${f!.name}`);
     } else if (command === "move") {
-      const { rest, epicId, beforeId, afterId } = parseMoveFlags(args);
-      const id = Number(rest[0]);
+      const { values: moveValues, positionals: movePositionals } = parseArgs({
+        args,
+        options: {
+          "epic-id": { type: "string" },
+          before: { type: "string" },
+          after: { type: "string" },
+        },
+        strict: true,
+        allowPositionals: true,
+      });
+      const id = Number(movePositionals[0]);
+      const epicId = Number(moveValues["epic-id"]);
+      const beforeId = moveValues.before
+        ? Number(moveValues.before)
+        : undefined;
+      const afterId = moveValues.after ? Number(moveValues.after) : undefined;
       if (!id || !epicId) usage();
+      if (beforeId !== undefined && afterId !== undefined) usage();
       const f = await orpc.features.move({ id, epicId, beforeId, afterId });
       console.log(`Moved: ${f!.id}\t${f!.name}`);
     } else if (command === "delete") {
@@ -292,9 +235,22 @@ export async function runCli(
       await orpc.epics.delete({ id });
       console.log(`Deleted: ${id}`);
     } else if (command === "move") {
-      const { rest, beforeId, afterId } = parseMoveFlags(args);
-      const id = Number(rest[0]);
+      const { values: moveValues, positionals: movePositionals } = parseArgs({
+        args,
+        options: {
+          before: { type: "string" },
+          after: { type: "string" },
+        },
+        strict: true,
+        allowPositionals: true,
+      });
+      const id = Number(movePositionals[0]);
+      const beforeId = moveValues.before
+        ? Number(moveValues.before)
+        : undefined;
+      const afterId = moveValues.after ? Number(moveValues.after) : undefined;
       if (!id) usage();
+      if (beforeId !== undefined && afterId !== undefined) usage();
       await orpc.epics.move({ id, beforeId, afterId });
       console.log(`Moved: ${id}`);
     } else if (command === "import") {
@@ -329,8 +285,16 @@ export async function runCli(
       await orpc.members.delete({ id });
       console.log(`Deleted: ${id}`);
     } else if (command === "import") {
-      const { sourceArgs, mode } = parseMemberImportFlags(args);
-      const tsv = await readImportSource(sourceArgs);
+      const { values: importValues, positionals: importPositionals } =
+        parseArgs({
+          args,
+          options: { mode: { type: "string", default: "append" } },
+          strict: true,
+          allowPositionals: true,
+        });
+      const mode = importValues.mode;
+      if (mode !== "append" && mode !== "sync") usage();
+      const tsv = await readImportSource(importPositionals);
       const result = await orpc.import.memberTSVImport({ tsv, mode });
       printImportResult(result);
     } else {

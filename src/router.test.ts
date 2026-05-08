@@ -1182,6 +1182,85 @@ describe("allocation capacity conflicts", () => {
     expect(fmB?.totalCapacity).toBe(0);
     expect(fmC?.totalCapacity).toBe(0);
   });
+
+  test("rebalances all allocations proportionally including new one", async () => {
+    const testDb = createTestDb();
+    sqlite = testDb.sqlite;
+    const { db } = testDb;
+    const { featureA, featureB, member, month } = await seedBase(db);
+    await addAllocation(db, {
+      featureId: featureB.id,
+      monthId: month.id,
+      memberId: member.id,
+      capacity: 1,
+    });
+
+    const update = router.allocations.updateMemberAllocation.callable({
+      context: { db },
+    });
+    const result = await update({
+      featureId: featureA.id,
+      periodType: "month",
+      monthId: month.id,
+      memberId: member.id,
+      capacity: 1,
+      capacityConflictResolution: "rebalanceAllProportionally",
+    });
+
+    const allocA = await getAllocation(db, featureA.id, month.id, member.id);
+    const allocB = await getAllocation(db, featureB.id, month.id, member.id);
+    expect(allocA?.capacity).toBeCloseTo(0.5);
+    expect(allocB?.capacity).toBeCloseTo(0.5);
+    expect((allocA?.capacity ?? 0) + (allocB?.capacity ?? 0)).toBeCloseTo(1);
+    expect(result.updatedFeatures.map((f) => f.featureId).sort()).toEqual([
+      featureA.id,
+      featureB.id,
+    ]);
+  });
+
+  test("rebalances all allocations proportionally with multiple features", async () => {
+    const testDb = createTestDb();
+    sqlite = testDb.sqlite;
+    const { db } = testDb;
+    const { featureA, featureB, featureC, member, month } = await seedBase(db);
+    await addAllocation(db, {
+      featureId: featureB.id,
+      monthId: month.id,
+      memberId: member.id,
+      capacity: 0.4,
+    });
+    await addAllocation(db, {
+      featureId: featureC.id,
+      monthId: month.id,
+      memberId: member.id,
+      capacity: 0.3,
+    });
+
+    const update = router.allocations.updateMemberAllocation.callable({
+      context: { db },
+    });
+    await update({
+      featureId: featureA.id,
+      periodType: "month",
+      monthId: month.id,
+      memberId: member.id,
+      capacity: 0.5,
+      capacityConflictResolution: "rebalanceAllProportionally",
+    });
+
+    // total requested = 0.5 + 0.4 + 0.3 = 1.2, scale = 1/1.2 ≈ 0.8333
+    const allocA = await getAllocation(db, featureA.id, month.id, member.id);
+    const allocB = await getAllocation(db, featureB.id, month.id, member.id);
+    const allocC = await getAllocation(db, featureC.id, month.id, member.id);
+    expect(allocA?.capacity).toBeCloseTo(0.5 * (1 / 1.2));
+    expect(allocB?.capacity).toBeCloseTo(0.4 * (1 / 1.2));
+    expect(allocC?.capacity).toBeCloseTo(0.3 * (1 / 1.2));
+    expect(
+      (allocA?.capacity ?? 0) +
+        (allocB?.capacity ?? 0) +
+        (allocC?.capacity ?? 0),
+    ).toBeCloseTo(1);
+  });
 });
 
 describe("allocation cap preserving operations", () => {

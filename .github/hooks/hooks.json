@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "agentStop": [
+      {
+        "type": "command",
+        "bash": ".github/hooks/post-agent.sh",
+        "cwd": ".",
+        "timeoutSec": 120
+      }
+    ]
+  }
+}

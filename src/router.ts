@@ -1441,6 +1441,38 @@ const membersSetMaxCapacity = o
     return row;
   });
 
+const membersGetCapacitySummary = o
+  .input(
+    z.object({
+      year: z.number().int(),
+      month: z.number().int().min(1).max(12),
+    }),
+  )
+  .handler(async ({ input, context }) => {
+    const { db } = context;
+    return db
+      .select({
+        id: members.id,
+        name: members.name,
+        maxCapacity: members.maxCapacity,
+        usedCapacity: sql<number>`coalesce(sum(${memberMonthAllocations.capacity}), 0)`,
+      })
+      .from(members)
+      .leftJoin(
+        memberMonthAllocations,
+        and(
+          eq(memberMonthAllocations.memberId, members.id),
+          eq(
+            memberMonthAllocations.monthId,
+            sql`(select id from months where year = ${input.year} and month = ${input.month})`,
+          ),
+        ),
+      )
+      .groupBy(members.id)
+      .orderBy(asc(members.id))
+      .all();
+  });
+
 // ---------------------------------------------------------------------------
 // Quarters
 // ---------------------------------------------------------------------------
@@ -3325,6 +3357,7 @@ export const router = {
     rename: membersRename,
     delete: membersDelete,
     setMaxCapacity: membersSetMaxCapacity,
+    getCapacitySummary: membersGetCapacitySummary,
   },
   quarters: {
     list: quartersList,

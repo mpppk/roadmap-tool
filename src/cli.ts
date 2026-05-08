@@ -36,6 +36,7 @@ function createHelpText(commandName: string): string {
   ${commandName} members rename <id> <name>
   ${commandName} members delete <id>
   ${commandName} members import <path|-> [--mode append|sync]
+  ${commandName} members capacity --year <year> --month <month>
 `;
 }
 
@@ -74,6 +75,7 @@ Subcommands:
   rename <id> <name>
   delete <id>
   import <path|-> [--mode append|sync]
+  capacity --year <year> --month <month>
 
 Run '${commandName} members <subcommand> --help' for subcommand details.`;
     default:
@@ -161,6 +163,12 @@ function createSubcommandHelpText(
 
   --mode append|sync  Import mode (default: append)
   --help, -h          Show this help`;
+    case "members.capacity":
+      return `Usage: ${commandName} members capacity [options]
+
+  --year <year>    Year (required)
+  --month <month>  Month 1-12 (required)
+  --help, -h       Show this help`;
     default:
       return activeHelpText;
   }
@@ -434,7 +442,10 @@ export async function runCli(
       if (items.length === 0) {
         console.log("(no members)");
       } else {
-        for (const m of items) console.log(`${m.id}\t${m.name}`);
+        for (const m of items) {
+          const maxCap = m.maxCapacity ?? 1;
+          console.log(`${m.id}\t${m.name}\t${maxCap}`);
+        }
       }
     } else if (command === "add") {
       if (args.includes("--help") || args.includes("-h"))
@@ -473,6 +484,30 @@ export async function runCli(
       const tsv = await readImportSource(importPositionals);
       const result = await orpc.import.memberTSVImport({ tsv, mode });
       printImportResult(result);
+    } else if (command === "capacity") {
+      if (args.includes("--help") || args.includes("-h"))
+        helpForSubcommand(resource, command);
+      const { values: capValues } = parseArgs({
+        args,
+        options: {
+          year: { type: "string" },
+          month: { type: "string" },
+        },
+        strict: true,
+        allowPositionals: false,
+      });
+      const year = Number(capValues.year);
+      const month = Number(capValues.month);
+      if (!year || !month || month < 1 || month > 12) usage();
+      const items = await orpc.members.getCapacitySummary({ year, month });
+      if (items.length === 0) {
+        console.log("(no members)");
+      } else {
+        for (const m of items) {
+          const maxCap = m.maxCapacity ?? 1;
+          console.log(`${m.id}\t${m.name}\t${maxCap}\t${m.usedCapacity}`);
+        }
+      }
     } else {
       usage();
     }

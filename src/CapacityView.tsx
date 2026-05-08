@@ -76,7 +76,8 @@ type PeriodColumn = {
 type CapacityConflictResolution =
   | "fitWithinLimit"
   | "allowOverflow"
-  | "rebalanceOthersProportionally";
+  | "rebalanceOthersProportionally"
+  | "rebalanceAllProportionally";
 
 type FeatureMonthUpdate = {
   featureId: number;
@@ -1153,6 +1154,7 @@ function CapacityConflictPopover({
   assignableCapacity,
   requestedCapacity,
   rebalancePreview,
+  rebalanceAllPreview,
   onResolve,
   onCancel,
   displayDivisor = 1,
@@ -1162,6 +1164,7 @@ function CapacityConflictPopover({
   assignableCapacity: number;
   requestedCapacity: number;
   rebalancePreview: RebalancePreview[];
+  rebalanceAllPreview: { newCapacity: number; othersPreview: RebalancePreview[] };
   onResolve: (resolution: CapacityConflictResolution) => void;
   onCancel: () => void;
   displayDivisor?: number;
@@ -1213,6 +1216,28 @@ function CapacityConflictPopover({
               ))}
             </span>
           )}
+        </button>
+        <button
+          type="button"
+          className="btn-sm capacity-conflict-action-btn"
+          onClick={() => onResolve("rebalanceAllProportionally")}
+        >
+          <span>比率を保ったままmax capacityに収まるように縮小</span>
+          <span className="capacity-conflict-preview-list">
+            <span className="capacity-conflict-preview-item">
+              今回: {fmt(requestedCapacity / d)}→
+              {fmt(rebalanceAllPreview.newCapacity / d)}
+            </span>
+            {rebalanceAllPreview.othersPreview.map((change) => (
+              <span
+                key={change.featureName}
+                className="capacity-conflict-preview-item"
+              >
+                {change.featureName}: {fmt(change.currentCapacity / d)}→
+                {fmt(change.nextCapacity / d)}
+              </span>
+            ))}
+          </span>
         </button>
         <button
           type="button"
@@ -1683,6 +1708,41 @@ export function CapacityView({ history }: { history: HistoryController }) {
       ...change,
       nextCapacity: r2(change.currentCapacity * scale),
     }));
+  };
+
+  const getRebalanceAllPreview = (
+    memberId: number,
+    column: PeriodColumn,
+    excludeFeatureId: number,
+    requestedCapacity: number,
+  ): { newCapacity: number; othersPreview: RebalancePreview[] } => {
+    const otherAllocations = featureRows
+      .filter((row) => row.id !== excludeFeatureId)
+      .map((row) => {
+        const alloc = getColumnData(row, column).memberAllocations.find(
+          (a) => a.memberId === memberId,
+        );
+        return {
+          featureName: row.name,
+          currentCapacity: alloc?.capacity ?? 0,
+        };
+      })
+      .filter((change) => change.currentCapacity > 0);
+    const usedElsewhere = otherAllocations.reduce(
+      (sum, change) => sum + change.currentCapacity,
+      0,
+    );
+    const limit = columnMemberLimit(column, getMemberMaxCap(memberId));
+    const total = usedElsewhere + requestedCapacity;
+    const scale = total > limit ? limit / total : 1;
+
+    return {
+      newCapacity: r2(requestedCapacity * scale),
+      othersPreview: otherAllocations.map((change) => ({
+        ...change,
+        nextCapacity: r2(change.currentCapacity * scale),
+      })),
+    };
   };
 
   const toggleExpand = (featureId: number) => {
@@ -3264,6 +3324,12 @@ export function CapacityView({ history }: { history: HistoryController }) {
                                       matchingCapacityConflict.requestedCapacity
                                     }
                                     rebalancePreview={getRebalancePreview(
+                                      matchingCapacityConflict.memberId,
+                                      column,
+                                      matchingCapacityConflict.featureId,
+                                      matchingCapacityConflict.requestedCapacity,
+                                    )}
+                                    rebalanceAllPreview={getRebalanceAllPreview(
                                       matchingCapacityConflict.memberId,
                                       column,
                                       matchingCapacityConflict.featureId,

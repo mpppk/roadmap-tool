@@ -26,6 +26,7 @@ const capacityConflictResolutionSchema = z.enum([
   "fitWithinLimit",
   "allowOverflow",
   "rebalanceOthersProportionally",
+  "rebalanceAllProportionally",
 ]);
 
 const snapshotEpicSchema = z.object({
@@ -807,6 +808,36 @@ async function updateSingleMemberMonthAllocation(
     capacity > maxCap
   ) {
     nextCapacity = capacity;
+  }
+
+  if (
+    capacityConflictResolution === "rebalanceAllProportionally" &&
+    usedElsewhere + capacity > maxCap
+  ) {
+    const total = usedElsewhere + capacity;
+    const scale = maxCap / total;
+    const otherAllocs = await db
+      .select()
+      .from(memberMonthAllocations)
+      .where(
+        and(
+          eq(memberMonthAllocations.memberId, memberId),
+          eq(memberMonthAllocations.monthId, monthId),
+          ne(memberMonthAllocations.featureId, featureId),
+        ),
+      );
+
+    for (const alloc of otherAllocs) {
+      affectedFeatureIds.add(alloc.featureId);
+      await setMemberMonthAllocationCapacity(db, {
+        featureId: alloc.featureId,
+        monthId,
+        memberId,
+        capacity: alloc.capacity * scale,
+        keepZero: true,
+      });
+    }
+    nextCapacity = capacity * scale;
   }
 
   await setMemberMonthAllocationCapacity(db, {

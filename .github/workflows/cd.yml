@@ -38,13 +38,34 @@ jobs:
         include:
           - platform: linux-x64
             runner: ubuntu-latest
-            artifact: roadmap-tool-linux-x64
+            bun_target: bun-linux-x64
+            os_name: Linux
+            arch_name: x86_64
+            archive: roadmap-tool_Linux_x86_64.tar.gz
+          - platform: linux-arm64
+            runner: ubuntu-latest
+            bun_target: bun-linux-arm64
+            os_name: Linux
+            arch_name: arm64
+            archive: roadmap-tool_Linux_arm64.tar.gz
           - platform: darwin-arm64
             runner: macos-latest
-            artifact: roadmap-tool-darwin-arm64
+            bun_target: bun-darwin-arm64
+            os_name: Darwin
+            arch_name: arm64
+            archive: roadmap-tool_Darwin_arm64.tar.gz
+          - platform: darwin-x64
+            runner: macos-13
+            bun_target: bun-darwin-x64
+            os_name: Darwin
+            arch_name: x86_64
+            archive: roadmap-tool_Darwin_x86_64.tar.gz
           - platform: windows-x64
             runner: windows-latest
-            artifact: roadmap-tool-windows-x64.exe
+            bun_target: bun-windows-x64
+            os_name: Windows
+            arch_name: x86_64
+            archive: roadmap-tool_Windows_x86_64.zip
 
     steps:
       - uses: actions/checkout@v4
@@ -56,23 +77,37 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Build binary
-        run: bun run build:binary
-
-      - name: Rename binary (Unix)
+      - name: Build binary (Unix)
         if: runner.os != 'Windows'
-        run: mv roadmap-tool ${{ matrix.artifact }}
+        run: |
+          bun build --compile --target=${{ matrix.bun_target }} \
+            --minify \
+            --define 'process.env.NODE_ENV="production"' \
+            ./src/binary.ts --outfile=roadmap-tool
 
-      - name: Rename binary (Windows)
+      - name: Build binary (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Move-Item roadmap-tool.exe ${{ matrix.artifact }}
+        run: |
+          bun build --compile --target=${{ matrix.bun_target }} `
+            --minify `
+            --define 'process.env.NODE_ENV="production"' `
+            ./src/binary.ts --outfile=roadmap-tool.exe
+
+      - name: Package (Unix tar.gz)
+        if: runner.os != 'Windows'
+        run: tar czf ${{ matrix.archive }} roadmap-tool
+
+      - name: Package (Windows zip)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path roadmap-tool.exe -DestinationPath ${{ matrix.archive }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}
+          name: ${{ matrix.platform }}
+          path: ${{ matrix.archive }}
           if-no-files-found: error
           retention-days: 1
 
@@ -90,6 +125,16 @@ jobs:
           merge-multiple: true
           path: dist/
 
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum roadmap-tool_Linux_x86_64.tar.gz \
+            roadmap-tool_Linux_arm64.tar.gz \
+            roadmap-tool_Darwin_arm64.tar.gz \
+            roadmap-tool_Darwin_x86_64.tar.gz \
+            roadmap-tool_Windows_x86_64.zip > checksums.txt
+          cat checksums.txt
+
       - name: Create GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -97,6 +142,9 @@ jobs:
           gh release create "${{ github.ref_name }}" \
             --title "${{ github.ref_name }}" \
             --generate-notes \
-            dist/roadmap-tool-linux-x64 \
-            dist/roadmap-tool-darwin-arm64 \
-            dist/roadmap-tool-windows-x64.exe
+            dist/roadmap-tool_Linux_x86_64.tar.gz \
+            dist/roadmap-tool_Linux_arm64.tar.gz \
+            dist/roadmap-tool_Darwin_arm64.tar.gz \
+            dist/roadmap-tool_Darwin_x86_64.tar.gz \
+            dist/roadmap-tool_Windows_x86_64.zip \
+            dist/checksums.txt

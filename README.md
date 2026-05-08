@@ -1,5 +1,30 @@
 # roadmap-tool
 
+チームのリソース配分・ロードマップ計画を管理するツールです。
+
+## インストール
+
+```sh
+curl -fsSL https://install.roadmap.nibo.sh | sh
+```
+
+インストール先を指定する場合:
+
+```sh
+curl -fsSL https://install.roadmap.nibo.sh | sh -s -- -b ~/.local/bin
+```
+
+対応プラットフォーム: macOS (Apple Silicon / Intel)、Linux (x86_64 / arm64)
+
+インストール後:
+
+```sh
+roadmap-tool --help
+roadmap-tool --version
+```
+
+---
+
 チームのリソース配分・ロードマップ計画を管理するツールです。フィーチャー（作業項目）・チームメンバー・四半期を登録し、各メンバーの月次キャパシティを機能ごとに配分することで、チーム全体の稼働状況を可視化・計画できます。
 
 ## ドメインモデル

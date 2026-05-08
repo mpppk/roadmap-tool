@@ -1164,7 +1164,10 @@ function CapacityConflictPopover({
   assignableCapacity: number;
   requestedCapacity: number;
   rebalancePreview: RebalancePreview[];
-  rebalanceAllPreview: { newCapacity: number; othersPreview: RebalancePreview[] };
+  rebalanceAllPreview: {
+    newCapacity: number;
+    othersPreview: RebalancePreview[];
+  };
   onResolve: (resolution: CapacityConflictResolution) => void;
   onCancel: () => void;
   displayDivisor?: number;

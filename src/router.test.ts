@@ -1211,9 +1211,7 @@ describe("allocation capacity conflicts", () => {
     const allocB = await getAllocation(db, featureB.id, month.id, member.id);
     expect(allocA?.capacity).toBeCloseTo(0.5);
     expect(allocB?.capacity).toBeCloseTo(0.5);
-    expect(
-      (allocA?.capacity ?? 0) + (allocB?.capacity ?? 0),
-    ).toBeCloseTo(1);
+    expect((allocA?.capacity ?? 0) + (allocB?.capacity ?? 0)).toBeCloseTo(1);
     expect(result.updatedFeatures.map((f) => f.featureId).sort()).toEqual([
       featureA.id,
       featureB.id,

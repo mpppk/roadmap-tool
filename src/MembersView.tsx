@@ -713,13 +713,35 @@ export function MembersView({
   history: HistoryController;
   externalDataVersion: number;
 }) {
-  const [viewMode, setViewMode] = useState<ViewMode>("quarter");
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    try {
+      const v = localStorage.getItem("roadmap.membersView.viewMode");
+      if (v === "quarter" || v === "month") return v;
+    } catch {}
+    return "quarter";
+  });
   const [capacityAggMode, setCapacityAggMode] =
     useState<CapacityAggMode>("total");
   const [quarters, setQuarters] = useState<Quarter[]>([]);
-  const [rangeStart, setRangeStart] = useState<QuarterYQ | null>(null);
-  const [rangeEnd, setRangeEnd] = useState<QuarterYQ | null>(null);
+  const [rangeStart, setRangeStart] = useState<QuarterYQ | null>(() => {
+    try {
+      const v = localStorage.getItem("roadmap.membersView.rangeStart");
+      return v ? (JSON.parse(v) as QuarterYQ) : null;
+    } catch {}
+    return null;
+  });
+  const [rangeEnd, setRangeEnd] = useState<QuarterYQ | null>(() => {
+    try {
+      const v = localStorage.getItem("roadmap.membersView.rangeEnd");
+      return v ? (JSON.parse(v) as QuarterYQ) : null;
+    } catch {}
+    return null;
+  });
   const rangeInitializedRef = useRef(false);
+  const rangeStartRef = useRef(rangeStart);
+  rangeStartRef.current = rangeStart;
+  const rangeEndRef = useRef(rangeEnd);
+  rangeEndRef.current = rangeEnd;
   const [memberRows, setMemberRows] = useState<MemberRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -754,6 +776,32 @@ export function MembersView({
     () => columnsForMode(displayedQuarters, viewMode),
     [displayedQuarters, viewMode],
   );
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("roadmap.membersView.viewMode", viewMode);
+    } catch {}
+  }, [viewMode]);
+
+  useEffect(() => {
+    try {
+      if (rangeStart !== null)
+        localStorage.setItem(
+          "roadmap.membersView.rangeStart",
+          JSON.stringify(rangeStart),
+        );
+    } catch {}
+  }, [rangeStart]);
+
+  useEffect(() => {
+    try {
+      if (rangeEnd !== null)
+        localStorage.setItem(
+          "roadmap.membersView.rangeEnd",
+          JSON.stringify(rangeEnd),
+        );
+    } catch {}
+  }, [rangeEnd]);
 
   // ── Initial load ────────────────────────────────────────────────────────
 
@@ -803,17 +851,19 @@ export function MembersView({
     setQuarters(sortedQs);
     if (!rangeInitializedRef.current) {
       rangeInitializedRef.current = true;
-      const first = sortedQs[0];
-      const last = sortedQs[sortedQs.length - 1];
-      if (first && last) {
-        setRangeStart({ year: first.year, quarter: first.quarter });
-        setRangeEnd({ year: last.year, quarter: last.quarter });
-      } else {
-        const now = new Date();
-        const yr = now.getFullYear();
-        const q = Math.ceil((now.getMonth() + 1) / 3) as 1 | 2 | 3 | 4;
-        setRangeStart({ year: yr, quarter: q });
-        setRangeEnd({ year: yr, quarter: q });
+      if (rangeStartRef.current === null && rangeEndRef.current === null) {
+        const first = sortedQs[0];
+        const last = sortedQs[sortedQs.length - 1];
+        if (first && last) {
+          setRangeStart({ year: first.year, quarter: first.quarter });
+          setRangeEnd({ year: last.year, quarter: last.quarter });
+        } else {
+          const now = new Date();
+          const yr = now.getFullYear();
+          const q = Math.ceil((now.getMonth() + 1) / 3) as 1 | 2 | 3 | 4;
+          setRangeStart({ year: yr, quarter: q });
+          setRangeEnd({ year: yr, quarter: q });
+        }
       }
     }
 

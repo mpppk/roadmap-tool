@@ -4,6 +4,8 @@
 
 ## インストール
 
+### ワンライナー（推奨）
+
 ```sh
 curl -fsSL https://install.roadmap.nibo.sh | sh
 ```
@@ -14,9 +16,43 @@ curl -fsSL https://install.roadmap.nibo.sh | sh
 curl -fsSL https://install.roadmap.nibo.sh | sh -s -- -b ~/.local/bin
 ```
 
-対応プラットフォーム: macOS (Apple Silicon / Intel)、Linux (x86_64 / arm64)
+### プラットフォーム別（手動）
 
-インストール後:
+最新リリースのバイナリを [GitHub Releases](https://github.com/mpppk/roadmap-tool/releases/latest) から直接ダウンロードすることもできます。
+
+**macOS (Apple Silicon)**
+
+```sh
+curl -fsSL https://github.com/mpppk/roadmap-tool/releases/latest/download/roadmap-tool_Darwin_arm64.tar.gz | tar xz
+sudo install -m 0755 roadmap-tool /usr/local/bin/roadmap-tool
+```
+
+**macOS (Intel)**
+
+```sh
+curl -fsSL https://github.com/mpppk/roadmap-tool/releases/latest/download/roadmap-tool_Darwin_x86_64.tar.gz | tar xz
+sudo install -m 0755 roadmap-tool /usr/local/bin/roadmap-tool
+```
+
+**Linux (x86_64)**
+
+```sh
+curl -fsSL https://github.com/mpppk/roadmap-tool/releases/latest/download/roadmap-tool_Linux_x86_64.tar.gz | tar xz
+sudo install -m 0755 roadmap-tool /usr/local/bin/roadmap-tool
+```
+
+**Linux (arm64)**
+
+```sh
+curl -fsSL https://github.com/mpppk/roadmap-tool/releases/latest/download/roadmap-tool_Linux_arm64.tar.gz | tar xz
+sudo install -m 0755 roadmap-tool /usr/local/bin/roadmap-tool
+```
+
+**Windows (x86_64)**
+
+[roadmap-tool_Windows_x86_64.zip](https://github.com/mpppk/roadmap-tool/releases/latest/download/roadmap-tool_Windows_x86_64.zip) をダウンロードして展開し、`roadmap-tool.exe` を PATH の通ったフォルダに配置してください。
+
+### インストール後
 
 ```sh
 roadmap-tool --help

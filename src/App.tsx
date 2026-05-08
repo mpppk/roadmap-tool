@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CapacityView } from "./CapacityView";
 import type { HistoryController, RoadmapSnapshot } from "./history-client";
 import { MembersView } from "./MembersView";
-import { orpc } from "./orpc-client";
+import { orpc, roadmapClientId } from "./orpc-client";
 
 type HistoryEntry = {
   label: string;
@@ -41,6 +41,7 @@ export function App() {
   const [historyBusy, setHistoryBusy] = useState(false);
   const [historyWarning, setHistoryWarning] = useState<string | null>(null);
   const [historyVersion, setHistoryVersion] = useState(0);
+  const [externalDataVersion, setExternalDataVersion] = useState(0);
   const historyQueueRef = useRef<Promise<void>>(Promise.resolve());
   const historyPendingRef = useRef(0);
 
@@ -55,6 +56,28 @@ export function App() {
     setRedoStack([]);
     setHistoryWarning(null);
   }, []);
+
+  useEffect(() => {
+    const url = new URL("/events/data-changes", window.location.origin);
+    url.searchParams.set("clientId", roadmapClientId);
+    const events = new EventSource(url);
+
+    const onDataChanged = (event: MessageEvent<string>) => {
+      const payload = JSON.parse(event.data) as {
+        version: number;
+        sourceClientId?: string;
+      };
+      if (payload.sourceClientId === roadmapClientId) return;
+      clearHistory();
+      setExternalDataVersion((version) => version + 1);
+    };
+
+    events.addEventListener("roadmap-data-changed", onDataChanged);
+    return () => {
+      events.removeEventListener("roadmap-data-changed", onDataChanged);
+      events.close();
+    };
+  }, [clearHistory]);
 
   const recordHistoryOperation = useCallback(
     <T,>(label: string, operation: () => Promise<T>): Promise<T> => {
@@ -228,8 +251,16 @@ export function App() {
     ],
   );
 
-  if (path === "/members") return <MembersView history={history} />;
-  return <CapacityView history={history} />;
+  if (path === "/members")
+    return (
+      <MembersView
+        history={history}
+        externalDataVersion={externalDataVersion}
+      />
+    );
+  return (
+    <CapacityView history={history} externalDataVersion={externalDataVersion} />
+  );
 }
 
 export default App;

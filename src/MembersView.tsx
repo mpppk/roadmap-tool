@@ -435,7 +435,13 @@ function MaxCapacityCell({
 
 const COL_W = 148;
 
-export function MembersView({ history }: { history: HistoryController }) {
+export function MembersView({
+  history,
+  externalDataVersion,
+}: {
+  history: HistoryController;
+  externalDataVersion: number;
+}) {
   const [viewMode, setViewMode] = useState<ViewMode>("quarter");
   const [capacityAggMode, setCapacityAggMode] =
     useState<CapacityAggMode>("total");
@@ -542,8 +548,9 @@ export function MembersView({ history }: { history: HistoryController }) {
 
   useEffect(() => {
     void history.version;
+    void externalDataVersion;
     void loadAll();
-  }, [loadAll, history.version]);
+  }, [loadAll, history.version, externalDataVersion]);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -708,7 +715,7 @@ export function MembersView({ history }: { history: HistoryController }) {
     }
   };
 
-  const addQuarter = async () => {
+  const _addQuarter = async () => {
     setBusy(true);
     try {
       const { year, quarter } = nextQuarterYQ(quarters);

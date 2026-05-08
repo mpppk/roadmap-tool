@@ -19,6 +19,42 @@ type Month = { id: number; year: number; month: number; quarterId: number };
 type Quarter = { id: number; year: number; quarter: number; months: Month[] };
 type Member = { id: number; name: string; maxCapacity: number | null };
 
+type CapacityConflictResolution =
+  | "fitWithinLimit"
+  | "allowOverflow"
+  | "rebalanceOthersProportionally"
+  | "rebalanceAllProportionally";
+
+type RebalancePreview = {
+  featureName: string;
+  currentCapacity: number;
+  nextCapacity: number;
+};
+
+type PendingCapacityConflict = {
+  featureId: number;
+  periodType: ViewMode;
+  monthId?: number;
+  quarterId?: number;
+  memberId: number;
+  memberName: string;
+  requestedCapacity: number;
+  usedElsewhere: number;
+  assignableCapacity: number;
+};
+
+type PendingMaxCapacityOverflow = {
+  featureId: number;
+  periodType: ViewMode;
+  monthId?: number;
+  quarterId?: number;
+  memberId: number;
+  memberName: string;
+  requestedCapacity: number;
+  limit: number;
+  usedElsewhere: number;
+};
+
 type MemberMonthData = {
   totalCapacity: number;
   featureAllocations: Array<{
@@ -42,6 +78,8 @@ type PeriodColumn = {
   type: ViewMode;
   label: string;
   monthIds: number[];
+  monthId?: number;
+  quarterId?: number;
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -108,6 +146,12 @@ function emptyMemberMonthData(): MemberMonthData {
   return { totalCapacity: 0, featureAllocations: [] };
 }
 
+const r2 = (v: number) => Math.round(v * 100) / 100;
+
+function fmt2(v: number): string {
+  return v.toFixed(2);
+}
+
 function aggregateMemberMonthData(
   monthMap: Map<number, MemberMonthData>,
   monthIds: number[],
@@ -153,18 +197,20 @@ function columnsForMode(
   if (viewMode === "quarter") {
     return quarters.map((q) => ({
       key: `q-${q.id}`,
-      type: "quarter",
+      type: "quarter" as const,
       label: quarterLabel(q),
       monthIds: q.months.map((m) => m.id),
+      quarterId: q.id,
     }));
   }
 
   return quarters.flatMap((q) =>
     q.months.map((m) => ({
       key: `m-${m.id}`,
-      type: "month",
+      type: "month" as const,
       label: monthLabel(m),
       monthIds: [m.id],
+      monthId: m.id,
     })),
   );
 }
@@ -431,6 +477,231 @@ function MaxCapacityCell({
   );
 }
 
+function HeatmapEditableFeatureCell({
+  value,
+  maxVal,
+  isOverflow,
+  onCommit,
+}: {
+  value: number;
+  maxVal: number;
+  isOverflow: boolean;
+  onCommit: (v: number) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [editVal, setEditVal] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const { bg, fg } = heatBg(value, maxVal);
+  const ovBg = isOverflow ? "oklch(72% 0.18 25)" : bg;
+  const ovFg = isOverflow ? "#fff" : fg;
+
+  const startEdit = () => {
+    setEditVal(value === 0 ? "" : fmt(value));
+    setEditing(true);
+    setTimeout(() => inputRef.current?.select(), 20);
+  };
+
+  const commit = () => {
+    const v = parseFloat(editVal);
+    if (!Number.isNaN(v) && v >= 0) onCommit(r2(v));
+    setEditing(false);
+  };
+
+  return (
+    <button
+      type="button"
+      className="hm-member-cell"
+      style={{ background: ovBg }}
+      onClick={startEdit}
+    >
+      {editing ? (
+        <input
+          ref={inputRef}
+          className="hm-input"
+          value={editVal}
+          placeholder="0"
+          onChange={(e) => setEditVal(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit();
+            if (e.key === "Escape") setEditing(false);
+          }}
+          onClick={(e) => e.stopPropagation()}
+          style={{ color: ovFg }}
+        />
+      ) : (
+        <span
+          className="hm-member-val"
+          style={{ color: value === 0 ? "transparent" : ovFg }}
+        >
+          {fmt(value)}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function MaxCapacityOverflowPopover({
+  memberName,
+  limit,
+  requestedCapacity,
+  usedElsewhere,
+  onResolve,
+  onCancel,
+  displayDivisor = 1,
+}: {
+  memberName: string;
+  limit: number;
+  requestedCapacity: number;
+  usedElsewhere: number;
+  onResolve: (resolution: "fitWithinLimit" | "allowOverflow") => void;
+  onCancel: () => void;
+  displayDivisor?: number;
+}) {
+  const d = displayDivisor;
+  const reducedValue = Math.max(0, limit - usedElsewhere);
+
+  return (
+    <div className="capacity-conflict-popover" role="dialog" aria-modal="false">
+      <div className="capacity-conflict-lines">
+        <div>
+          {memberName}のmax capacity ({fmt2(limit / d)}) を超えています。
+        </div>
+        <div>今回の割り当てキャパシティ: {fmt2(requestedCapacity / d)}</div>
+      </div>
+      <div className="capacity-conflict-actions">
+        <button
+          type="button"
+          className="btn-sm capacity-conflict-action-btn"
+          onClick={() => onResolve("fitWithinLimit")}
+        >
+          {`縮小して設定 (${fmt2(reducedValue / d)})`}
+        </button>
+        <button
+          type="button"
+          className="btn-sm capacity-conflict-action-btn"
+          onClick={() => onResolve("allowOverflow")}
+        >
+          {`max capacityを超えて設定 (${fmt2(requestedCapacity / d)})`}
+        </button>
+        <button
+          type="button"
+          className="btn-sm capacity-conflict-action-btn"
+          onClick={onCancel}
+        >
+          キャンセル
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CapacityConflictPopover({
+  memberName,
+  usedElsewhere,
+  assignableCapacity,
+  requestedCapacity,
+  rebalancePreview,
+  rebalanceAllPreview,
+  onResolve,
+  onCancel,
+  displayDivisor = 1,
+}: {
+  memberName: string;
+  usedElsewhere: number;
+  assignableCapacity: number;
+  requestedCapacity: number;
+  rebalancePreview: RebalancePreview[];
+  rebalanceAllPreview: {
+    newCapacity: number;
+    othersPreview: RebalancePreview[];
+  };
+  onResolve: (resolution: CapacityConflictResolution) => void;
+  onCancel: () => void;
+  displayDivisor?: number;
+}) {
+  const d = displayDivisor;
+  const overflowTotal = usedElsewhere + requestedCapacity;
+
+  return (
+    <div className="capacity-conflict-popover" role="dialog" aria-modal="false">
+      <div className="capacity-conflict-lines">
+        <div>{memberName}の合計キャパシティが1を超えています。</div>
+        <div>割り当て済み: {fmt2(usedElsewhere / d)}</div>
+        <div>残りキャパシティ: {fmt2(assignableCapacity / d)}</div>
+        <div>今回の割り当てキャパシティ: {fmt2(requestedCapacity / d)}</div>
+      </div>
+      <div className="capacity-conflict-actions">
+        <button
+          type="button"
+          className="btn-sm capacity-conflict-action-btn"
+          onClick={() => onResolve("allowOverflow")}
+        >
+          {`そのまま割り当て(${fmt2(usedElsewhere / d)}+${fmt2(
+            requestedCapacity / d,
+          )}=${fmt2(overflowTotal / d)})`}
+        </button>
+        <button
+          type="button"
+          className="btn-sm capacity-conflict-action-btn"
+          onClick={() => onResolve("fitWithinLimit")}
+        >
+          超過しない最大値({fmt2(assignableCapacity / d)})を割り当て
+        </button>
+        <button
+          type="button"
+          className="btn-sm capacity-conflict-action-btn"
+          onClick={() => onResolve("rebalanceOthersProportionally")}
+        >
+          <span>超過しないように他機能のキャパシティを削減</span>
+          {rebalancePreview.length > 0 && (
+            <span className="capacity-conflict-preview-list">
+              {rebalancePreview.map((change) => (
+                <span
+                  key={change.featureName}
+                  className="capacity-conflict-preview-item"
+                >
+                  {change.featureName}: {fmt(change.currentCapacity / d)}→
+                  {fmt(change.nextCapacity / d)}
+                </span>
+              ))}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
+          className="btn-sm capacity-conflict-action-btn"
+          onClick={() => onResolve("rebalanceAllProportionally")}
+        >
+          <span>比率を保ったままmax capacityに収まるように縮小</span>
+          <span className="capacity-conflict-preview-list">
+            <span className="capacity-conflict-preview-item">
+              今回: {fmt(requestedCapacity / d)}→
+              {fmt(rebalanceAllPreview.newCapacity / d)}
+            </span>
+            {rebalanceAllPreview.othersPreview.map((change) => (
+              <span
+                key={change.featureName}
+                className="capacity-conflict-preview-item"
+              >
+                {change.featureName}: {fmt(change.currentCapacity / d)}→
+                {fmt(change.nextCapacity / d)}
+              </span>
+            ))}
+          </span>
+        </button>
+        <button
+          type="button"
+          className="btn-sm capacity-conflict-action-btn"
+          onClick={onCancel}
+        >
+          キャンセル
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ──────────────────────────────────────────────────────────
 
 const COL_W = 148;
@@ -462,6 +733,10 @@ export function MembersView({
     errors: { row: number; message: string }[];
   } | null>(null);
   const [importing, setImporting] = useState(false);
+  const [capacityConflict, setCapacityConflict] =
+    useState<PendingCapacityConflict | null>(null);
+  const [maxCapacityOverflow, setMaxCapacityOverflow] =
+    useState<PendingMaxCapacityOverflow | null>(null);
 
   const displayedQuarters = useMemo(() => {
     if (!rangeStart || !rangeEnd) return quarters;
@@ -571,6 +846,292 @@ export function MembersView({
       ),
     );
   };
+
+  // ── Allocation helpers ────────────────────────────────────────────────────
+
+  const applyAllocationUpdate = useCallback(
+    (
+      updatedFeatures: Array<{
+        featureId: number;
+        months: Array<{
+          monthId: number;
+          totalCapacity: number;
+          unassignedCapacity: number;
+          memberAllocations: Array<{ memberId: number; capacity: number }>;
+        }>;
+      }>,
+    ) => {
+      setMemberRows((rows) =>
+        rows.map((member) => {
+          let changed = false;
+          const newMonths = new Map(member.months);
+          for (const updatedFeature of updatedFeatures) {
+            for (const updatedMonth of updatedFeature.months) {
+              const existing =
+                newMonths.get(updatedMonth.monthId) ?? emptyMemberMonthData();
+              const memberAlloc = updatedMonth.memberAllocations.find(
+                (a) => a.memberId === member.id,
+              );
+              const newCapacity = memberAlloc?.capacity ?? 0;
+              const existingAlloc = existing.featureAllocations.find(
+                (fa) => fa.featureId === updatedFeature.featureId,
+              );
+              if (existingAlloc?.capacity === newCapacity) continue;
+              changed = true;
+              let newFeatureAllocations: MemberMonthData["featureAllocations"];
+              if (newCapacity === 0) {
+                newFeatureAllocations = existing.featureAllocations.filter(
+                  (fa) => fa.featureId !== updatedFeature.featureId,
+                );
+              } else if (existingAlloc) {
+                newFeatureAllocations = existing.featureAllocations.map((fa) =>
+                  fa.featureId === updatedFeature.featureId
+                    ? { ...fa, capacity: newCapacity }
+                    : fa,
+                );
+              } else {
+                newFeatureAllocations = existing.featureAllocations;
+              }
+              const newTotalCapacity = newFeatureAllocations.reduce(
+                (sum, fa) => sum + fa.capacity,
+                0,
+              );
+              newMonths.set(updatedMonth.monthId, {
+                totalCapacity: newTotalCapacity,
+                featureAllocations: newFeatureAllocations,
+              });
+            }
+          }
+          return changed ? { ...member, months: newMonths } : member;
+        }),
+      );
+    },
+    [],
+  );
+
+  const getRebalancePreview = useCallback(
+    (
+      member: MemberRow,
+      column: PeriodColumn,
+      excludeFeatureId: number,
+      requestedCapacity: number,
+    ): RebalancePreview[] => {
+      const featureTotals = new Map<
+        number,
+        { featureName: string; capacity: number }
+      >();
+      for (const monthId of column.monthIds) {
+        const monthData = member.months.get(monthId);
+        if (!monthData) continue;
+        for (const fa of monthData.featureAllocations) {
+          if (fa.featureId === excludeFeatureId) continue;
+          const current = featureTotals.get(fa.featureId) ?? {
+            featureName: fa.featureName,
+            capacity: 0,
+          };
+          featureTotals.set(fa.featureId, {
+            featureName: current.featureName || fa.featureName,
+            capacity: current.capacity + fa.capacity,
+          });
+        }
+      }
+      const otherAllocations = [...featureTotals.values()].filter(
+        (f) => f.capacity > 0,
+      );
+      const usedElsewhere = otherAllocations.reduce(
+        (sum, f) => sum + f.capacity,
+        0,
+      );
+      const limit = columnMemberLimit(column, member.maxCapacity ?? 1);
+      const scale =
+        requestedCapacity <= limit && usedElsewhere > 0
+          ? Math.max(0, (limit - requestedCapacity) / usedElsewhere)
+          : 1;
+      return otherAllocations.map((f) => ({
+        featureName: f.featureName,
+        currentCapacity: f.capacity,
+        nextCapacity: r2(f.capacity * scale),
+      }));
+    },
+    [],
+  );
+
+  const getRebalanceAllPreview = useCallback(
+    (
+      member: MemberRow,
+      column: PeriodColumn,
+      excludeFeatureId: number,
+      requestedCapacity: number,
+    ): { newCapacity: number; othersPreview: RebalancePreview[] } => {
+      const featureTotals = new Map<
+        number,
+        { featureName: string; capacity: number }
+      >();
+      for (const monthId of column.monthIds) {
+        const monthData = member.months.get(monthId);
+        if (!monthData) continue;
+        for (const fa of monthData.featureAllocations) {
+          if (fa.featureId === excludeFeatureId) continue;
+          const current = featureTotals.get(fa.featureId) ?? {
+            featureName: fa.featureName,
+            capacity: 0,
+          };
+          featureTotals.set(fa.featureId, {
+            featureName: current.featureName || fa.featureName,
+            capacity: current.capacity + fa.capacity,
+          });
+        }
+      }
+      const otherAllocations = [...featureTotals.values()].filter(
+        (f) => f.capacity > 0,
+      );
+      const usedElsewhere = otherAllocations.reduce(
+        (sum, f) => sum + f.capacity,
+        0,
+      );
+      const limit = columnMemberLimit(column, member.maxCapacity ?? 1);
+      const total = usedElsewhere + requestedCapacity;
+      const scale = total > limit ? limit / total : 1;
+      return {
+        newCapacity: r2(requestedCapacity * scale),
+        othersPreview: otherAllocations.map((f) => ({
+          featureName: f.featureName,
+          currentCapacity: f.capacity,
+          nextCapacity: r2(f.capacity * scale),
+        })),
+      };
+    },
+    [],
+  );
+
+  const handleUpdateMemberAllocation = useCallback(
+    async (
+      featureId: number,
+      member: MemberRow,
+      column: PeriodColumn,
+      capacity: number,
+    ) => {
+      setBusy(true);
+      try {
+        setCapacityConflict(null);
+        setMaxCapacityOverflow(null);
+        const limit = columnMemberLimit(column, member.maxCapacity ?? 1);
+
+        if (capacity > limit) {
+          const usedElsewhere = column.monthIds.reduce((sum, monthId) => {
+            const monthData = member.months.get(monthId);
+            return (
+              sum +
+              (monthData?.featureAllocations
+                .filter((a) => a.featureId !== featureId)
+                .reduce((s, a) => s + a.capacity, 0) ?? 0)
+            );
+          }, 0);
+          setMaxCapacityOverflow({
+            featureId,
+            periodType: column.type,
+            monthId: column.monthId,
+            quarterId: column.quarterId,
+            memberId: member.id,
+            memberName: member.name,
+            requestedCapacity: capacity,
+            limit,
+            usedElsewhere,
+          });
+          return;
+        }
+
+        const preview = await orpc.allocations.previewMemberAllocation({
+          featureId,
+          memberId: member.id,
+          capacity,
+          periodType: column.type,
+          monthId: column.monthId,
+          quarterId: column.quarterId,
+        });
+        if (preview.hasConflict) {
+          setCapacityConflict({
+            featureId,
+            periodType: column.type,
+            monthId: column.monthId,
+            quarterId: column.quarterId,
+            memberId: member.id,
+            memberName: member.name,
+            requestedCapacity: capacity,
+            usedElsewhere: preview.usedElsewhere,
+            assignableCapacity: preview.assignableCapacity,
+          });
+          return;
+        }
+
+        await history.record("Member capacityを変更", async () => {
+          const result = await orpc.allocations.updateMemberAllocation({
+            featureId,
+            memberId: member.id,
+            capacity,
+            periodType: column.type,
+            monthId: column.monthId,
+            quarterId: column.quarterId,
+            capacityConflictResolution: "fitWithinLimit",
+          });
+          applyAllocationUpdate(result.updatedFeatures);
+        });
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyAllocationUpdate, history],
+  );
+
+  const resolveCapacityConflict = useCallback(
+    async (resolution: CapacityConflictResolution) => {
+      if (!capacityConflict) return;
+      setBusy(true);
+      try {
+        await history.record("Capacity競合を解決", async () => {
+          const result = await orpc.allocations.updateMemberAllocation({
+            featureId: capacityConflict.featureId,
+            periodType: capacityConflict.periodType,
+            monthId: capacityConflict.monthId,
+            quarterId: capacityConflict.quarterId,
+            memberId: capacityConflict.memberId,
+            capacity: capacityConflict.requestedCapacity,
+            capacityConflictResolution: resolution,
+          });
+          applyAllocationUpdate(result.updatedFeatures);
+        });
+        setCapacityConflict(null);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyAllocationUpdate, capacityConflict, history],
+  );
+
+  const resolveMaxCapacityOverflow = useCallback(
+    async (resolution: "fitWithinLimit" | "allowOverflow") => {
+      if (!maxCapacityOverflow) return;
+      setBusy(true);
+      try {
+        await history.record("Max capacity超過を解決", async () => {
+          const result = await orpc.allocations.updateMemberAllocation({
+            featureId: maxCapacityOverflow.featureId,
+            periodType: maxCapacityOverflow.periodType,
+            monthId: maxCapacityOverflow.monthId,
+            quarterId: maxCapacityOverflow.quarterId,
+            memberId: maxCapacityOverflow.memberId,
+            capacity: maxCapacityOverflow.requestedCapacity,
+            capacityConflictResolution: resolution,
+          });
+          applyAllocationUpdate(result.updatedFeatures);
+        });
+        setMaxCapacityOverflow(null);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyAllocationUpdate, maxCapacityOverflow, history],
+  );
 
   // ── API actions ───────────────────────────────────────────────────────────
 
@@ -1033,6 +1594,16 @@ export function MembersView({
                     );
                   } else {
                     for (const [featureId, featureInfo] of featureMap) {
+                      const matchingCapacityConflict =
+                        capacityConflict?.featureId === featureId &&
+                        capacityConflict.memberId === member.id
+                          ? capacityConflict
+                          : null;
+                      const matchingMaxCapacityOverflow =
+                        maxCapacityOverflow?.featureId === featureId &&
+                        maxCapacityOverflow.memberId === member.id
+                          ? maxCapacityOverflow
+                          : null;
                       rows.push(
                         <tr
                           key={`${member.id}-${featureId}`}
@@ -1061,41 +1632,121 @@ export function MembersView({
                             const cellOv =
                               data.totalCapacity > limit + 0.000001;
                             const div = colDivisor(column);
-                            const displayValue = (fa?.capacity ?? 0) / div;
+                            const rawValue =
+                              matchingCapacityConflict?.periodType ===
+                                column.type &&
+                              matchingCapacityConflict?.monthId ===
+                                column.monthId &&
+                              matchingCapacityConflict?.quarterId ===
+                                column.quarterId
+                                ? matchingCapacityConflict.requestedCapacity
+                                : matchingMaxCapacityOverflow?.periodType ===
+                                      column.type &&
+                                    matchingMaxCapacityOverflow?.monthId ===
+                                      column.monthId &&
+                                    matchingMaxCapacityOverflow?.quarterId ===
+                                      column.quarterId
+                                  ? matchingMaxCapacityOverflow.requestedCapacity
+                                  : (fa?.capacity ?? 0);
+                            const displayValue = rawValue / div;
                             const displayLimit = limit / div;
-                            const { bg, fg } = heatBg(
-                              displayValue,
-                              displayLimit,
-                            );
+                            const isConflictCell =
+                              (!!matchingCapacityConflict &&
+                                matchingCapacityConflict.periodType ===
+                                  column.type &&
+                                matchingCapacityConflict.monthId ===
+                                  column.monthId &&
+                                matchingCapacityConflict.quarterId ===
+                                  column.quarterId) ||
+                              (!!matchingMaxCapacityOverflow &&
+                                matchingMaxCapacityOverflow.periodType ===
+                                  column.type &&
+                                matchingMaxCapacityOverflow.monthId ===
+                                  column.monthId &&
+                                matchingMaxCapacityOverflow.quarterId ===
+                                  column.quarterId);
+                            const isOverflow = cellOv || isConflictCell;
                             return (
                               <td
                                 key={column.key}
                                 className="td-member-val"
                                 style={{ width: COL_W, padding: 0 }}
                               >
-                                <div
-                                  className="hm-member-cell"
-                                  style={{
-                                    background: cellOv
-                                      ? "oklch(72% 0.18 25)"
-                                      : bg,
-                                    cursor: "default",
-                                  }}
-                                >
-                                  <span
-                                    className="hm-member-val"
-                                    style={{
-                                      color:
-                                        displayValue === 0
-                                          ? "transparent"
-                                          : cellOv
-                                            ? "#fff"
-                                            : fg,
-                                    }}
-                                  >
-                                    {fmt(displayValue)}
-                                  </span>
-                                </div>
+                                <HeatmapEditableFeatureCell
+                                  value={displayValue}
+                                  maxVal={displayLimit}
+                                  isOverflow={isOverflow}
+                                  onCommit={(v) =>
+                                    void handleUpdateMemberAllocation(
+                                      featureId,
+                                      member,
+                                      column,
+                                      v * div,
+                                    )
+                                  }
+                                />
+                                {matchingMaxCapacityOverflow &&
+                                  matchingMaxCapacityOverflow.periodType ===
+                                    column.type &&
+                                  matchingMaxCapacityOverflow.monthId ===
+                                    column.monthId &&
+                                  matchingMaxCapacityOverflow.quarterId ===
+                                    column.quarterId && (
+                                    <MaxCapacityOverflowPopover
+                                      memberName={
+                                        matchingMaxCapacityOverflow.memberName
+                                      }
+                                      limit={matchingMaxCapacityOverflow.limit}
+                                      requestedCapacity={
+                                        matchingMaxCapacityOverflow.requestedCapacity
+                                      }
+                                      usedElsewhere={
+                                        matchingMaxCapacityOverflow.usedElsewhere
+                                      }
+                                      onResolve={resolveMaxCapacityOverflow}
+                                      onCancel={() =>
+                                        setMaxCapacityOverflow(null)
+                                      }
+                                      displayDivisor={div}
+                                    />
+                                  )}
+                                {matchingCapacityConflict &&
+                                  matchingCapacityConflict.periodType ===
+                                    column.type &&
+                                  matchingCapacityConflict.monthId ===
+                                    column.monthId &&
+                                  matchingCapacityConflict.quarterId ===
+                                    column.quarterId && (
+                                    <CapacityConflictPopover
+                                      memberName={
+                                        matchingCapacityConflict.memberName
+                                      }
+                                      usedElsewhere={
+                                        matchingCapacityConflict.usedElsewhere
+                                      }
+                                      assignableCapacity={
+                                        matchingCapacityConflict.assignableCapacity
+                                      }
+                                      requestedCapacity={
+                                        matchingCapacityConflict.requestedCapacity
+                                      }
+                                      rebalancePreview={getRebalancePreview(
+                                        member,
+                                        column,
+                                        matchingCapacityConflict.featureId,
+                                        matchingCapacityConflict.requestedCapacity,
+                                      )}
+                                      rebalanceAllPreview={getRebalanceAllPreview(
+                                        member,
+                                        column,
+                                        matchingCapacityConflict.featureId,
+                                        matchingCapacityConflict.requestedCapacity,
+                                      )}
+                                      onResolve={resolveCapacityConflict}
+                                      onCancel={() => setCapacityConflict(null)}
+                                      displayDivisor={div}
+                                    />
+                                  )}
                               </td>
                             );
                           })}

@@ -1319,7 +1319,13 @@ function PasteConflictDialog({
 const FEATURE_MAX_VAL = 3;
 const COL_W = 148;
 
-export function CapacityView({ history }: { history: HistoryController }) {
+export function CapacityView({
+  history,
+  externalDataVersion,
+}: {
+  history: HistoryController;
+  externalDataVersion: number;
+}) {
   const [viewMode, setViewMode] = useState<ViewMode>("quarter");
   const [capacityAggMode, setCapacityAggMode] =
     useState<CapacityAggMode>("average");
@@ -1627,8 +1633,9 @@ export function CapacityView({ history }: { history: HistoryController }) {
 
   useEffect(() => {
     void history.version;
+    void externalDataVersion;
     loadAll();
-  }, [loadAll, history.version]);
+  }, [loadAll, history.version, externalDataVersion]);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 

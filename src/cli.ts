@@ -1,7 +1,7 @@
+import { parseArgs } from "node:util";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
-import { parseArgs } from "util";
 import { getNameErrorMessage } from "./name-errors";
 import type { AppRouter } from "./router";
 import { getLocalBaseUrl } from "./runtime-config";

@@ -113,7 +113,6 @@ jobs:
           sha256sum roadmap-tool_Linux_x86_64.tar.gz \
             roadmap-tool_Linux_arm64.tar.gz \
             roadmap-tool_Darwin_arm64.tar.gz \
-            roadmap-tool_Darwin_x86_64.tar.gz \
             roadmap-tool_Windows_x86_64.zip > checksums.txt
           cat checksums.txt
 
@@ -127,6 +126,5 @@ jobs:
             dist/roadmap-tool_Linux_x86_64.tar.gz \
             dist/roadmap-tool_Linux_arm64.tar.gz \
             dist/roadmap-tool_Darwin_arm64.tar.gz \
-            dist/roadmap-tool_Darwin_x86_64.tar.gz \
             dist/roadmap-tool_Windows_x86_64.zip \
             dist/checksums.txt

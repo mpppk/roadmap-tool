@@ -128,7 +128,8 @@ export async function runUpdate(checkOnly: boolean): Promise<void> {
     if (assetName.endsWith(".tar.gz")) {
       await Bun.$`tar -xzf ${archivePath} -C ${extractDir}`.quiet();
     } else {
-      await Bun.$`unzip -o ${archivePath} -d ${extractDir}`.quiet();
+      // .zip on Windows: use built-in tar (Windows 10+ supports zip via bsdtar)
+      await Bun.$`tar -xf ${archivePath} -C ${extractDir}`.quiet();
     }
 
     const binaryName =
@@ -140,7 +141,16 @@ export async function runUpdate(checkOnly: boolean): Promise<void> {
 
     try {
       if (process.platform === "win32") {
-        await Bun.$`cmd /c move /Y ${newBinPath} ${execPath}`;
+        // Windows cannot overwrite a running exe; rename it first (rename is allowed
+        // even for in-use files on NTFS), then move the new binary into its place.
+        // newBinPath is ${execPath}.new — same volume, so rename is atomic.
+        const { rename: fsRename, unlink } = await import("node:fs/promises");
+        const oldBinPath = `${execPath}.old`;
+        try {
+          await unlink(oldBinPath);
+        } catch {}
+        await fsRename(execPath, oldBinPath);
+        await fsRename(newBinPath, execPath);
       } else {
         await Bun.$`chmod +x ${newBinPath}`.quiet();
         await Bun.$`mv ${newBinPath} ${execPath}`.quiet();

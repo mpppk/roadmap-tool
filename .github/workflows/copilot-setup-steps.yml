@@ -28,6 +28,9 @@ jobs:
       - name: Install project dependencies
         run: bun install --frozen-lockfile
 
+      - name: Add node_modules/.bin to PATH
+        run: echo "$GITHUB_WORKSPACE/node_modules/.bin" >> $GITHUB_PATH
+
       - name: Install gyazo-cli
         run: |
           git clone https://github.com/mpppk/gyazo-cli.git /tmp/gyazo-cli

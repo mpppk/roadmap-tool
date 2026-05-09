@@ -28,11 +28,8 @@ jobs:
       - name: Install project dependencies
         run: bun install --frozen-lockfile
 
-      - name: Link project tools to system PATH
-        run: |
-          ln -sf "$GITHUB_WORKSPACE/node_modules/.bin/tsc" /usr/local/bin/tsc
-          ln -sf "$GITHUB_WORKSPACE/node_modules/.bin/biome" /usr/local/bin/biome
-          ln -sf "$GITHUB_WORKSPACE/node_modules/.bin/drizzle-kit" /usr/local/bin/drizzle-kit
+      - name: Install TypeScript globally
+        run: npm install -g typescript
 
       - name: Install gyazo-cli
         run: |

@@ -238,6 +238,22 @@ bun run db:push      # スキーマを直接 DB へ反映（開発時のみ）
 bun run db:studio    # Drizzle Studio を開く（GUI でデータ確認）
 ```
 
+### データベースファイルの場所
+
+デフォルトの DB ファイルは [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/0.8/) に従って以下の場所に保存されます。
+
+| 条件 | パス |
+|---|---|
+| `ROADMAP_DB` 環境変数が設定されている | その値をそのまま使用 |
+| `XDG_DATA_HOME` が絶対パスで設定されている | `$XDG_DATA_HOME/roadmap-tool/db.sqlite` |
+| それ以外 | `$HOME/.local/share/roadmap-tool/db.sqlite` |
+
+DB ファイルのパスを変更したい場合は `ROADMAP_DB` 環境変数で上書きできます。
+
+```sh
+ROADMAP_DB=/path/to/my.sqlite bun dev
+```
+
 ## CLI
 
 サーバーが起動している状態で、機能・メンバーの管理をコマンドラインから行えます。CLI は `PORT` で指定されたローカルサーバーに接続します（未指定時は `http://localhost:3000`）。パッケージとして取得できる環境では `bunx roadmap-tool` で実行できます。

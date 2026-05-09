@@ -486,6 +486,37 @@
 .tr-member.is-overflow td {
   background: var(--cv-red-bg);
 }
+@keyframes highlight-fade {
+  0% {
+    background: var(--cv-accent-bg, #dbeafe);
+  }
+  70% {
+    background: var(--cv-accent-bg, #dbeafe);
+  }
+  100% {
+    background: var(--bg);
+  }
+}
+.tr-member.is-highlighted td {
+  animation: highlight-fade 3s ease forwards;
+}
+.feature-link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: inherit;
+  font-family: inherit;
+  color: var(--cv-text-2);
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--cv-text-3);
+}
+.feature-link-btn:hover {
+  color: var(--cv-accent);
+  text-decoration-color: var(--cv-accent);
+}
 .td-member-label {
   padding: 0 14px 0 48px;
   position: sticky;

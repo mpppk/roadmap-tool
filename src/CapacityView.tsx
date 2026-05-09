@@ -9,12 +9,12 @@ import {
   Trash2,
 } from "lucide-react";
 import {
+  type MouseEvent as ReactMouseEvent,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type MouseEvent as ReactMouseEvent,
 } from "react";
 import "./capacity.css";
 import { parseCapacityTSV } from "./capacity-clipboard";
@@ -1395,6 +1395,11 @@ export function CapacityView({
     useState<PendingCapacityConflict | null>(null);
   const [maxCapacityOverflow, setMaxCapacityOverflow] =
     useState<PendingMaxCapacityOverflow | null>(null);
+  const [highlightTarget, setHighlightTarget] = useState<{
+    featureId: number;
+    memberId: number;
+  } | null>(null);
+  const highlightRowRef = useRef<HTMLTableRowElement | null>(null);
 
   // ── Selection / clipboard state ─────────────────────────────────────────
   const [selStartRow, setSelStartRow] = useState<number | null>(null);
@@ -1715,6 +1720,38 @@ export function CapacityView({
     void externalDataVersion;
     loadAll();
   }, [loadAll, history.version, externalDataVersion]);
+
+  // URLパラメータでハイライト対象が指定されている場合、対象フィーチャーを展開してハイライトセット
+  useEffect(() => {
+    if (loading) return;
+    const params = new URLSearchParams(window.location.search);
+    const featureId = params.get("featureId");
+    const memberId = params.get("memberId");
+    if (!featureId || !memberId) return;
+    const fid = parseInt(featureId, 10);
+    const mid = parseInt(memberId, 10);
+    if (Number.isNaN(fid) || Number.isNaN(mid)) return;
+    setFeatureRows((rows) =>
+      rows.map((r) => (r.id === fid ? { ...r, expanded: true } : r)),
+    );
+    setHighlightTarget({ featureId: fid, memberId: mid });
+    // URLパラメータをクリア
+    const url = new URL(window.location.href);
+    url.searchParams.delete("featureId");
+    url.searchParams.delete("memberId");
+    window.history.replaceState(null, "", url.toString());
+  }, [loading]);
+
+  // ハイライト行が描画されたらスクロールして、一定時間後にハイライトを消す
+  useEffect(() => {
+    if (!highlightTarget || !highlightRowRef.current) return;
+    highlightRowRef.current.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+    const timer = setTimeout(() => setHighlightTarget(null), 3000);
+    return () => clearTimeout(timer);
+  }, [highlightTarget]);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -3257,10 +3294,14 @@ export function CapacityView({
                         );
                       });
 
+                      const isHighlighted =
+                        highlightTarget?.featureId === feature.id &&
+                        highlightTarget?.memberId === member.id;
                       rows.push(
                         <tr
                           key={`${feature.id}-${member.id}`}
-                          className={`tr-member${isOverflow ? " is-overflow" : ""}`}
+                          ref={isHighlighted ? highlightRowRef : null}
+                          className={`tr-member${isOverflow ? " is-overflow" : ""}${isHighlighted ? " is-highlighted" : ""}`}
                         >
                           <td className="td-label td-member-label">
                             <div className="member-label-row">

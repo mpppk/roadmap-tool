@@ -220,8 +220,8 @@
   z-index: 10;
 }
 
-/* Feature row */
-.tr-epic td {
+/* Epic row */
+.tr-initiative td {
   background: color-mix(in oklch, var(--surface) 86%, var(--cv-accent) 14%);
   border-bottom: 1px solid var(--border-strong);
 }
@@ -241,12 +241,12 @@
 .drag-handle:active {
   cursor: grabbing;
 }
-.epic-total-cell {
+.initiative-total-cell {
   text-align: center;
   vertical-align: middle;
   position: relative;
 }
-.epic-overflow-dot {
+.initiative-overflow-dot {
   position: absolute;
   top: 5px;
   right: 5px;
@@ -255,7 +255,7 @@
   border-radius: 50%;
   background: var(--cv-red);
 }
-.tr-feature td {
+.tr-epic td {
   background: var(--surface);
 }
 .cv-section-sep td {
@@ -283,7 +283,7 @@
   gap: 8px;
   height: 100%;
 }
-.tr-capacity-feature .td-label-inner {
+.tr-capacity-epic .td-label-inner {
   padding-left: 16px;
 }
 .toggle-btn {
@@ -305,7 +305,7 @@
 .toggle-btn:hover {
   background: var(--bg);
 }
-.feature-name {
+.epic-name {
   font-weight: 500;
   color: var(--cv-text);
   font-size: 13px;
@@ -316,17 +316,17 @@
   font-family: inherit;
   text-align: left;
 }
-.tr-epic .feature-name {
+.tr-initiative .epic-name {
   font-weight: 700;
 }
-.feature-name-row {
+.epic-name-row {
   display: flex;
   align-items: center;
   gap: 2px;
   min-width: 0;
 }
-.feature-meta-btn,
-.feature-details-icon-btn {
+.epic-meta-btn,
+.epic-details-icon-btn {
   width: 22px;
   height: 22px;
   border: 1px solid transparent;
@@ -340,24 +340,24 @@
   flex-shrink: 0;
   padding: 0;
 }
-.feature-meta-btn:hover,
-.feature-details-icon-btn:hover {
+.epic-meta-btn:hover,
+.epic-details-icon-btn:hover {
   background: var(--bg);
   color: var(--cv-text);
   border-color: var(--border);
 }
-.feature-meta-btn.active {
+.epic-meta-btn.active {
   color: var(--cv-accent);
 }
-.feature-details-icon-btn:disabled {
+.epic-details-icon-btn:disabled {
   opacity: 0.35;
   cursor: not-allowed;
 }
-.feature-details-icon-btn.danger:hover {
+.epic-details-icon-btn.danger:hover {
   color: var(--cv-red);
   background: var(--cv-red-bg);
 }
-.feature-name-input {
+.epic-name-input {
   font-weight: 500;
   font-size: 13px;
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
@@ -376,7 +376,7 @@
   gap: 8px;
   min-width: 0;
 }
-.feature-name-input[aria-invalid="true"] {
+.epic-name-input[aria-invalid="true"] {
   border-bottom-color: var(--cv-red);
 }
 .name-warning,
@@ -500,7 +500,7 @@
 .tr-member.is-highlighted td {
   animation: highlight-fade 3s ease forwards;
 }
-.feature-link-btn {
+.epic-link-btn {
   background: none;
   border: none;
   padding: 0;
@@ -513,7 +513,7 @@
   text-underline-offset: 2px;
   text-decoration-color: var(--cv-text-3);
 }
-.feature-link-btn:hover {
+.epic-link-btn:hover {
   color: var(--cv-accent);
   text-decoration-color: var(--cv-accent);
 }
@@ -530,7 +530,7 @@
   font-size: 12px;
   color: var(--cv-text-2);
 }
-.member-feature-epic {
+.member-epic-initiative {
   display: block;
   margin-top: 2px;
   font-size: 10px;
@@ -785,7 +785,7 @@
   font-size: 13px;
 }
 
-/* Member label in feature expansion */
+/* Member label in epic expansion */
 .member-label-row {
   display: flex;
   align-items: center;
@@ -913,24 +913,24 @@
   max-height: 160px;
   overflow-y: auto;
 }
-.feature-details-dialog {
+.epic-details-dialog {
   width: min(760px, calc(100vw - 40px));
   max-width: 760px;
 }
-.feature-details-header {
+.epic-details-header {
   display: flex;
   align-items: center;
   gap: 12px;
 }
-.feature-details-label {
+.epic-details-label {
   display: grid;
   gap: 5px;
   margin-bottom: 12px;
   color: var(--cv-text-2);
   font-size: 12px;
 }
-.feature-details-input,
-.feature-details-textarea {
+.epic-details-input,
+.epic-details-textarea {
   width: 100%;
   box-sizing: border-box;
   border: 1px solid var(--border-strong);
@@ -941,16 +941,16 @@
   font-size: 12px;
   padding: 6px 8px;
 }
-.feature-details-textarea {
+.epic-details-textarea {
   min-height: 110px;
   resize: vertical;
   line-height: 1.5;
 }
-.feature-details-links {
+.epic-details-links {
   display: grid;
   gap: 6px;
 }
-.feature-details-add-link-btn {
+.epic-details-add-link-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -963,15 +963,15 @@
   font-size: 12px;
   cursor: pointer;
 }
-.feature-details-add-link-btn:hover:not(:disabled) {
+.epic-details-add-link-btn:hover:not(:disabled) {
   background: var(--surface-hover, rgba(0, 0, 0, 0.05));
   color: var(--cv-text);
 }
-.feature-details-add-link-btn:disabled {
+.epic-details-add-link-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
-.feature-details-link-row {
+.epic-details-link-row {
   display: grid;
   grid-template-columns: minmax(120px, 0.8fr) minmax(180px, 1.5fr) repeat(
       4,
@@ -980,7 +980,7 @@
   gap: 6px;
   align-items: center;
 }
-.feature-details-error {
+.epic-details-error {
   display: block;
   margin: 0 0 12px;
 }

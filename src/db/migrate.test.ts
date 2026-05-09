@@ -80,16 +80,16 @@ describe("DB migrations", () => {
     sqlite.close();
   });
 
-  test("normalizes existing duplicate and blank feature/member names", () => {
+  test("normalizes existing duplicate and blank epic/member names", () => {
     const now = Date.now();
-    const insertFeature = sqlite.prepare(
+    const insertEpic = sqlite.prepare(
       "INSERT INTO features (name, created_at) VALUES (?, ?)",
     );
-    insertFeature.run("Auth", now);
-    insertFeature.run(" Auth ", now);
-    insertFeature.run("Auth-2", now);
-    insertFeature.run(" Auth-2 ", now);
-    insertFeature.run("   ", now);
+    insertEpic.run("Auth", now);
+    insertEpic.run(" Auth ", now);
+    insertEpic.run("Auth-2", now);
+    insertEpic.run(" Auth-2 ", now);
+    insertEpic.run("   ", now);
 
     const insertMember = sqlite.prepare(
       "INSERT INTO members (name, created_at) VALUES (?, ?)",
@@ -101,8 +101,8 @@ describe("DB migrations", () => {
 
     runMigrations(sqlite);
 
-    const featureNames = sqlite
-      .prepare<{ name: string }, []>("SELECT name FROM features ORDER BY id")
+    const epicNames = sqlite
+      .prepare<{ name: string }, []>("SELECT name FROM epics ORDER BY id")
       .all()
       .map((row) => row.name);
     const memberNames = sqlite
@@ -116,7 +116,7 @@ describe("DB migrations", () => {
       .all()
       .map((row) => row.name);
 
-    expect(featureNames).toEqual([
+    expect(epicNames).toEqual([
       "Auth",
       "Auth-3",
       "Auth-2",
@@ -134,40 +134,40 @@ describe("DB migrations", () => {
       .run("Auth", now);
 
     runMigrations(sqlite);
-    const defaultEpic = sqlite
+    const defaultInitiative = sqlite
       .prepare<{ id: number; name: string; is_default: number }, []>(
-        "SELECT id, name, is_default FROM epics WHERE is_default = 1",
+        "SELECT id, name, is_default FROM initiatives WHERE is_default = 1",
       )
       .get();
-    expect(defaultEpic?.name).toBe("未分類");
+    expect(defaultInitiative?.name).toBe("未分類");
 
     expectSqliteError(() => {
       sqlite
         .prepare(
-          "INSERT INTO features (name, epic_id, position, created_at) VALUES (?, ?, ?, ?)",
+          "INSERT INTO epics (name, initiative_id, position, created_at) VALUES (?, ?, ?, ?)",
         )
-        .run("Auth", defaultEpic!.id, 1, now);
+        .run("Auth", defaultInitiative!.id, 1, now);
     }, "SQLITE_CONSTRAINT_UNIQUE");
 
     expectSqliteError(() => {
       sqlite
         .prepare(
-          "INSERT INTO features (name, epic_id, position, created_at) VALUES (?, ?, ?, ?)",
+          "INSERT INTO epics (name, initiative_id, position, created_at) VALUES (?, ?, ?, ?)",
         )
-        .run(" Auth ", defaultEpic!.id, 1, now);
+        .run(" Auth ", defaultInitiative!.id, 1, now);
     }, "SQLITE_CONSTRAINT_CHECK");
 
     sqlite
       .prepare(
-        "INSERT INTO features (name, epic_id, position, created_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO epics (name, initiative_id, position, created_at) VALUES (?, ?, ?, ?)",
       )
-      .run("auth", defaultEpic!.id, 1, now);
+      .run("auth", defaultInitiative!.id, 1, now);
     sqlite
       .prepare("INSERT INTO members (name, created_at) VALUES (?, ?)")
       .run("Auth", now);
   });
 
-  test("adds feature metadata columns and links table", () => {
+  test("adds epic metadata columns and links table", () => {
     const now = Date.now();
     sqlite
       .prepare("INSERT INTO features (name, created_at) VALUES (?, ?)")
@@ -175,40 +175,40 @@ describe("DB migrations", () => {
 
     runMigrations(sqlite);
 
-    const feature = sqlite
+    const epic = sqlite
       .prepare<
         {
           id: number;
           description: string | null;
-          epic_id: number;
+          initiative_id: number;
           position: number;
         },
         []
       >(
-        "SELECT id, description, epic_id, position FROM features WHERE name = 'Auth'",
+        "SELECT id, description, initiative_id, position FROM epics WHERE name = 'Auth'",
       )
       .get();
-    expect(feature?.description).toBeNull();
-    expect(feature?.epic_id).toBeGreaterThan(0);
-    expect(feature?.position).toBe(0);
+    expect(epic?.description).toBeNull();
+    expect(epic?.initiative_id).toBeGreaterThan(0);
+    expect(epic?.position).toBe(0);
 
     sqlite
       .prepare(
-        "INSERT INTO feature_links (feature_id, title, url, position) VALUES (?, ?, ?, ?)",
+        "INSERT INTO epic_links (epic_id, title, url, position) VALUES (?, ?, ?, ?)",
       )
-      .run(feature!.id, "Spec", "https://example.com/spec", 0);
+      .run(epic!.id, "Spec", "https://example.com/spec", 0);
 
     const linkCount = sqlite
       .prepare<{ count: number }, []>(
-        "SELECT count(*) AS count FROM feature_links",
+        "SELECT count(*) AS count FROM epic_links",
       )
       .get();
     expect(linkCount?.count).toBe(1);
 
-    sqlite.prepare("DELETE FROM features WHERE id = ?").run(feature!.id);
+    sqlite.prepare("DELETE FROM epics WHERE id = ?").run(epic!.id);
     const remainingLinks = sqlite
       .prepare<{ count: number }, []>(
-        "SELECT count(*) AS count FROM feature_links",
+        "SELECT count(*) AS count FROM epic_links",
       )
       .get();
     expect(remainingLinks?.count).toBe(0);

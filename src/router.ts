@@ -4,10 +4,10 @@ import * as z from "zod";
 import type { db as DbType } from "./db/index";
 import {
   epicLinks,
+  epicMonths,
   epics,
-  featureLinks,
-  featureMonths,
-  features,
+  initiativeLinks,
+  initiatives,
   memberMonthAllocations,
   members,
   months,
@@ -29,24 +29,24 @@ const capacityConflictResolutionSchema = z.enum([
   "rebalanceAllProportionally",
 ]);
 
-const snapshotEpicSchema = z.object({
+const snapshotInitiativeschema = z.object({
   id: z.number().int(),
   name: z.string(),
   description: z.string().nullable(),
   position: z.number().int(),
   isDefault: z.boolean(),
 });
-const snapshotFeatureSchema = z.object({
+const snapshotEpicSchema = z.object({
   id: z.number().int(),
-  epicId: z.number().int(),
+  initiativeId: z.number().int(),
   name: z.string(),
   description: z.string().nullable(),
   position: z.number().int(),
   createdAt: z.number().int(),
 });
-const snapshotFeatureLinkSchema = z.object({
+const snapshotEpicLinkSchema = z.object({
   id: z.number().int(),
-  featureId: z.number().int(),
+  epicId: z.number().int(),
   title: z.string(),
   url: z.string(),
   position: z.number().int(),
@@ -68,27 +68,27 @@ const snapshotMonthSchema = z.object({
   month: z.number().int(),
   quarterId: z.number().int(),
 });
-const snapshotFeatureMonthSchema = z.object({
+const snapshotEpicMonthSchema = z.object({
   id: z.number().int(),
-  featureId: z.number().int(),
+  epicId: z.number().int(),
   monthId: z.number().int(),
   totalCapacity: z.number(),
 });
 const snapshotMemberMonthAllocationSchema = z.object({
   id: z.number().int(),
-  featureId: z.number().int(),
+  epicId: z.number().int(),
   monthId: z.number().int(),
   memberId: z.number().int(),
   capacity: z.number(),
 });
 const roadmapSnapshotSchema = z.object({
+  initiatives: z.array(snapshotInitiativeschema),
   epics: z.array(snapshotEpicSchema),
-  features: z.array(snapshotFeatureSchema),
-  featureLinks: z.array(snapshotFeatureLinkSchema),
+  epicLinks: z.array(snapshotEpicLinkSchema),
   members: z.array(snapshotMemberSchema),
   quarters: z.array(snapshotQuarterSchema),
   months: z.array(snapshotMonthSchema),
-  featureMonths: z.array(snapshotFeatureMonthSchema),
+  epicMonths: z.array(snapshotEpicMonthSchema),
   memberMonthAllocations: z.array(snapshotMemberMonthAllocationSchema),
 });
 
@@ -99,19 +99,19 @@ const FEATURE_LINK_TITLE_MAX_LENGTH = 100;
 const FEATURE_LINK_URL_MAX_LENGTH = 2048;
 const FEATURE_LINK_MAX_COUNT = 20;
 
-const featureLinkInputSchema = z.object({
+const epicLinkInputSchema = z.object({
   title: z.string(),
   url: z.string(),
 });
 
-type NormalizedFeatureLinkInput = {
+type NormalizedEpicLinkInput = {
   title: string;
   url: string;
   position: number;
 };
 
-type FeatureRowRecord = typeof features.$inferSelect;
 type EpicRowRecord = typeof epics.$inferSelect;
+type InitiativeRowRecord = typeof initiatives.$inferSelect;
 
 type SQLiteConstraintError = {
   code?: string;
@@ -124,11 +124,11 @@ function normalizeNameInput(name: string, resource: NameResource): string {
   return normalized;
 }
 
-function throwFeatureMetadataError(message: string): never {
+function throwEpicMetadataError(message: string): never {
   throw new ORPCError("BAD_REQUEST", { message });
 }
 
-function normalizeFeatureDescriptionInput(
+function normalizeEpicDescriptionInput(
   description: string | null | undefined,
 ): string | null | undefined {
   if (description === undefined) return undefined;
@@ -136,19 +136,19 @@ function normalizeFeatureDescriptionInput(
   const normalized = description.trim();
   if (normalized.length === 0) return null;
   if (normalized.length > DESCRIPTION_MAX_LENGTH) {
-    throwFeatureMetadataError(
+    throwEpicMetadataError(
       `説明は${DESCRIPTION_MAX_LENGTH}文字以内で入力してください。`,
     );
   }
   return normalized;
 }
 
-function normalizeFeatureLinksInput(
+function normalizeEpicLinksInput(
   links: Array<{ title: string; url: string }> | undefined,
-): NormalizedFeatureLinkInput[] | undefined {
+): NormalizedEpicLinkInput[] | undefined {
   if (links === undefined) return undefined;
 
-  const normalizedLinks: NormalizedFeatureLinkInput[] = [];
+  const normalizedLinks: NormalizedEpicLinkInput[] = [];
   const seenUrls = new Set<string>();
 
   for (const link of links) {
@@ -156,12 +156,12 @@ function normalizeFeatureLinksInput(
     const url = link.url.trim();
     if (title.length === 0 || url.length === 0) continue;
     if (title.length > FEATURE_LINK_TITLE_MAX_LENGTH) {
-      throwFeatureMetadataError(
+      throwEpicMetadataError(
         `リンク名は${FEATURE_LINK_TITLE_MAX_LENGTH}文字以内で入力してください。`,
       );
     }
     if (url.length > FEATURE_LINK_URL_MAX_LENGTH) {
-      throwFeatureMetadataError(
+      throwEpicMetadataError(
         `リンクURLは${FEATURE_LINK_URL_MAX_LENGTH}文字以内で入力してください。`,
       );
     }
@@ -169,18 +169,18 @@ function normalizeFeatureLinksInput(
     try {
       parsed = new URL(url);
     } catch {
-      throwFeatureMetadataError(
+      throwEpicMetadataError(
         "リンクURLは http:// または https:// で始まるURLを入力してください。",
       );
     }
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      throwFeatureMetadataError(
+      throwEpicMetadataError(
         "リンクURLは http:// または https:// で始まるURLを入力してください。",
       );
     }
     if (seenUrls.has(url)) {
-      throwFeatureMetadataError(
-        "同じURLのリンクは1つのFeatureに複数登録できません。",
+      throwEpicMetadataError(
+        "同じURLのリンクは1つのEpicに複数登録できません。",
       );
     }
     seenUrls.add(url);
@@ -192,8 +192,8 @@ function normalizeFeatureLinksInput(
   }
 
   if (normalizedLinks.length > FEATURE_LINK_MAX_COUNT) {
-    throwFeatureMetadataError(
-      `リンクは1つのFeatureにつき${FEATURE_LINK_MAX_COUNT}件まで登録できます。`,
+    throwEpicMetadataError(
+      `リンクは1つのEpicにつき${FEATURE_LINK_MAX_COUNT}件まで登録できます。`,
     );
   }
 
@@ -224,11 +224,11 @@ function rethrowNameMutationError(
   const sqliteError = asSQLiteConstraintError(error);
   const message = sqliteError?.message ?? "";
   const tableName =
-    resource === "feature"
-      ? "features"
+    resource === "epic"
+      ? "epics"
       : resource === "member"
         ? "members"
-        : "epics";
+        : "initiatives";
   if (
     sqliteError?.code === "SQLITE_CONSTRAINT_UNIQUE" &&
     (message.includes(`${tableName}.name`) ||
@@ -247,20 +247,17 @@ function rethrowNameMutationError(
   throw error;
 }
 
-async function assertFeatureNameAvailable(
+async function assertEpicNameAvailable(
   db: typeof DbType,
   name: string,
   excludeId?: number,
 ): Promise<void> {
   const where =
     excludeId === undefined
-      ? sql`trim(${features.name}) = ${name}`
-      : and(sql`trim(${features.name}) = ${name}`, ne(features.id, excludeId));
-  const existing = await db
-    .select({ id: features.id })
-    .from(features)
-    .where(where);
-  if (existing.length > 0) throwNameError("feature", "DUPLICATE_NAME");
+      ? sql`trim(${epics.name}) = ${name}`
+      : and(sql`trim(${epics.name}) = ${name}`, ne(epics.id, excludeId));
+  const existing = await db.select({ id: epics.id }).from(epics).where(where);
+  if (existing.length > 0) throwNameError("epic", "DUPLICATE_NAME");
 }
 
 async function assertMemberNameAvailable(
@@ -279,17 +276,31 @@ async function assertMemberNameAvailable(
   if (existing.length > 0) throwNameError("member", "DUPLICATE_NAME");
 }
 
-async function assertEpicNameAvailable(
+async function assertInitiativeNameAvailable(
   db: typeof DbType,
   name: string,
   excludeId?: number,
 ): Promise<void> {
   const where =
     excludeId === undefined
-      ? sql`trim(${epics.name}) = ${name}`
-      : and(sql`trim(${epics.name}) = ${name}`, ne(epics.id, excludeId));
-  const existing = await db.select({ id: epics.id }).from(epics).where(where);
-  if (existing.length > 0) throwNameError("epic", "DUPLICATE_NAME");
+      ? sql`trim(${initiatives.name}) = ${name}`
+      : and(
+          sql`trim(${initiatives.name}) = ${name}`,
+          ne(initiatives.id, excludeId),
+        );
+  const existing = await db
+    .select({ id: initiatives.id })
+    .from(initiatives)
+    .where(where);
+  if (existing.length > 0) throwNameError("initiative", "DUPLICATE_NAME");
+}
+
+async function getInitiativeLinks(db: typeof DbType, initiativeId: number) {
+  return db
+    .select()
+    .from(initiativeLinks)
+    .where(eq(initiativeLinks.initiativeId, initiativeId))
+    .orderBy(asc(initiativeLinks.position), asc(initiativeLinks.id));
 }
 
 async function getEpicLinks(db: typeof DbType, epicId: number) {
@@ -300,12 +311,14 @@ async function getEpicLinks(db: typeof DbType, epicId: number) {
     .orderBy(asc(epicLinks.position), asc(epicLinks.id));
 }
 
-async function getFeatureLinks(db: typeof DbType, featureId: number) {
-  return db
-    .select()
-    .from(featureLinks)
-    .where(eq(featureLinks.featureId, featureId))
-    .orderBy(asc(featureLinks.position), asc(featureLinks.id));
+async function buildInitiativeDto(
+  db: typeof DbType,
+  initiative: InitiativeRowRecord,
+) {
+  return {
+    ...initiative,
+    links: await getInitiativeLinks(db, initiative.id),
+  };
 }
 
 async function buildEpicDto(db: typeof DbType, epic: EpicRowRecord) {
@@ -315,17 +328,29 @@ async function buildEpicDto(db: typeof DbType, epic: EpicRowRecord) {
   };
 }
 
-async function buildFeatureDto(db: typeof DbType, feature: FeatureRowRecord) {
-  return {
-    ...feature,
-    links: await getFeatureLinks(db, feature.id),
-  };
+async function saveInitiativeLinks(
+  db: typeof DbType,
+  initiativeId: number,
+  links: NormalizedEpicLinkInput[],
+) {
+  await db
+    .delete(initiativeLinks)
+    .where(eq(initiativeLinks.initiativeId, initiativeId));
+  if (links.length === 0) return;
+  await db.insert(initiativeLinks).values(
+    links.map((link) => ({
+      initiativeId,
+      title: link.title,
+      url: link.url,
+      position: link.position,
+    })),
+  );
 }
 
 async function saveEpicLinks(
   db: typeof DbType,
   epicId: number,
-  links: NormalizedFeatureLinkInput[],
+  links: NormalizedEpicLinkInput[],
 ) {
   await db.delete(epicLinks).where(eq(epicLinks.epicId, epicId));
   if (links.length === 0) return;
@@ -339,87 +364,70 @@ async function saveEpicLinks(
   );
 }
 
-async function saveFeatureLinks(
-  db: typeof DbType,
-  featureId: number,
-  links: NormalizedFeatureLinkInput[],
-) {
-  await db.delete(featureLinks).where(eq(featureLinks.featureId, featureId));
-  if (links.length === 0) return;
-  await db.insert(featureLinks).values(
-    links.map((link) => ({
-      featureId,
-      title: link.title,
-      url: link.url,
-      position: link.position,
-    })),
-  );
-}
-
-async function getDefaultEpicId(db: typeof DbType): Promise<number> {
-  const [defaultEpic] = await db
-    .select({ id: epics.id })
-    .from(epics)
-    .where(eq(epics.isDefault, true));
-  if (defaultEpic) return defaultEpic.id;
+async function getDefaultInitiativeId(db: typeof DbType): Promise<number> {
+  const [defaultInitiative] = await db
+    .select({ id: initiatives.id })
+    .from(initiatives)
+    .where(eq(initiatives.isDefault, true));
+  if (defaultInitiative) return defaultInitiative.id;
 
   const [fallback] = await db
-    .select({ id: epics.id })
-    .from(epics)
-    .orderBy(asc(epics.position), asc(epics.id))
+    .select({ id: initiatives.id })
+    .from(initiatives)
+    .orderBy(asc(initiatives.position), asc(initiatives.id))
     .limit(1);
   if (fallback) return fallback.id;
 
   const [created] = await db
-    .insert(epics)
+    .insert(initiatives)
     .values({ name: "未分類", position: 0, isDefault: true })
     .returning();
-  if (!created) throw new Error("Failed to create default Epic");
+  if (!created) throw new Error("Failed to create default Initiative");
   return created.id;
 }
 
-async function getOrCreateEpicByName(
+async function getOrCreateInitiativeByName(
   db: typeof DbType,
   name: string | null | undefined,
 ): Promise<number> {
   const normalized =
     name === undefined || name === null || name.trim().length === 0
       ? null
-      : normalizeNameInput(name, "epic");
-  if (normalized === null) return getDefaultEpicId(db);
+      : normalizeNameInput(name, "initiative");
+  if (normalized === null) return getDefaultInitiativeId(db);
 
   const [existing] = await db
-    .select({ id: epics.id })
-    .from(epics)
-    .where(sql`trim(${epics.name}) = ${normalized}`);
+    .select({ id: initiatives.id })
+    .from(initiatives)
+    .where(sql`trim(${initiatives.name}) = ${normalized}`);
   if (existing) return existing.id;
 
   const [last] = await db
-    .select({ position: epics.position })
-    .from(epics)
-    .orderBy(sql`${epics.position} DESC`, sql`${epics.id} DESC`)
+    .select({ position: initiatives.position })
+    .from(initiatives)
+    .orderBy(sql`${initiatives.position} DESC`, sql`${initiatives.id} DESC`)
     .limit(1);
   const [created] = await db
-    .insert(epics)
+    .insert(initiatives)
     .values({
       name: normalized,
       position: (last?.position ?? -1) + 1,
       isDefault: false,
     })
     .returning();
-  if (!created) throw new Error(`Failed to create Epic: ${normalized}`);
+  if (!created) throw new Error(`Failed to create Initiative: ${normalized}`);
   return created.id;
 }
 
-async function nextFeaturePosition(
+async function nextEpicPosition(
   db: typeof DbType,
-  epicId: number,
+  initiativeId: number,
 ): Promise<number> {
   const [last] = await db
-    .select({ position: features.position })
-    .from(features)
-    .where(eq(features.epicId, epicId))
-    .orderBy(sql`${features.position} DESC`, sql`${features.id} DESC`)
+    .select({ position: epics.position })
+    .from(epics)
+    .where(eq(epics.initiativeId, initiativeId))
+    .orderBy(sql`${epics.position} DESC`, sql`${epics.id} DESC`)
     .limit(1);
   return (last?.position ?? -1) + 1;
 }
@@ -511,7 +519,7 @@ async function getMemberUsageInMonth(
   db: typeof DbType,
   memberId: number,
   monthId: number,
-  excludeFeatureId: number,
+  excludeEpicId: number,
 ): Promise<number> {
   const rows = await db
     .select({
@@ -522,26 +530,21 @@ async function getMemberUsageInMonth(
       and(
         eq(memberMonthAllocations.memberId, memberId),
         eq(memberMonthAllocations.monthId, monthId),
-        ne(memberMonthAllocations.featureId, excludeFeatureId),
+        ne(memberMonthAllocations.epicId, excludeEpicId),
       ),
     );
   return rows[0]?.total ?? 0;
 }
 
-async function getFeatureMonthRow(
+async function getEpicMonthRow(
   db: typeof DbType,
-  featureId: number,
+  epicId: number,
   monthId: number,
 ) {
   const rows = await db
     .select()
-    .from(featureMonths)
-    .where(
-      and(
-        eq(featureMonths.featureId, featureId),
-        eq(featureMonths.monthId, monthId),
-      ),
-    );
+    .from(epicMonths)
+    .where(and(eq(epicMonths.epicId, epicId), eq(epicMonths.monthId, monthId)));
   return rows[0] ?? null;
 }
 
@@ -550,34 +553,34 @@ function normalizeCapacity(value: number): number {
   return Math.abs(rounded) < 1e-9 ? 0 : rounded;
 }
 
-async function upsertFeatureMonthTotal(
+async function upsertEpicMonthTotal(
   db: typeof DbType,
-  featureId: number,
+  epicId: number,
   monthId: number,
   totalCapacity: number,
 ) {
-  const existing = await getFeatureMonthRow(db, featureId, monthId);
+  const existing = await getEpicMonthRow(db, epicId, monthId);
   if (existing) {
     await db
-      .update(featureMonths)
+      .update(epicMonths)
       .set({ totalCapacity: normalizeCapacity(totalCapacity) })
-      .where(eq(featureMonths.id, existing.id));
+      .where(eq(epicMonths.id, existing.id));
     return;
   }
 
-  await db.insert(featureMonths).values({
-    featureId,
+  await db.insert(epicMonths).values({
+    epicId,
     monthId,
     totalCapacity: normalizeCapacity(totalCapacity),
   });
 }
 
-async function buildFeatureMonthResult(
+async function buildEpicMonthResult(
   db: typeof DbType,
-  featureId: number,
+  epicId: number,
   monthId: number,
 ): Promise<MonthAllocationResult> {
-  const fm = await getFeatureMonthRow(db, featureId, monthId);
+  const fm = await getEpicMonthRow(db, epicId, monthId);
   const totalCapacity = fm?.totalCapacity ?? 0;
 
   const allocs = await db
@@ -585,7 +588,7 @@ async function buildFeatureMonthResult(
     .from(memberMonthAllocations)
     .where(
       and(
-        eq(memberMonthAllocations.featureId, featureId),
+        eq(memberMonthAllocations.epicId, epicId),
         eq(memberMonthAllocations.monthId, monthId),
       ),
     );
@@ -602,60 +605,60 @@ async function buildFeatureMonthResult(
   };
 }
 
-async function buildFeatureMonthsResult(
+async function buildEpicMonthsResult(
   db: typeof DbType,
-  featureId: number,
+  epicId: number,
   monthIds: number[],
 ) {
   const results = await Promise.all(
-    monthIds.map((monthId) => buildFeatureMonthResult(db, featureId, monthId)),
+    monthIds.map((monthId) => buildEpicMonthResult(db, epicId, monthId)),
   );
   return { months: results };
 }
 
 async function buildMemberAllocationUpdateResult(
   db: typeof DbType,
-  featureId: number,
+  epicId: number,
   monthIds: number[],
-  affectedFeatureIds: Iterable<number>,
+  affectedEpicIds: Iterable<number>,
 ) {
-  const updatedFeatures = [];
-  for (const affectedFeatureId of [...new Set(affectedFeatureIds)]) {
-    updatedFeatures.push({
-      featureId: affectedFeatureId,
+  const updatedEpics = [];
+  for (const affectedEpicId of [...new Set(affectedEpicIds)]) {
+    updatedEpics.push({
+      epicId: affectedEpicId,
       months: await Promise.all(
         monthIds.map((monthId) =>
-          buildFeatureMonthResult(db, affectedFeatureId, monthId),
+          buildEpicMonthResult(db, affectedEpicId, monthId),
         ),
       ),
     });
   }
   const target =
-    updatedFeatures.find((f) => f.featureId === featureId) ??
-    (await buildFeatureMonthsResult(db, featureId, monthIds));
+    updatedEpics.find((f) => f.epicId === epicId) ??
+    (await buildEpicMonthsResult(db, epicId, monthIds));
 
   return {
     months: target.months,
-    updatedFeatures,
+    updatedEpics,
   };
 }
 
 async function updateSingleMonthTotal(
   db: typeof DbType,
-  featureId: number,
+  epicId: number,
   monthId: number,
   newTotal: number,
 ) {
-  const existing = await getFeatureMonthRow(db, featureId, monthId);
+  const existing = await getEpicMonthRow(db, epicId, monthId);
   const oldTotal = existing?.totalCapacity ?? 0;
-  await upsertFeatureMonthTotal(db, featureId, monthId, newTotal);
+  await upsertEpicMonthTotal(db, epicId, monthId, newTotal);
 
   const currentAllocs = await db
     .select()
     .from(memberMonthAllocations)
     .where(
       and(
-        eq(memberMonthAllocations.featureId, featureId),
+        eq(memberMonthAllocations.epicId, epicId),
         eq(memberMonthAllocations.monthId, monthId),
       ),
     );
@@ -667,7 +670,7 @@ async function updateSingleMonthTotal(
       db,
       alloc.memberId,
       monthId,
-      featureId,
+      epicId,
     );
     const maxCap = await getMemberMaxCapacity(db, alloc.memberId);
     const cap = Math.max(0, maxCap - usedElsewhere);
@@ -683,13 +686,13 @@ async function updateSingleMonthTotal(
 async function setMemberMonthAllocationCapacity(
   db: typeof DbType,
   {
-    featureId,
+    epicId,
     monthId,
     memberId,
     capacity,
     keepZero,
   }: {
-    featureId: number;
+    epicId: number;
     monthId: number;
     memberId: number;
     capacity: number;
@@ -702,7 +705,7 @@ async function setMemberMonthAllocationCapacity(
     .from(memberMonthAllocations)
     .where(
       and(
-        eq(memberMonthAllocations.featureId, featureId),
+        eq(memberMonthAllocations.epicId, epicId),
         eq(memberMonthAllocations.monthId, monthId),
         eq(memberMonthAllocations.memberId, memberId),
       ),
@@ -724,7 +727,7 @@ async function setMemberMonthAllocationCapacity(
       .where(eq(memberMonthAllocations.id, existing[0]!.id));
   } else {
     await db.insert(memberMonthAllocations).values({
-      featureId,
+      epicId,
       monthId,
       memberId,
       capacity: nextCapacity,
@@ -732,9 +735,9 @@ async function setMemberMonthAllocationCapacity(
   }
 }
 
-async function recalculateFeatureMonthTotal(
+async function recalculateEpicMonthTotal(
   db: typeof DbType,
-  featureId: number,
+  epicId: number,
   monthId: number,
 ) {
   const updatedAllocs = await db
@@ -742,19 +745,19 @@ async function recalculateFeatureMonthTotal(
     .from(memberMonthAllocations)
     .where(
       and(
-        eq(memberMonthAllocations.featureId, featureId),
+        eq(memberMonthAllocations.epicId, epicId),
         eq(memberMonthAllocations.monthId, monthId),
       ),
     );
   const newTotal = normalizeCapacity(
     updatedAllocs.reduce((s, a) => s + a.capacity, 0),
   );
-  await upsertFeatureMonthTotal(db, featureId, monthId, newTotal);
+  await upsertEpicMonthTotal(db, epicId, monthId, newTotal);
 }
 
 async function updateSingleMemberMonthAllocation(
   db: typeof DbType,
-  featureId: number,
+  epicId: number,
   monthId: number,
   memberId: number,
   capacity: number,
@@ -764,7 +767,7 @@ async function updateSingleMemberMonthAllocation(
     db,
     memberId,
     monthId,
-    featureId,
+    epicId,
   );
   const maxCap = await getMemberMaxCapacity(db, memberId);
   const cap = Math.max(0, maxCap - usedElsewhere);
@@ -772,7 +775,7 @@ async function updateSingleMemberMonthAllocation(
     capacityConflictResolution === "fitWithinLimit"
       ? Math.min(capacity, cap)
       : capacity;
-  const affectedFeatureIds = new Set<number>([featureId]);
+  const affectedEpicIds = new Set<number>([epicId]);
 
   if (
     capacityConflictResolution === "rebalanceOthersProportionally" &&
@@ -787,14 +790,14 @@ async function updateSingleMemberMonthAllocation(
         and(
           eq(memberMonthAllocations.memberId, memberId),
           eq(memberMonthAllocations.monthId, monthId),
-          ne(memberMonthAllocations.featureId, featureId),
+          ne(memberMonthAllocations.epicId, epicId),
         ),
       );
 
     for (const alloc of otherAllocs) {
-      affectedFeatureIds.add(alloc.featureId);
+      affectedEpicIds.add(alloc.epicId);
       await setMemberMonthAllocationCapacity(db, {
-        featureId: alloc.featureId,
+        epicId: alloc.epicId,
         monthId,
         memberId,
         capacity: alloc.capacity * scale,
@@ -823,14 +826,14 @@ async function updateSingleMemberMonthAllocation(
         and(
           eq(memberMonthAllocations.memberId, memberId),
           eq(memberMonthAllocations.monthId, monthId),
-          ne(memberMonthAllocations.featureId, featureId),
+          ne(memberMonthAllocations.epicId, epicId),
         ),
       );
 
     for (const alloc of otherAllocs) {
-      affectedFeatureIds.add(alloc.featureId);
+      affectedEpicIds.add(alloc.epicId);
       await setMemberMonthAllocationCapacity(db, {
-        featureId: alloc.featureId,
+        epicId: alloc.epicId,
         monthId,
         memberId,
         capacity: alloc.capacity * scale,
@@ -841,18 +844,18 @@ async function updateSingleMemberMonthAllocation(
   }
 
   await setMemberMonthAllocationCapacity(db, {
-    featureId,
+    epicId,
     monthId,
     memberId,
     capacity: nextCapacity,
     keepZero: false,
   });
 
-  for (const affectedFeatureId of affectedFeatureIds) {
-    await recalculateFeatureMonthTotal(db, affectedFeatureId, monthId);
+  for (const affectedEpicId of affectedEpicIds) {
+    await recalculateEpicMonthTotal(db, affectedEpicId, monthId);
   }
 
-  return affectedFeatureIds;
+  return affectedEpicIds;
 }
 
 function splitTotalAcrossMonths(
@@ -878,22 +881,22 @@ function snapshotsEqual(a: RoadmapSnapshot, b: RoadmapSnapshot): boolean {
 
 async function getRoadmapSnapshot(db: typeof DbType): Promise<RoadmapSnapshot> {
   const [
+    initiativeRows,
     epicRows,
-    featureRows,
-    featureLinkRows,
+    epicLinkRows,
     memberRows,
     quarterRows,
     monthRows,
-    featureMonthRows,
+    epicMonthRows,
     memberMonthAllocationRows,
   ] = await Promise.all([
+    db.select().from(initiatives).orderBy(asc(initiatives.id)).all(),
     db.select().from(epics).orderBy(asc(epics.id)).all(),
-    db.select().from(features).orderBy(asc(features.id)).all(),
-    db.select().from(featureLinks).orderBy(asc(featureLinks.id)).all(),
+    db.select().from(epicLinks).orderBy(asc(epicLinks.id)).all(),
     db.select().from(members).orderBy(asc(members.id)).all(),
     db.select().from(quarters).orderBy(asc(quarters.id)).all(),
     db.select().from(months).orderBy(asc(months.id)).all(),
-    db.select().from(featureMonths).orderBy(asc(featureMonths.id)).all(),
+    db.select().from(epicMonths).orderBy(asc(epicMonths.id)).all(),
     db
       .select()
       .from(memberMonthAllocations)
@@ -902,24 +905,24 @@ async function getRoadmapSnapshot(db: typeof DbType): Promise<RoadmapSnapshot> {
   ]);
 
   return {
-    epics: epicRows.map((row) => ({
+    initiatives: initiativeRows.map((row) => ({
       id: row.id,
       name: row.name,
       description: row.description,
       position: row.position,
       isDefault: row.isDefault,
     })),
-    features: featureRows.map((row) => ({
+    epics: epicRows.map((row) => ({
       id: row.id,
-      epicId: row.epicId,
+      initiativeId: row.initiativeId,
       name: row.name,
       description: row.description,
       position: row.position,
       createdAt: snapshotTimestamp(row.createdAt),
     })),
-    featureLinks: featureLinkRows.map((row) => ({
+    epicLinks: epicLinkRows.map((row) => ({
       id: row.id,
-      featureId: row.featureId,
+      epicId: row.epicId,
       title: row.title,
       url: row.url,
       position: row.position,
@@ -941,15 +944,15 @@ async function getRoadmapSnapshot(db: typeof DbType): Promise<RoadmapSnapshot> {
       month: row.month,
       quarterId: row.quarterId,
     })),
-    featureMonths: featureMonthRows.map((row) => ({
+    epicMonths: epicMonthRows.map((row) => ({
       id: row.id,
-      featureId: row.featureId,
+      epicId: row.epicId,
       monthId: row.monthId,
       totalCapacity: row.totalCapacity,
     })),
     memberMonthAllocations: memberMonthAllocationRows.map((row) => ({
       id: row.id,
-      featureId: row.featureId,
+      epicId: row.epicId,
       monthId: row.monthId,
       memberId: row.memberId,
       capacity: row.capacity,
@@ -962,22 +965,22 @@ async function restoreRoadmapSnapshot(
   snapshot: RoadmapSnapshot,
 ) {
   await db.delete(memberMonthAllocations);
-  await db.delete(featureMonths);
-  await db.delete(featureLinks);
+  await db.delete(epicMonths);
+  await db.delete(epicLinks);
   await db.delete(months);
   await db.delete(quarters);
   await db.delete(members);
-  await db.delete(features);
   await db.delete(epics);
+  await db.delete(initiatives);
 
-  if (snapshot.epics.length > 0) {
-    await db.insert(epics).values(snapshot.epics);
+  if (snapshot.initiatives.length > 0) {
+    await db.insert(initiatives).values(snapshot.initiatives);
   }
-  if (snapshot.features.length > 0) {
-    await db.insert(features).values(
-      snapshot.features.map((row) => ({
+  if (snapshot.epics.length > 0) {
+    await db.insert(epics).values(
+      snapshot.epics.map((row) => ({
         id: row.id,
-        epicId: row.epicId,
+        initiativeId: row.initiativeId,
         name: row.name,
         description: row.description,
         position: row.position,
@@ -1001,11 +1004,11 @@ async function restoreRoadmapSnapshot(
   if (snapshot.months.length > 0) {
     await db.insert(months).values(snapshot.months);
   }
-  if (snapshot.featureLinks.length > 0) {
-    await db.insert(featureLinks).values(snapshot.featureLinks);
+  if (snapshot.epicLinks.length > 0) {
+    await db.insert(epicLinks).values(snapshot.epicLinks);
   }
-  if (snapshot.featureMonths.length > 0) {
-    await db.insert(featureMonths).values(snapshot.featureMonths);
+  if (snapshot.epicMonths.length > 0) {
+    await db.insert(epicMonths).values(snapshot.epicMonths);
   }
   if (snapshot.memberMonthAllocations.length > 0) {
     await db
@@ -1033,32 +1036,32 @@ function insertMovedId(
   return without;
 }
 
-async function resequenceEpics(db: typeof DbType, orderedIds: number[]) {
+async function resequenceInitiatives(db: typeof DbType, orderedIds: number[]) {
   for (let index = 0; index < orderedIds.length; index++) {
     await db
-      .update(epics)
+      .update(initiatives)
       .set({ position: index })
-      .where(eq(epics.id, orderedIds[index]!));
+      .where(eq(initiatives.id, orderedIds[index]!));
   }
 }
 
-async function resequenceFeatures(
+async function resequenceEpics(
   db: typeof DbType,
-  epicId: number,
+  initiativeId: number,
   orderedIds: number[],
 ) {
   const tempOffset = 1_000_000;
   for (let index = 0; index < orderedIds.length; index++) {
     await db
-      .update(features)
-      .set({ epicId, position: tempOffset + index })
-      .where(eq(features.id, orderedIds[index]!));
+      .update(epics)
+      .set({ initiativeId, position: tempOffset + index })
+      .where(eq(epics.id, orderedIds[index]!));
   }
   for (let index = 0; index < orderedIds.length; index++) {
     await db
-      .update(features)
-      .set({ epicId, position: index })
-      .where(eq(features.id, orderedIds[index]!));
+      .update(epics)
+      .set({ initiativeId, position: index })
+      .where(eq(epics.id, orderedIds[index]!));
   }
 }
 
@@ -1092,6 +1095,151 @@ const historyRestore = o
   });
 
 // ---------------------------------------------------------------------------
+// Initiatives
+// ---------------------------------------------------------------------------
+
+const initiativesList = o.input(z.object({})).handler(async ({ context }) => {
+  const rows = await context.db
+    .select()
+    .from(initiatives)
+    .orderBy(asc(initiatives.position), asc(initiatives.id))
+    .all();
+  return Promise.all(
+    rows.map((initiative) => buildInitiativeDto(context.db, initiative)),
+  );
+});
+
+const initiativesCreate = o
+  .input(
+    z.object({
+      name: z.string(),
+      description: z.string().nullable().optional(),
+      links: z.array(epicLinkInputSchema).optional(),
+    }),
+  )
+  .handler(async ({ input, context }) => {
+    const name = normalizeNameInput(input.name, "initiative");
+    const description = normalizeEpicDescriptionInput(input.description);
+    const links = normalizeEpicLinksInput(input.links);
+    await assertInitiativeNameAvailable(context.db, name);
+    const [last] = await context.db
+      .select({ position: initiatives.position })
+      .from(initiatives)
+      .orderBy(sql`${initiatives.position} DESC`, sql`${initiatives.id} DESC`)
+      .limit(1);
+    try {
+      const [row] = await context.db
+        .insert(initiatives)
+        .values({
+          name,
+          description: description ?? null,
+          position: (last?.position ?? -1) + 1,
+          isDefault: false,
+        })
+        .returning();
+      if (!row) return row;
+      if (links !== undefined)
+        await saveInitiativeLinks(context.db, row.id, links);
+      return buildInitiativeDto(context.db, row);
+    } catch (error) {
+      rethrowNameMutationError("initiative", error);
+    }
+  });
+
+const initiativesRename = o
+  .input(
+    z.object({
+      id: z.number().int(),
+      name: z.string(),
+      description: z.string().nullable().optional(),
+      links: z.array(epicLinkInputSchema).optional(),
+    }),
+  )
+  .handler(async ({ input, context }) => {
+    const name = normalizeNameInput(input.name, "initiative");
+    const description = normalizeEpicDescriptionInput(input.description);
+    const links = normalizeEpicLinksInput(input.links);
+    await assertInitiativeNameAvailable(context.db, name, input.id);
+    try {
+      const values: { name: string; description?: string | null } = { name };
+      if (description !== undefined) values.description = description;
+      const [row] = await context.db
+        .update(initiatives)
+        .set(values)
+        .where(eq(initiatives.id, input.id))
+        .returning();
+      if (!row) return row;
+      if (links !== undefined)
+        await saveInitiativeLinks(context.db, row.id, links);
+      return buildInitiativeDto(context.db, row);
+    } catch (error) {
+      rethrowNameMutationError("initiative", error);
+    }
+  });
+
+const initiativesDelete = o
+  .input(z.object({ id: z.number().int() }))
+  .handler(async ({ input, context }) => {
+    const [initiative] = await context.db
+      .select()
+      .from(initiatives)
+      .where(eq(initiatives.id, input.id));
+    if (!initiative) return;
+    if (initiative.isDefault) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: "既定Initiativeは削除できません。",
+      });
+    }
+    const [child] = await context.db
+      .select({ id: epics.id })
+      .from(epics)
+      .where(eq(epics.initiativeId, input.id))
+      .limit(1);
+    if (child) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: "Epicが残っているInitiativeは削除できません。",
+      });
+    }
+    await context.db.delete(initiatives).where(eq(initiatives.id, input.id));
+  });
+
+const initiativesMove = o
+  .input(
+    z.object({
+      id: z.number().int(),
+      beforeId: z.number().int().optional(),
+      afterId: z.number().int().optional(),
+    }),
+  )
+  .handler(async ({ input, context }) => {
+    const rows = await context.db
+      .select({ id: initiatives.id })
+      .from(initiatives)
+      .orderBy(asc(initiatives.position), asc(initiatives.id))
+      .all();
+    if (!rows.some((row) => row.id === input.id)) {
+      throw new ORPCError("NOT_FOUND", { message: "Initiative not found" });
+    }
+    const orderedIds = insertMovedId(
+      rows.map((row) => row.id),
+      input.id,
+      input.beforeId,
+      input.afterId,
+    );
+    await resequenceInitiatives(context.db, orderedIds);
+    const updatedRows = await context.db
+      .select()
+      .from(initiatives)
+      .orderBy(asc(initiatives.position), asc(initiatives.id))
+      .all();
+    return Promise.all(
+      updatedRows.map((initiative) =>
+        buildInitiativeDto(context.db, initiative),
+      ),
+    );
+  });
+
+// ---------------------------------------------------------------------------
 // Epics
 // ---------------------------------------------------------------------------
 
@@ -1099,7 +1247,7 @@ const epicsList = o.input(z.object({})).handler(async ({ context }) => {
   const rows = await context.db
     .select()
     .from(epics)
-    .orderBy(asc(epics.position), asc(epics.id))
+    .orderBy(asc(epics.initiativeId), asc(epics.position), asc(epics.id))
     .all();
   return Promise.all(rows.map((epic) => buildEpicDto(context.db, epic)));
 });
@@ -1108,28 +1256,26 @@ const epicsCreate = o
   .input(
     z.object({
       name: z.string(),
+      initiativeId: z.number().int().optional(),
       description: z.string().nullable().optional(),
-      links: z.array(featureLinkInputSchema).optional(),
+      links: z.array(epicLinkInputSchema).optional(),
     }),
   )
   .handler(async ({ input, context }) => {
     const name = normalizeNameInput(input.name, "epic");
-    const description = normalizeFeatureDescriptionInput(input.description);
-    const links = normalizeFeatureLinksInput(input.links);
+    const description = normalizeEpicDescriptionInput(input.description);
+    const links = normalizeEpicLinksInput(input.links);
+    const initiativeId =
+      input.initiativeId ?? (await getDefaultInitiativeId(context.db));
     await assertEpicNameAvailable(context.db, name);
-    const [last] = await context.db
-      .select({ position: epics.position })
-      .from(epics)
-      .orderBy(sql`${epics.position} DESC`, sql`${epics.id} DESC`)
-      .limit(1);
     try {
       const [row] = await context.db
         .insert(epics)
         .values({
           name,
           description: description ?? null,
-          position: (last?.position ?? -1) + 1,
-          isDefault: false,
+          initiativeId,
+          position: await nextEpicPosition(context.db, initiativeId),
         })
         .returning();
       if (!row) return row;
@@ -1145,18 +1291,37 @@ const epicsRename = o
     z.object({
       id: z.number().int(),
       name: z.string(),
+      initiativeId: z.number().int().optional(),
       description: z.string().nullable().optional(),
-      links: z.array(featureLinkInputSchema).optional(),
+      links: z.array(epicLinkInputSchema).optional(),
     }),
   )
   .handler(async ({ input, context }) => {
     const name = normalizeNameInput(input.name, "epic");
-    const description = normalizeFeatureDescriptionInput(input.description);
-    const links = normalizeFeatureLinksInput(input.links);
+    const description = normalizeEpicDescriptionInput(input.description);
+    const links = normalizeEpicLinksInput(input.links);
     await assertEpicNameAvailable(context.db, name, input.id);
     try {
-      const values: { name: string; description?: string | null } = { name };
+      const values: {
+        name: string;
+        description?: string | null;
+        initiativeId?: number;
+        position?: number;
+      } = { name };
       if (description !== undefined) values.description = description;
+      if (input.initiativeId !== undefined) {
+        const [current] = await context.db
+          .select({ initiativeId: epics.initiativeId })
+          .from(epics)
+          .where(eq(epics.id, input.id));
+        values.initiativeId = input.initiativeId;
+        if (current?.initiativeId !== input.initiativeId) {
+          values.position = await nextEpicPosition(
+            context.db,
+            input.initiativeId,
+          );
+        }
+      }
       const [row] = await context.db
         .update(epics)
         .set(values)
@@ -1173,26 +1338,6 @@ const epicsRename = o
 const epicsDelete = o
   .input(z.object({ id: z.number().int() }))
   .handler(async ({ input, context }) => {
-    const [epic] = await context.db
-      .select()
-      .from(epics)
-      .where(eq(epics.id, input.id));
-    if (!epic) return;
-    if (epic.isDefault) {
-      throw new ORPCError("BAD_REQUEST", {
-        message: "既定Epicは削除できません。",
-      });
-    }
-    const [child] = await context.db
-      .select({ id: features.id })
-      .from(features)
-      .where(eq(features.epicId, input.id))
-      .limit(1);
-    if (child) {
-      throw new ORPCError("BAD_REQUEST", {
-        message: "Featureが残っているEpicは削除できません。",
-      });
-    }
     await context.db.delete(epics).where(eq(epics.id, input.id));
   });
 
@@ -1200,143 +1345,7 @@ const epicsMove = o
   .input(
     z.object({
       id: z.number().int(),
-      beforeId: z.number().int().optional(),
-      afterId: z.number().int().optional(),
-    }),
-  )
-  .handler(async ({ input, context }) => {
-    const rows = await context.db
-      .select({ id: epics.id })
-      .from(epics)
-      .orderBy(asc(epics.position), asc(epics.id))
-      .all();
-    if (!rows.some((row) => row.id === input.id)) {
-      throw new ORPCError("NOT_FOUND", { message: "Epic not found" });
-    }
-    const orderedIds = insertMovedId(
-      rows.map((row) => row.id),
-      input.id,
-      input.beforeId,
-      input.afterId,
-    );
-    await resequenceEpics(context.db, orderedIds);
-    const updatedRows = await context.db
-      .select()
-      .from(epics)
-      .orderBy(asc(epics.position), asc(epics.id))
-      .all();
-    return Promise.all(
-      updatedRows.map((epic) => buildEpicDto(context.db, epic)),
-    );
-  });
-
-// ---------------------------------------------------------------------------
-// Features
-// ---------------------------------------------------------------------------
-
-const featuresList = o.input(z.object({})).handler(async ({ context }) => {
-  const rows = await context.db
-    .select()
-    .from(features)
-    .orderBy(asc(features.epicId), asc(features.position), asc(features.id))
-    .all();
-  return Promise.all(
-    rows.map((feature) => buildFeatureDto(context.db, feature)),
-  );
-});
-
-const featuresCreate = o
-  .input(
-    z.object({
-      name: z.string(),
-      epicId: z.number().int().optional(),
-      description: z.string().nullable().optional(),
-      links: z.array(featureLinkInputSchema).optional(),
-    }),
-  )
-  .handler(async ({ input, context }) => {
-    const name = normalizeNameInput(input.name, "feature");
-    const description = normalizeFeatureDescriptionInput(input.description);
-    const links = normalizeFeatureLinksInput(input.links);
-    const epicId = input.epicId ?? (await getDefaultEpicId(context.db));
-    await assertFeatureNameAvailable(context.db, name);
-    try {
-      const [row] = await context.db
-        .insert(features)
-        .values({
-          name,
-          description: description ?? null,
-          epicId,
-          position: await nextFeaturePosition(context.db, epicId),
-        })
-        .returning();
-      if (!row) return row;
-      if (links !== undefined)
-        await saveFeatureLinks(context.db, row.id, links);
-      return buildFeatureDto(context.db, row);
-    } catch (error) {
-      rethrowNameMutationError("feature", error);
-    }
-  });
-
-const featuresRename = o
-  .input(
-    z.object({
-      id: z.number().int(),
-      name: z.string(),
-      epicId: z.number().int().optional(),
-      description: z.string().nullable().optional(),
-      links: z.array(featureLinkInputSchema).optional(),
-    }),
-  )
-  .handler(async ({ input, context }) => {
-    const name = normalizeNameInput(input.name, "feature");
-    const description = normalizeFeatureDescriptionInput(input.description);
-    const links = normalizeFeatureLinksInput(input.links);
-    await assertFeatureNameAvailable(context.db, name, input.id);
-    try {
-      const values: {
-        name: string;
-        description?: string | null;
-        epicId?: number;
-        position?: number;
-      } = { name };
-      if (description !== undefined) values.description = description;
-      if (input.epicId !== undefined) {
-        const [current] = await context.db
-          .select({ epicId: features.epicId })
-          .from(features)
-          .where(eq(features.id, input.id));
-        values.epicId = input.epicId;
-        if (current?.epicId !== input.epicId) {
-          values.position = await nextFeaturePosition(context.db, input.epicId);
-        }
-      }
-      const [row] = await context.db
-        .update(features)
-        .set(values)
-        .where(eq(features.id, input.id))
-        .returning();
-      if (!row) return row;
-      if (links !== undefined)
-        await saveFeatureLinks(context.db, row.id, links);
-      return buildFeatureDto(context.db, row);
-    } catch (error) {
-      rethrowNameMutationError("feature", error);
-    }
-  });
-
-const featuresDelete = o
-  .input(z.object({ id: z.number().int() }))
-  .handler(async ({ input, context }) => {
-    await context.db.delete(features).where(eq(features.id, input.id));
-  });
-
-const featuresMove = o
-  .input(
-    z.object({
-      id: z.number().int(),
-      epicId: z.number().int(),
+      initiativeId: z.number().int(),
       beforeId: z.number().int().optional(),
       afterId: z.number().int().optional(),
     }),
@@ -1344,23 +1353,26 @@ const featuresMove = o
   .handler(async ({ input, context }) => {
     const [target] = await context.db
       .select()
-      .from(features)
-      .where(eq(features.id, input.id));
+      .from(epics)
+      .where(eq(epics.id, input.id));
     if (!target)
-      throw new ORPCError("NOT_FOUND", { message: "Feature not found" });
+      throw new ORPCError("NOT_FOUND", { message: "Epic not found" });
 
-    const affectedEpicIds = new Set<number>([target.epicId, input.epicId]);
-    for (const epicId of affectedEpicIds) {
+    const affectedInitiativeIds = new Set<number>([
+      target.initiativeId,
+      input.initiativeId,
+    ]);
+    for (const initiativeId of affectedInitiativeIds) {
       const rows = await context.db
-        .select({ id: features.id })
-        .from(features)
-        .where(eq(features.epicId, epicId))
-        .orderBy(asc(features.position), asc(features.id))
+        .select({ id: epics.id })
+        .from(epics)
+        .where(eq(epics.initiativeId, initiativeId))
+        .orderBy(asc(epics.position), asc(epics.id))
         .all();
       let orderedIds = rows
         .map((row) => row.id)
         .filter((id) => id !== input.id);
-      if (epicId === input.epicId) {
+      if (initiativeId === input.initiativeId) {
         orderedIds = insertMovedId(
           [...orderedIds, input.id],
           input.id,
@@ -1368,14 +1380,14 @@ const featuresMove = o
           input.afterId,
         );
       }
-      await resequenceFeatures(context.db, epicId, orderedIds);
+      await resequenceEpics(context.db, initiativeId, orderedIds);
     }
     const [row] = await context.db
       .select()
-      .from(features)
-      .where(eq(features.id, input.id));
+      .from(epics)
+      .where(eq(epics.id, input.id));
     if (!row) return row;
-    return buildFeatureDto(context.db, row);
+    return buildEpicDto(context.db, row);
   });
 
 // ---------------------------------------------------------------------------
@@ -1521,26 +1533,26 @@ const quartersDelete = o
 // Allocations
 // ---------------------------------------------------------------------------
 
-const allocationsGetFeatureView = o
-  .input(z.object({ featureId: z.number().int() }))
+const allocationsGetEpicView = o
+  .input(z.object({ epicId: z.number().int() }))
   .handler(async ({ input, context }) => {
     const { db } = context;
-    const [feature] = await db
+    const [epic] = await db
       .select()
-      .from(features)
-      .where(eq(features.id, input.featureId));
-    if (!feature) throw new Error("Feature not found");
+      .from(epics)
+      .where(eq(epics.id, input.epicId));
+    if (!epic) throw new Error("Epic not found");
 
     const allQuarters = await getQuarterRowsWithMonths(db);
     const allMembers = await db.select().from(members).all();
     const fmRows = await db
       .select()
-      .from(featureMonths)
-      .where(eq(featureMonths.featureId, input.featureId));
+      .from(epicMonths)
+      .where(eq(epicMonths.epicId, input.epicId));
     const maRows = await db
       .select()
       .from(memberMonthAllocations)
-      .where(eq(memberMonthAllocations.featureId, input.featureId));
+      .where(eq(memberMonthAllocations.epicId, input.epicId));
 
     const quarterData = allQuarters.map((q) => ({
       quarter: { id: q.id, year: q.year, quarter: q.quarter },
@@ -1568,7 +1580,7 @@ const allocationsGetFeatureView = o
     }));
 
     return {
-      feature: await buildFeatureDto(db, feature),
+      epic: await buildEpicDto(db, epic),
       quarters: quarterData,
     };
   });
@@ -1584,9 +1596,11 @@ const allocationsGetMemberView = o
     if (!member) throw new Error("Member not found");
 
     const allQuarters = await getQuarterRowsWithMonths(db);
-    const allFeatures = await db.select().from(features).all();
     const allEpics = await db.select().from(epics).all();
-    const epicById = new Map(allEpics.map((epic) => [epic.id, epic]));
+    const allInitiatives = await db.select().from(initiatives).all();
+    const initiativeById = new Map(
+      allInitiatives.map((initiative) => [initiative.id, initiative]),
+    );
     const maRows = await db
       .select()
       .from(memberMonthAllocations)
@@ -1600,15 +1614,14 @@ const allocationsGetMemberView = o
         return {
           month,
           totalCapacity: monthTotal,
-          featureAllocations: allFeatures
-            .map((feature) => ({
-              feature: {
-                ...feature,
-                epic: epicById.get(feature.epicId) ?? null,
+          epicAllocations: allEpics
+            .map((epic) => ({
+              epic: {
+                ...epic,
+                initiative: initiativeById.get(epic.initiativeId) ?? null,
               },
               capacity:
-                monthAllocs.find((a) => a.featureId === feature.id)?.capacity ??
-                0,
+                monthAllocs.find((a) => a.epicId === epic.id)?.capacity ?? 0,
             }))
             .filter((a) => a.capacity > 0),
         };
@@ -1621,13 +1634,13 @@ const allocationsGetMemberView = o
 const allocationsAssignMember = o
   .input(
     z.object({
-      featureId: z.number().int(),
+      epicId: z.number().int(),
       memberId: z.number().int(),
     }),
   )
   .handler(async ({ input, context }) => {
     const { db } = context;
-    const { featureId, memberId } = input;
+    const { epicId, memberId } = input;
     const allMonths = await db.select().from(months).all();
     for (const month of allMonths) {
       const existing = await db
@@ -1635,14 +1648,14 @@ const allocationsAssignMember = o
         .from(memberMonthAllocations)
         .where(
           and(
-            eq(memberMonthAllocations.featureId, featureId),
+            eq(memberMonthAllocations.epicId, epicId),
             eq(memberMonthAllocations.monthId, month.id),
             eq(memberMonthAllocations.memberId, memberId),
           ),
         );
       if (existing.length === 0) {
         await db.insert(memberMonthAllocations).values({
-          featureId,
+          epicId,
           monthId: month.id,
           memberId,
           capacity: 0,
@@ -1651,23 +1664,23 @@ const allocationsAssignMember = o
     }
   });
 
-const allocationsRemoveMemberFromFeature = o
+const allocationsRemoveMemberFromEpic = o
   .input(
     z.object({
-      featureId: z.number().int(),
+      epicId: z.number().int(),
       memberId: z.number().int(),
     }),
   )
   .handler(async ({ input, context }) => {
     const { db } = context;
-    const { featureId, memberId } = input;
+    const { epicId, memberId } = input;
 
     const toRemove = await db
       .select()
       .from(memberMonthAllocations)
       .where(
         and(
-          eq(memberMonthAllocations.featureId, featureId),
+          eq(memberMonthAllocations.epicId, epicId),
           eq(memberMonthAllocations.memberId, memberId),
         ),
       );
@@ -1678,7 +1691,7 @@ const allocationsRemoveMemberFromFeature = o
       .delete(memberMonthAllocations)
       .where(
         and(
-          eq(memberMonthAllocations.featureId, featureId),
+          eq(memberMonthAllocations.epicId, epicId),
           eq(memberMonthAllocations.memberId, memberId),
         ),
       );
@@ -1690,19 +1703,19 @@ const allocationsRemoveMemberFromFeature = o
         .from(memberMonthAllocations)
         .where(
           and(
-            eq(memberMonthAllocations.featureId, featureId),
+            eq(memberMonthAllocations.epicId, epicId),
             eq(memberMonthAllocations.monthId, monthId),
           ),
         );
       const newTotal = remaining.reduce((s, a) => s + a.capacity, 0);
-      await upsertFeatureMonthTotal(db, featureId, monthId, newTotal);
+      await upsertEpicMonthTotal(db, epicId, monthId, newTotal);
     }
   });
 
 const allocationsUpdateTotal = o
   .input(
     z.object({
-      featureId: z.number().int(),
+      epicId: z.number().int(),
       totalCapacity: z.number().min(0),
       ...periodInput,
     }),
@@ -1712,7 +1725,7 @@ const allocationsUpdateTotal = o
     const monthRows = await getTargetMonthRows(db, input);
     const currentTotals = await Promise.all(
       monthRows.map(async (month) => {
-        const fm = await getFeatureMonthRow(db, input.featureId, month.id);
+        const fm = await getEpicMonthRow(db, input.epicId, month.id);
         return fm?.totalCapacity ?? 0;
       }),
     );
@@ -1724,15 +1737,15 @@ const allocationsUpdateTotal = o
     for (const [index, month] of monthRows.entries()) {
       await updateSingleMonthTotal(
         db,
-        input.featureId,
+        input.epicId,
         month.id,
         newMonthTotals[index] ?? 0,
       );
     }
 
-    return buildFeatureMonthsResult(
+    return buildEpicMonthsResult(
       db,
-      input.featureId,
+      input.epicId,
       monthRows.map((month) => month.id),
     );
   });
@@ -1740,7 +1753,7 @@ const allocationsUpdateTotal = o
 const allocationsPreviewMemberAllocation = o
   .input(
     z.object({
-      featureId: z.number().int(),
+      epicId: z.number().int(),
       memberId: z.number().int(),
       capacity: z.number().min(0),
       ...periodInput,
@@ -1755,7 +1768,7 @@ const allocationsPreviewMemberAllocation = o
           context.db,
           input.memberId,
           month.id,
-          input.featureId,
+          input.epicId,
         );
         return {
           usedElsewhere,
@@ -1787,7 +1800,7 @@ const allocationsPreviewMemberAllocation = o
 const allocationsUpdateMemberAllocation = o
   .input(
     z.object({
-      featureId: z.number().int(),
+      epicId: z.number().int(),
       memberId: z.number().int(),
       capacity: z.number().min(0),
       ...periodInput,
@@ -1806,7 +1819,7 @@ const allocationsUpdateMemberAllocation = o
           .from(memberMonthAllocations)
           .where(
             and(
-              eq(memberMonthAllocations.featureId, input.featureId),
+              eq(memberMonthAllocations.epicId, input.epicId),
               eq(memberMonthAllocations.monthId, month.id),
               eq(memberMonthAllocations.memberId, input.memberId),
             ),
@@ -1819,38 +1832,38 @@ const allocationsUpdateMemberAllocation = o
         ? [input.capacity]
         : splitTotalAcrossMonths(input.capacity, currentCapacities);
 
-    const affectedFeatureIds = new Set<number>([input.featureId]);
+    const affectedEpicIds = new Set<number>([input.epicId]);
     for (const [index, month] of monthRows.entries()) {
       const affected = await updateSingleMemberMonthAllocation(
         db,
-        input.featureId,
+        input.epicId,
         month.id,
         input.memberId,
         newMonthCapacities[index] ?? 0,
         input.capacityConflictResolution,
       );
-      for (const featureId of affected) affectedFeatureIds.add(featureId);
+      for (const epicId of affected) affectedEpicIds.add(epicId);
     }
 
     return buildMemberAllocationUpdateResult(
       db,
-      input.featureId,
+      input.epicId,
       monthRows.map((month) => month.id),
-      affectedFeatureIds,
+      affectedEpicIds,
     );
   });
 
 const allocationsMoveQuarter = o
   .input(
     z.object({
-      featureId: z.number().int(),
+      epicId: z.number().int(),
       fromQuarterId: z.number().int(),
       toQuarterId: z.number().int(),
     }),
   )
   .handler(async ({ input, context }) => {
     const { db } = context;
-    const { featureId, fromQuarterId, toQuarterId } = input;
+    const { epicId, fromQuarterId, toQuarterId } = input;
     const fromMonths = await getQuarterMonthRows(db, fromQuarterId);
     const toMonths = await getQuarterMonthRows(db, toQuarterId);
     if (fromMonths.length === 0 || toMonths.length === 0) return;
@@ -1859,12 +1872,12 @@ const allocationsMoveQuarter = o
       const toMonth = toMonths[index];
       if (!toMonth) continue;
 
-      const fromFm = await getFeatureMonthRow(db, featureId, fromMonth.id);
+      const fromFm = await getEpicMonthRow(db, epicId, fromMonth.id);
       if (fromFm) {
-        const toFm = await getFeatureMonthRow(db, featureId, toMonth.id);
-        await upsertFeatureMonthTotal(
+        const toFm = await getEpicMonthRow(db, epicId, toMonth.id);
+        await upsertEpicMonthTotal(
           db,
-          featureId,
+          epicId,
           toMonth.id,
           (toFm?.totalCapacity ?? 0) + fromFm.totalCapacity,
         );
@@ -1875,7 +1888,7 @@ const allocationsMoveQuarter = o
         .from(memberMonthAllocations)
         .where(
           and(
-            eq(memberMonthAllocations.featureId, featureId),
+            eq(memberMonthAllocations.epicId, epicId),
             eq(memberMonthAllocations.monthId, fromMonth.id),
           ),
         );
@@ -1886,7 +1899,7 @@ const allocationsMoveQuarter = o
           .from(memberMonthAllocations)
           .where(
             and(
-              eq(memberMonthAllocations.featureId, featureId),
+              eq(memberMonthAllocations.epicId, epicId),
               eq(memberMonthAllocations.monthId, toMonth.id),
               eq(memberMonthAllocations.memberId, alloc.memberId),
             ),
@@ -1896,7 +1909,7 @@ const allocationsMoveQuarter = o
           db,
           alloc.memberId,
           toMonth.id,
-          featureId,
+          epicId,
         );
         const maxCap = await getMemberMaxCapacity(db, alloc.memberId);
         const cap = Math.max(0, maxCap - usedElsewhere);
@@ -1912,7 +1925,7 @@ const allocationsMoveQuarter = o
             .where(eq(memberMonthAllocations.id, toExisting.id));
         } else {
           await db.insert(memberMonthAllocations).values({
-            featureId,
+            epicId,
             monthId: toMonth.id,
             memberId: alloc.memberId,
             capacity: merged,
@@ -1924,16 +1937,16 @@ const allocationsMoveQuarter = o
         .delete(memberMonthAllocations)
         .where(
           and(
-            eq(memberMonthAllocations.featureId, featureId),
+            eq(memberMonthAllocations.epicId, epicId),
             eq(memberMonthAllocations.monthId, fromMonth.id),
           ),
         );
       await db
-        .delete(featureMonths)
+        .delete(epicMonths)
         .where(
           and(
-            eq(featureMonths.featureId, featureId),
-            eq(featureMonths.monthId, fromMonth.id),
+            eq(epicMonths.epicId, epicId),
+            eq(epicMonths.monthId, fromMonth.id),
           ),
         );
     }
@@ -1943,33 +1956,35 @@ const allocationsMoveQuarter = o
 // Export
 // ---------------------------------------------------------------------------
 
-const exportFeatureCSV = o.input(z.object({})).handler(async ({ context }) => {
+const exportEpicCSV = o.input(z.object({})).handler(async ({ context }) => {
   const { db } = context;
-  const allFeatures = await db.select().from(features).all();
   const allEpics = await db.select().from(epics).all();
+  const allInitiatives = await db.select().from(initiatives).all();
   const allQuarters = await getQuarterRowsWithMonths(db);
-  const fmRows = await db.select().from(featureMonths).all();
-  const epicById = new Map(allEpics.map((epic) => [epic.id, epic.name]));
+  const fmRows = await db.select().from(epicMonths).all();
+  const initiativeById = new Map(
+    allInitiatives.map((initiative) => [initiative.id, initiative.name]),
+  );
 
   const header = [
-    "Epic",
+    "Initiative",
     "機能",
-    "feature_id",
+    "epic_id",
     ...allQuarters.map((q) => `${q.year}-Q${q.quarter}`),
   ].join(",");
-  const rows = allFeatures.map((feature) => {
+  const rows = allEpics.map((epic) => {
     const cells = allQuarters.map((quarter) =>
       quarter.months.reduce((sum, month) => {
         const fm = fmRows.find(
-          (r) => r.featureId === feature.id && r.monthId === month.id,
+          (r) => r.epicId === epic.id && r.monthId === month.id,
         );
         return sum + (fm?.totalCapacity ?? 0);
       }, 0),
     );
     return [
-      csvCell(epicById.get(feature.epicId) ?? ""),
-      csvCell(feature.name),
-      feature.id,
+      csvCell(initiativeById.get(epic.initiativeId) ?? ""),
+      csvCell(epic.name),
+      epic.id,
       ...cells,
     ].join(",");
   });
@@ -1981,30 +1996,32 @@ const exportMemberCSV = o.input(z.object({})).handler(async ({ context }) => {
   const { db } = context;
   const allMembers = await db.select().from(members).all();
   const allQuarters = await getQuarterRowsWithMonths(db);
-  const allFeatures = await db.select().from(features).all();
   const allEpics = await db.select().from(epics).all();
+  const allInitiatives = await db.select().from(initiatives).all();
   const maRows = await db.select().from(memberMonthAllocations).all();
-  const epicById = new Map(allEpics.map((epic) => [epic.id, epic.name]));
+  const initiativeById = new Map(
+    allInitiatives.map((initiative) => [initiative.id, initiative.name]),
+  );
 
   const qHeaders = allQuarters.map((q) => `${q.year}-Q${q.quarter}`);
   const header = [
     "担当者",
     "member_id",
-    "Epic",
+    "Initiative",
     "機能",
-    "feature_id",
+    "epic_id",
     ...qHeaders,
   ].join(",");
 
   const rows: string[] = [];
   for (const member of allMembers) {
-    for (const feature of allFeatures) {
+    for (const epic of allEpics) {
       const cells = allQuarters.map((quarter) =>
         quarter.months.reduce((sum, month) => {
           const alloc = maRows.find(
             (r) =>
               r.memberId === member.id &&
-              r.featureId === feature.id &&
+              r.epicId === epic.id &&
               r.monthId === month.id,
           );
           return sum + (alloc?.capacity ?? 0);
@@ -2015,9 +2032,9 @@ const exportMemberCSV = o.input(z.object({})).handler(async ({ context }) => {
           [
             csvCell(member.name),
             member.id,
-            csvCell(epicById.get(feature.epicId) ?? ""),
-            csvCell(feature.name),
-            feature.id,
+            csvCell(initiativeById.get(epic.initiativeId) ?? ""),
+            csvCell(epic.name),
+            epic.id,
             ...cells,
           ].join(","),
         );
@@ -2037,20 +2054,22 @@ const exportAllocationCSV = o
       .from(months)
       .orderBy(months.year, months.month)
       .all();
-    const allFeatures = await db.select().from(features).all();
     const allEpics = await db.select().from(epics).all();
+    const allInitiatives = await db.select().from(initiatives).all();
     const allMembers = await db.select().from(members).all();
     const maRows = await db.select().from(memberMonthAllocations).all();
 
-    const featureById = new Map(allFeatures.map((f) => [f.id, f]));
-    const epicById = new Map(allEpics.map((epic) => [epic.id, epic.name]));
+    const epicById = new Map(allEpics.map((f) => [f.id, f]));
+    const initiativeById = new Map(
+      allInitiatives.map((initiative) => [initiative.id, initiative.name]),
+    );
     const memberById = new Map(allMembers.map((m) => [m.id, m.name]));
     const monthById = new Map(allMonths.map((m) => [m.id, m]));
 
     const header = [
-      "Epic",
+      "Initiative",
       "機能",
-      "feature_id",
+      "epic_id",
       "担当者",
       "member_id",
       "キャパシティ",
@@ -2059,16 +2078,16 @@ const exportAllocationCSV = o
     const rows = maRows
       .filter((r) => r.capacity > 0)
       .flatMap((r) => {
-        const feature = featureById.get(r.featureId);
-        const featureName = feature?.name ?? "";
+        const epic = epicById.get(r.epicId);
+        const epicName = epic?.name ?? "";
         const memberName = memberById.get(r.memberId) ?? "";
         const month = monthById.get(r.monthId);
         if (!month) return [];
         return [
           [
-            csvCell(feature ? (epicById.get(feature.epicId) ?? "") : ""),
-            csvCell(featureName),
-            r.featureId,
+            csvCell(epic ? (initiativeById.get(epic.initiativeId) ?? "") : ""),
+            csvCell(epicName),
+            r.epicId,
             csvCell(memberName),
             r.memberId,
             r.capacity,
@@ -2099,20 +2118,22 @@ const exportAllocationTSV = o
       .from(months)
       .orderBy(months.year, months.month)
       .all();
-    const allFeatures = await db.select().from(features).all();
     const allEpics = await db.select().from(epics).all();
+    const allInitiatives = await db.select().from(initiatives).all();
     const allMembers = await db.select().from(members).all();
     const maRows = await db.select().from(memberMonthAllocations).all();
 
-    const featureById = new Map(allFeatures.map((f) => [f.id, f]));
-    const epicById = new Map(allEpics.map((epic) => [epic.id, epic.name]));
+    const epicById = new Map(allEpics.map((f) => [f.id, f]));
+    const initiativeById = new Map(
+      allInitiatives.map((initiative) => [initiative.id, initiative.name]),
+    );
     const memberById = new Map(allMembers.map((m) => [m.id, m.name]));
     const monthById = new Map(allMonths.map((m) => [m.id, m]));
 
     const header = [
-      "Epic",
+      "Initiative",
       "機能",
-      "feature_id",
+      "epic_id",
       "担当者",
       "member_id",
       "キャパシティ",
@@ -2121,16 +2142,16 @@ const exportAllocationTSV = o
     const rows = maRows
       .filter((r) => r.capacity > 0)
       .flatMap((r) => {
-        const feature = featureById.get(r.featureId);
-        const featureName = feature?.name ?? "";
+        const epic = epicById.get(r.epicId);
+        const epicName = epic?.name ?? "";
         const memberName = memberById.get(r.memberId) ?? "";
         const month = monthById.get(r.monthId);
         if (!month) return [];
         return [
           [
-            tsvCell(feature ? (epicById.get(feature.epicId) ?? "") : ""),
-            tsvCell(featureName),
-            r.featureId,
+            tsvCell(epic ? (initiativeById.get(epic.initiativeId) ?? "") : ""),
+            tsvCell(epicName),
+            r.epicId,
             tsvCell(memberName),
             r.memberId,
             r.capacity,
@@ -2142,20 +2163,22 @@ const exportAllocationTSV = o
     return [header, ...rows].join("\n");
   });
 
-const exportFeatureMetadataCSV = o
+const exportEpicMetadataCSV = o
   .input(z.object({}))
   .handler(async ({ context }) => {
-    const allFeatures = await context.db.select().from(features).all();
     const allEpics = await context.db.select().from(epics).all();
-    const epicById = new Map(allEpics.map((epic) => [epic.id, epic.name]));
+    const allInitiatives = await context.db.select().from(initiatives).all();
+    const initiativeById = new Map(
+      allInitiatives.map((initiative) => [initiative.id, initiative.name]),
+    );
     const rows = await Promise.all(
-      allFeatures.map(async (feature) => {
-        const links = await getFeatureLinks(context.db, feature.id);
+      allEpics.map(async (epic) => {
+        const links = await getEpicLinks(context.db, epic.id);
         return [
-          csvCell(epicById.get(feature.epicId) ?? ""),
-          feature.id,
-          csvCell(feature.name),
-          csvCell(feature.description ?? ""),
+          csvCell(initiativeById.get(epic.initiativeId) ?? ""),
+          epic.id,
+          csvCell(epic.name),
+          csvCell(epic.description ?? ""),
           csvCell(
             JSON.stringify(
               links.map((link) => ({ title: link.title, url: link.url })),
@@ -2165,25 +2188,25 @@ const exportFeatureMetadataCSV = o
       }),
     );
     return [
-      ["epic", "feature_id", "name", "description", "links"].join(","),
+      ["initiative", "epic_id", "name", "description", "links"].join(","),
       ...rows,
     ].join("\n");
   });
 
-const exportEpicMetadataCSV = o
+const exportInitiativeMetadataCSV = o
   .input(z.object({}))
   .handler(async ({ context }) => {
-    const allEpics = await context.db
+    const allInitiatives = await context.db
       .select()
-      .from(epics)
-      .orderBy(asc(epics.position), asc(epics.id))
+      .from(initiatives)
+      .orderBy(asc(initiatives.position), asc(initiatives.id))
       .all();
     const rows = await Promise.all(
-      allEpics.map(async (epic) => {
-        const links = await getEpicLinks(context.db, epic.id);
+      allInitiatives.map(async (initiative) => {
+        const links = await getInitiativeLinks(context.db, initiative.id);
         return [
-          csvCell(epic.name),
-          csvCell(epic.description ?? ""),
+          csvCell(initiative.name),
+          csvCell(initiative.description ?? ""),
           csvCell(
             JSON.stringify(
               links.map((link) => ({ title: link.title, url: link.url })),
@@ -2303,13 +2326,13 @@ class MemberTSVImportAbort extends Error {
   }
 }
 
-type FeatureMetadataImportRow = {
+type EpicMetadataImportRow = {
   row: number;
-  epic: string | null | undefined;
-  featureId: number | null;
+  initiative: string | null | undefined;
+  epicId: number | null;
   name: string;
   description: string | null;
-  links: NormalizedFeatureLinkInput[];
+  links: NormalizedEpicLinkInput[];
 };
 
 function parseOptionalMemberId(
@@ -2435,7 +2458,7 @@ function parseMemberTSVRows(
   return { rows, skipped, errors };
 }
 
-function parseFeatureMetadataLinksCell(
+function parseEpicMetadataLinksCell(
   value: string,
 ): Array<{ title: string; url: string }> {
   if (value.trim().length === 0) return [];
@@ -2443,10 +2466,10 @@ function parseFeatureMetadataLinksCell(
   try {
     parsed = JSON.parse(value);
   } catch {
-    throwFeatureMetadataError("links列はJSON配列で入力してください。");
+    throwEpicMetadataError("links列はJSON配列で入力してください。");
   }
   if (!Array.isArray(parsed)) {
-    throwFeatureMetadataError("links列はJSON配列で入力してください。");
+    throwEpicMetadataError("links列はJSON配列で入力してください。");
   }
   return parsed.map((item) => {
     if (
@@ -2455,7 +2478,7 @@ function parseFeatureMetadataLinksCell(
       typeof (item as { title?: unknown }).title !== "string" ||
       typeof (item as { url?: unknown }).url !== "string"
     ) {
-      throwFeatureMetadataError(
+      throwEpicMetadataError(
         'links列は [{"title":"...","url":"https://..."}] の形式で入力してください。',
       );
     }
@@ -2480,15 +2503,15 @@ const csvImport = o
     }
 
     const headers = parseCSVLine(lines[0]!).map((h) => h.trim());
-    const colFeature = headers.indexOf("機能");
+    const colEpic = headers.indexOf("機能");
     const colMember = headers.indexOf("担当者");
     const colCapacity = headers.indexOf("キャパシティ");
     const colMonth = headers.indexOf("月");
-    const colEpic = headers.indexOf("Epic");
-    const colFeatureId = headers.indexOf("feature_id");
+    const colInitiative = headers.indexOf("Initiative");
+    const colEpicId = headers.indexOf("epic_id");
     const colMemberId = headers.indexOf("member_id");
 
-    if ([colFeature, colMember, colCapacity, colMonth].includes(-1)) {
+    if ([colEpic, colMember, colCapacity, colMonth].includes(-1)) {
       throw new ORPCError("BAD_REQUEST", {
         message:
           "CSVヘッダーに「機能」「担当者」「キャパシティ」「月」のカラムが必要です。",
@@ -2500,15 +2523,18 @@ const csvImport = o
     const errors: ImportRowError[] = [];
 
     // Preload caches
-    const featureCache = new Map<string, { id: number; epicId: number }>();
-    const featureCacheById = new Map<number, { id: number; epicId: number }>();
+    const epicCache = new Map<string, { id: number; initiativeId: number }>();
+    const epicCacheById = new Map<
+      number,
+      { id: number; initiativeId: number }
+    >();
     const memberCache = new Map<string, number>();
     const memberCacheById = new Map<number, number>();
     const monthCache = new Map<string, number>();
-    const defaultEpicId = await getDefaultEpicId(db);
-    for (const f of await db.select().from(features).all()) {
-      featureCache.set(f.name, { id: f.id, epicId: f.epicId });
-      featureCacheById.set(f.id, { id: f.id, epicId: f.epicId });
+    const defaultInitiativeId = await getDefaultInitiativeId(db);
+    for (const f of await db.select().from(epics).all()) {
+      epicCache.set(f.name, { id: f.id, initiativeId: f.initiativeId });
+      epicCacheById.set(f.id, { id: f.id, initiativeId: f.initiativeId });
     }
     for (const m of await db.select().from(members).all()) {
       memberCache.set(m.name, m.id);
@@ -2523,17 +2549,17 @@ const csvImport = o
       const rowNum = i + 1;
       const cols = parseCSVLine(lines[i]!);
 
-      const featureName = (cols[colFeature] ?? "").trim();
+      const epicName = (cols[colEpic] ?? "").trim();
       const memberName = (cols[colMember] ?? "").trim();
       const capacityStr = (cols[colCapacity] ?? "").trim();
       const monthStr = (cols[colMonth] ?? "").trim();
-      const rawFeatureId =
-        colFeatureId >= 0 ? (cols[colFeatureId] ?? "").trim() : "";
+      const rawEpicId = colEpicId >= 0 ? (cols[colEpicId] ?? "").trim() : "";
       const rawMemberId =
         colMemberId >= 0 ? (cols[colMemberId] ?? "").trim() : "";
-      const epicName = colEpic >= 0 ? (cols[colEpic] ?? "").trim() : undefined;
+      const initiativeName =
+        colInitiative >= 0 ? (cols[colInitiative] ?? "").trim() : undefined;
 
-      if (!featureName) {
+      if (!epicName) {
         errors.push({ row: rowNum, message: "機能名が空です" });
         skipped++;
         continue;
@@ -2574,46 +2600,47 @@ const csvImport = o
         continue;
       }
 
-      // Find or create feature
-      const desiredEpicId =
-        colEpic >= 0 ? await getOrCreateEpicByName(db, epicName) : undefined;
+      // Find or create epic
+      const desiredInitiativeId =
+        colInitiative >= 0
+          ? await getOrCreateInitiativeByName(db, initiativeName)
+          : undefined;
       // ID lookup first, then name fallback
-      const parsedFeatureId = rawFeatureId ? Number(rawFeatureId) : NaN;
-      let featureRecord =
-        (!Number.isNaN(parsedFeatureId) &&
-          featureCacheById.get(parsedFeatureId)) ||
-        featureCache.get(featureName);
-      let featureId = featureRecord?.id;
-      if (featureId === undefined) {
-        const epicId = desiredEpicId ?? defaultEpicId;
+      const parsedEpicId = rawEpicId ? Number(rawEpicId) : NaN;
+      let epicRecord =
+        (!Number.isNaN(parsedEpicId) && epicCacheById.get(parsedEpicId)) ||
+        epicCache.get(epicName);
+      let epicId = epicRecord?.id;
+      if (epicId === undefined) {
+        const initiativeId = desiredInitiativeId ?? defaultInitiativeId;
         const [newF] = await db
-          .insert(features)
+          .insert(epics)
           .values({
-            name: featureName,
-            epicId,
-            position: await nextFeaturePosition(db, epicId),
+            name: epicName,
+            initiativeId,
+            position: await nextEpicPosition(db, initiativeId),
           })
           .returning();
-        if (!newF) throw new Error(`Failed to create feature: ${featureName}`);
-        featureId = newF.id;
-        featureRecord = { id: featureId, epicId: newF.epicId };
-        featureCache.set(featureName, featureRecord);
-        featureCacheById.set(featureId, featureRecord);
+        if (!newF) throw new Error(`Failed to create epic: ${epicName}`);
+        epicId = newF.id;
+        epicRecord = { id: epicId, initiativeId: newF.initiativeId };
+        epicCache.set(epicName, epicRecord);
+        epicCacheById.set(epicId, epicRecord);
       } else if (
-        desiredEpicId !== undefined &&
-        featureRecord &&
-        featureRecord.epicId !== desiredEpicId
+        desiredInitiativeId !== undefined &&
+        epicRecord &&
+        epicRecord.initiativeId !== desiredInitiativeId
       ) {
         await db
-          .update(features)
+          .update(epics)
           .set({
-            epicId: desiredEpicId,
-            position: await nextFeaturePosition(db, desiredEpicId),
+            initiativeId: desiredInitiativeId,
+            position: await nextEpicPosition(db, desiredInitiativeId),
           })
-          .where(eq(features.id, featureId));
-        const updated = { id: featureId, epicId: desiredEpicId };
-        featureCache.set(featureName, updated);
-        featureCacheById.set(featureId, updated);
+          .where(eq(epics.id, epicId));
+        const updated = { id: epicId, initiativeId: desiredInitiativeId };
+        epicCache.set(epicName, updated);
+        epicCacheById.set(epicId, updated);
       }
 
       // Find or create member
@@ -2637,12 +2664,12 @@ const csvImport = o
       // Find or create month (and quarter if needed)
       const monthId = await findOrCreateMonth(db, year, monthNum, monthCache);
 
-      // Ensure feature_months record exists without overwriting existing total
-      const existingFM = await getFeatureMonthRow(db, featureId, monthId);
+      // Ensure epic_months record exists without overwriting existing total
+      const existingFM = await getEpicMonthRow(db, epicId, monthId);
       if (!existingFM) {
         await db
-          .insert(featureMonths)
-          .values({ featureId, monthId, totalCapacity: 0 });
+          .insert(epicMonths)
+          .values({ epicId, monthId, totalCapacity: 0 });
       }
 
       // Additive upsert for member_month_allocations
@@ -2651,7 +2678,7 @@ const csvImport = o
         .from(memberMonthAllocations)
         .where(
           and(
-            eq(memberMonthAllocations.featureId, featureId),
+            eq(memberMonthAllocations.epicId, epicId),
             eq(memberMonthAllocations.monthId, monthId),
             eq(memberMonthAllocations.memberId, memberId),
           ),
@@ -2666,25 +2693,21 @@ const csvImport = o
           .where(eq(memberMonthAllocations.id, existingAlloc[0].id));
       } else {
         await db.insert(memberMonthAllocations).values({
-          featureId,
+          epicId,
           monthId,
           memberId,
           capacity: normalizeCapacity(capacity),
         });
       }
 
-      affectedPairs.add(`${featureId}:${monthId}`);
+      affectedPairs.add(`${epicId}:${monthId}`);
       success++;
     }
 
-    // Recalculate feature_months totals for all affected pairs
+    // Recalculate epic_months totals for all affected pairs
     for (const pair of affectedPairs) {
       const parts = pair.split(":");
-      await recalculateFeatureMonthTotal(
-        db,
-        Number(parts[0]),
-        Number(parts[1]),
-      );
+      await recalculateEpicMonthTotal(db, Number(parts[0]), Number(parts[1]));
     }
 
     return { success, skipped, errors };
@@ -2704,15 +2727,15 @@ const tsvImport = o
     }
 
     const headers = parseTSVLine(lines[0]!).map((h) => h.trim());
-    const colFeature = headers.indexOf("機能");
+    const colEpic = headers.indexOf("機能");
     const colMember = headers.indexOf("担当者");
     const colCapacity = headers.indexOf("キャパシティ");
     const colMonth = headers.indexOf("月");
-    const colEpic = headers.indexOf("Epic");
-    const colFeatureId = headers.indexOf("feature_id");
+    const colInitiative = headers.indexOf("Initiative");
+    const colEpicId = headers.indexOf("epic_id");
     const colMemberId = headers.indexOf("member_id");
 
-    if ([colFeature, colMember, colCapacity, colMonth].includes(-1)) {
+    if ([colEpic, colMember, colCapacity, colMonth].includes(-1)) {
       throw new ORPCError("BAD_REQUEST", {
         message:
           "TSVヘッダーに「機能」「担当者」「キャパシティ」「月」のカラムが必要です。",
@@ -2724,15 +2747,18 @@ const tsvImport = o
     const errors: ImportRowError[] = [];
 
     // Preload caches
-    const featureCache = new Map<string, { id: number; epicId: number }>();
-    const featureCacheById = new Map<number, { id: number; epicId: number }>();
+    const epicCache = new Map<string, { id: number; initiativeId: number }>();
+    const epicCacheById = new Map<
+      number,
+      { id: number; initiativeId: number }
+    >();
     const memberCache = new Map<string, number>();
     const memberCacheById = new Map<number, number>();
     const monthCache = new Map<string, number>();
-    const defaultEpicId = await getDefaultEpicId(db);
-    for (const f of await db.select().from(features).all()) {
-      featureCache.set(f.name, { id: f.id, epicId: f.epicId });
-      featureCacheById.set(f.id, { id: f.id, epicId: f.epicId });
+    const defaultInitiativeId = await getDefaultInitiativeId(db);
+    for (const f of await db.select().from(epics).all()) {
+      epicCache.set(f.name, { id: f.id, initiativeId: f.initiativeId });
+      epicCacheById.set(f.id, { id: f.id, initiativeId: f.initiativeId });
     }
     for (const m of await db.select().from(members).all()) {
       memberCache.set(m.name, m.id);
@@ -2747,17 +2773,17 @@ const tsvImport = o
       const rowNum = i + 1;
       const cols = parseTSVLine(lines[i]!);
 
-      const featureName = (cols[colFeature] ?? "").trim();
+      const epicName = (cols[colEpic] ?? "").trim();
       const memberName = (cols[colMember] ?? "").trim();
       const capacityStr = (cols[colCapacity] ?? "").trim();
       const monthStr = (cols[colMonth] ?? "").trim();
-      const rawFeatureId =
-        colFeatureId >= 0 ? (cols[colFeatureId] ?? "").trim() : "";
+      const rawEpicId = colEpicId >= 0 ? (cols[colEpicId] ?? "").trim() : "";
       const rawMemberId =
         colMemberId >= 0 ? (cols[colMemberId] ?? "").trim() : "";
-      const epicName = colEpic >= 0 ? (cols[colEpic] ?? "").trim() : undefined;
+      const initiativeName =
+        colInitiative >= 0 ? (cols[colInitiative] ?? "").trim() : undefined;
 
-      if (!featureName) {
+      if (!epicName) {
         errors.push({ row: rowNum, message: "機能名が空です" });
         skipped++;
         continue;
@@ -2798,46 +2824,47 @@ const tsvImport = o
         continue;
       }
 
-      // Find or create feature
-      const desiredEpicId =
-        colEpic >= 0 ? await getOrCreateEpicByName(db, epicName) : undefined;
+      // Find or create epic
+      const desiredInitiativeId =
+        colInitiative >= 0
+          ? await getOrCreateInitiativeByName(db, initiativeName)
+          : undefined;
       // ID lookup first, then name fallback
-      const parsedFeatureId = rawFeatureId ? Number(rawFeatureId) : NaN;
-      let featureRecord =
-        (!Number.isNaN(parsedFeatureId) &&
-          featureCacheById.get(parsedFeatureId)) ||
-        featureCache.get(featureName);
-      let featureId = featureRecord?.id;
-      if (featureId === undefined) {
-        const epicId = desiredEpicId ?? defaultEpicId;
+      const parsedEpicId = rawEpicId ? Number(rawEpicId) : NaN;
+      let epicRecord =
+        (!Number.isNaN(parsedEpicId) && epicCacheById.get(parsedEpicId)) ||
+        epicCache.get(epicName);
+      let epicId = epicRecord?.id;
+      if (epicId === undefined) {
+        const initiativeId = desiredInitiativeId ?? defaultInitiativeId;
         const [newF] = await db
-          .insert(features)
+          .insert(epics)
           .values({
-            name: featureName,
-            epicId,
-            position: await nextFeaturePosition(db, epicId),
+            name: epicName,
+            initiativeId,
+            position: await nextEpicPosition(db, initiativeId),
           })
           .returning();
-        if (!newF) throw new Error(`Failed to create feature: ${featureName}`);
-        featureId = newF.id;
-        featureRecord = { id: featureId, epicId: newF.epicId };
-        featureCache.set(featureName, featureRecord);
-        featureCacheById.set(featureId, featureRecord);
+        if (!newF) throw new Error(`Failed to create epic: ${epicName}`);
+        epicId = newF.id;
+        epicRecord = { id: epicId, initiativeId: newF.initiativeId };
+        epicCache.set(epicName, epicRecord);
+        epicCacheById.set(epicId, epicRecord);
       } else if (
-        desiredEpicId !== undefined &&
-        featureRecord &&
-        featureRecord.epicId !== desiredEpicId
+        desiredInitiativeId !== undefined &&
+        epicRecord &&
+        epicRecord.initiativeId !== desiredInitiativeId
       ) {
         await db
-          .update(features)
+          .update(epics)
           .set({
-            epicId: desiredEpicId,
-            position: await nextFeaturePosition(db, desiredEpicId),
+            initiativeId: desiredInitiativeId,
+            position: await nextEpicPosition(db, desiredInitiativeId),
           })
-          .where(eq(features.id, featureId));
-        const updated = { id: featureId, epicId: desiredEpicId };
-        featureCache.set(featureName, updated);
-        featureCacheById.set(featureId, updated);
+          .where(eq(epics.id, epicId));
+        const updated = { id: epicId, initiativeId: desiredInitiativeId };
+        epicCache.set(epicName, updated);
+        epicCacheById.set(epicId, updated);
       }
 
       // Find or create member
@@ -2861,12 +2888,12 @@ const tsvImport = o
       // Find or create month (and quarter if needed)
       const monthId = await findOrCreateMonth(db, year, monthNum, monthCache);
 
-      // Ensure feature_months record exists without overwriting existing total
-      const existingFM = await getFeatureMonthRow(db, featureId, monthId);
+      // Ensure epic_months record exists without overwriting existing total
+      const existingFM = await getEpicMonthRow(db, epicId, monthId);
       if (!existingFM) {
         await db
-          .insert(featureMonths)
-          .values({ featureId, monthId, totalCapacity: 0 });
+          .insert(epicMonths)
+          .values({ epicId, monthId, totalCapacity: 0 });
       }
 
       // Additive upsert for member_month_allocations
@@ -2875,7 +2902,7 @@ const tsvImport = o
         .from(memberMonthAllocations)
         .where(
           and(
-            eq(memberMonthAllocations.featureId, featureId),
+            eq(memberMonthAllocations.epicId, epicId),
             eq(memberMonthAllocations.monthId, monthId),
             eq(memberMonthAllocations.memberId, memberId),
           ),
@@ -2890,31 +2917,27 @@ const tsvImport = o
           .where(eq(memberMonthAllocations.id, existingAlloc[0].id));
       } else {
         await db.insert(memberMonthAllocations).values({
-          featureId,
+          epicId,
           monthId,
           memberId,
           capacity: normalizeCapacity(capacity),
         });
       }
 
-      affectedPairs.add(`${featureId}:${monthId}`);
+      affectedPairs.add(`${epicId}:${monthId}`);
       success++;
     }
 
-    // Recalculate feature_months totals for all affected pairs
+    // Recalculate epic_months totals for all affected pairs
     for (const pair of affectedPairs) {
       const parts = pair.split(":");
-      await recalculateFeatureMonthTotal(
-        db,
-        Number(parts[0]),
-        Number(parts[1]),
-      );
+      await recalculateEpicMonthTotal(db, Number(parts[0]), Number(parts[1]));
     }
 
     return { success, skipped, errors };
   });
 
-const featureMetadataCSVImport = o
+const epicMetadataCSVImport = o
   .input(z.object({ csv: z.string() }))
   .handler(async ({ input, context }) => {
     const { db } = context;
@@ -2926,8 +2949,8 @@ const featureMetadataCSVImport = o
     if (lines.length < 2) return { success: 0 };
 
     const headers = parseCSVLine(lines[0]!).map((h) => h.trim());
-    const colEpic = headers.indexOf("epic");
-    const colFeatureId = headers.indexOf("feature_id");
+    const colInitiative = headers.indexOf("initiative");
+    const colEpicId = headers.indexOf("epic_id");
     const colName = headers.indexOf("name");
     const colDescription = headers.indexOf("description");
     const colLinks = headers.indexOf("links");
@@ -2937,100 +2960,94 @@ const featureMetadataCSVImport = o
       });
     }
 
-    const rows: FeatureMetadataImportRow[] = [];
+    const rows: EpicMetadataImportRow[] = [];
     const seenNames = new Set<string>();
     for (let i = 1; i < lines.length; i++) {
       const rowNum = i + 1;
       const cols = parseCSVLine(lines[i]!);
-      const epic =
-        colEpic < 0
+      const initiative =
+        colInitiative < 0
           ? undefined
-          : (cols[colEpic] ?? "").trim().length > 0
-            ? (cols[colEpic] ?? "").trim()
+          : (cols[colInitiative] ?? "").trim().length > 0
+            ? (cols[colInitiative] ?? "").trim()
             : null;
-      const name = normalizeNameInput(cols[colName] ?? "", "feature");
+      const name = normalizeNameInput(cols[colName] ?? "", "epic");
       if (seenNames.has(name)) {
-        throwFeatureMetadataError(
-          `Feature metadata CSV内でFeature名が重複しています: ${name}`,
+        throwEpicMetadataError(
+          `Epic metadata CSV内でEpic名が重複しています: ${name}`,
         );
       }
       seenNames.add(name);
 
-      const rawFeatureId =
-        colFeatureId >= 0 ? (cols[colFeatureId] ?? "").trim() : "";
-      const featureId = rawFeatureId ? Number(rawFeatureId) : null;
+      const rawEpicId = colEpicId >= 0 ? (cols[colEpicId] ?? "").trim() : "";
+      const epicId = rawEpicId ? Number(rawEpicId) : null;
 
-      const description = normalizeFeatureDescriptionInput(
+      const description = normalizeEpicDescriptionInput(
         cols[colDescription] ?? "",
       );
-      const links = normalizeFeatureLinksInput(
-        parseFeatureMetadataLinksCell(cols[colLinks] ?? ""),
+      const links = normalizeEpicLinksInput(
+        parseEpicMetadataLinksCell(cols[colLinks] ?? ""),
       );
       rows.push({
         row: rowNum,
-        epic,
-        featureId:
-          featureId !== null && !Number.isNaN(featureId) ? featureId : null,
+        initiative,
+        epicId: epicId !== null && !Number.isNaN(epicId) ? epicId : null,
         name,
         description: description ?? null,
         links: links ?? [],
       });
     }
 
-    const existingFeatures = await db.select().from(features).all();
-    const featureByName = new Map(existingFeatures.map((f) => [f.name, f]));
-    const featureById = new Map(existingFeatures.map((f) => [f.id, f]));
-    const defaultEpicId = await getDefaultEpicId(db);
+    const existingEpics = await db.select().from(epics).all();
+    const epicByName = new Map(existingEpics.map((f) => [f.name, f]));
+    const epicById = new Map(existingEpics.map((f) => [f.id, f]));
+    const defaultInitiativeId = await getDefaultInitiativeId(db);
 
     for (const row of rows) {
       // ID lookup first, then name fallback
       const existing =
-        (row.featureId !== null && featureById.get(row.featureId)) ||
-        featureByName.get(row.name);
-      const epicId =
-        row.epic === undefined
-          ? (existing?.epicId ?? defaultEpicId)
-          : row.epic !== null
-            ? await getOrCreateEpicByName(db, row.epic)
-            : defaultEpicId;
+        (row.epicId !== null && epicById.get(row.epicId)) ||
+        epicByName.get(row.name);
+      const initiativeId =
+        row.initiative === undefined
+          ? (existing?.initiativeId ?? defaultInitiativeId)
+          : row.initiative !== null
+            ? await getOrCreateInitiativeByName(db, row.initiative)
+            : defaultInitiativeId;
       if (existing) {
         const [updated] = await db
-          .update(features)
+          .update(epics)
           .set({
             description: row.description,
-            epicId,
-            ...(existing.epicId !== epicId
-              ? { position: await nextFeaturePosition(db, epicId) }
+            initiativeId,
+            ...(existing.initiativeId !== initiativeId
+              ? { position: await nextEpicPosition(db, initiativeId) }
               : {}),
           })
-          .where(eq(features.id, existing.id))
+          .where(eq(epics.id, existing.id))
           .returning();
         if (!updated) {
-          throw new Error(
-            `Failed to update feature metadata at row ${row.row}`,
-          );
+          throw new Error(`Failed to update epic metadata at row ${row.row}`);
         }
-        await saveFeatureLinks(db, existing.id, row.links);
-        featureByName.set(row.name, updated);
-        featureById.set(existing.id, updated);
+        await saveEpicLinks(db, existing.id, row.links);
+        epicByName.set(row.name, updated);
+        epicById.set(existing.id, updated);
       } else {
         const [created] = await db
-          .insert(features)
+          .insert(epics)
           .values({
             name: row.name,
             description: row.description,
-            epicId,
-            position: await nextFeaturePosition(db, epicId),
+            initiativeId,
+            position: await nextEpicPosition(db, initiativeId),
           })
           .returning();
         if (!created) {
-          throw new Error(
-            `Failed to create feature metadata at row ${row.row}`,
-          );
+          throw new Error(`Failed to create epic metadata at row ${row.row}`);
         }
-        await saveFeatureLinks(db, created.id, row.links);
-        featureByName.set(row.name, created);
-        featureById.set(created.id, created);
+        await saveEpicLinks(db, created.id, row.links);
+        epicByName.set(row.name, created);
+        epicById.set(created.id, created);
       }
     }
 
@@ -3223,7 +3240,7 @@ const memberTSVImport = o
     }
   });
 
-const epicMetadataCSVImport = o
+const initiativeMetadataCSVImport = o
   .input(z.object({ csv: z.string() }))
   .handler(async ({ input, context }) => {
     const { db } = context;
@@ -3248,24 +3265,24 @@ const epicMetadataCSVImport = o
       row: number;
       name: string;
       description: string | null;
-      links: NormalizedFeatureLinkInput[];
+      links: NormalizedEpicLinkInput[];
     }> = [];
     const seenNames = new Set<string>();
     for (let i = 1; i < lines.length; i++) {
       const rowNum = i + 1;
       const cols = parseCSVLine(lines[i]!);
-      const name = normalizeNameInput(cols[colName] ?? "", "epic");
+      const name = normalizeNameInput(cols[colName] ?? "", "initiative");
       if (seenNames.has(name)) {
-        throwFeatureMetadataError(
-          `Epic metadata CSV内でEpic名が重複しています: ${name}`,
+        throwEpicMetadataError(
+          `Initiative metadata CSV内でInitiative名が重複しています: ${name}`,
         );
       }
       seenNames.add(name);
-      const description = normalizeFeatureDescriptionInput(
+      const description = normalizeEpicDescriptionInput(
         cols[colDescription] ?? "",
       );
-      const links = normalizeFeatureLinksInput(
-        parseFeatureMetadataLinksCell(cols[colLinks] ?? ""),
+      const links = normalizeEpicLinksInput(
+        parseEpicMetadataLinksCell(cols[colLinks] ?? ""),
       );
       rows.push({
         row: rowNum,
@@ -3275,36 +3292,42 @@ const epicMetadataCSVImport = o
       });
     }
 
-    const existingEpics = await db.select().from(epics).all();
-    const epicByName = new Map(existingEpics.map((epic) => [epic.name, epic]));
+    const existingInitiatives = await db.select().from(initiatives).all();
+    const initiativeByName = new Map(
+      existingInitiatives.map((initiative) => [initiative.name, initiative]),
+    );
     for (const row of rows) {
-      const existing = epicByName.get(row.name);
+      const existing = initiativeByName.get(row.name);
       if (existing) {
         const [updated] = await db
-          .update(epics)
+          .update(initiatives)
           .set({ description: row.description })
-          .where(eq(epics.id, existing.id))
+          .where(eq(initiatives.id, existing.id))
           .returning();
         if (!updated) {
-          throw new Error(`Failed to update epic metadata at row ${row.row}`);
+          throw new Error(
+            `Failed to update initiative metadata at row ${row.row}`,
+          );
         }
-        await saveEpicLinks(db, existing.id, row.links);
-        epicByName.set(row.name, updated);
+        await saveInitiativeLinks(db, existing.id, row.links);
+        initiativeByName.set(row.name, updated);
       } else {
         const [created] = await db
-          .insert(epics)
+          .insert(initiatives)
           .values({
             name: row.name,
             description: row.description,
-            position: (await db.select().from(epics).all()).length,
+            position: (await db.select().from(initiatives).all()).length,
             isDefault: false,
           })
           .returning();
         if (!created) {
-          throw new Error(`Failed to create epic metadata at row ${row.row}`);
+          throw new Error(
+            `Failed to create initiative metadata at row ${row.row}`,
+          );
         }
-        await saveEpicLinks(db, created.id, row.links);
-        epicByName.set(row.name, created);
+        await saveInitiativeLinks(db, created.id, row.links);
+        initiativeByName.set(row.name, created);
       }
     }
 
@@ -3320,19 +3343,19 @@ export const router = {
     snapshot: historySnapshot,
     restore: historyRestore,
   },
+  initiatives: {
+    list: initiativesList,
+    create: initiativesCreate,
+    rename: initiativesRename,
+    delete: initiativesDelete,
+    move: initiativesMove,
+  },
   epics: {
     list: epicsList,
     create: epicsCreate,
     rename: epicsRename,
     delete: epicsDelete,
     move: epicsMove,
-  },
-  features: {
-    list: featuresList,
-    create: featuresCreate,
-    rename: featuresRename,
-    delete: featuresDelete,
-    move: featuresMove,
   },
   members: {
     list: membersList,
@@ -3348,29 +3371,29 @@ export const router = {
     delete: quartersDelete,
   },
   allocations: {
-    getFeatureView: allocationsGetFeatureView,
+    getEpicView: allocationsGetEpicView,
     getMemberView: allocationsGetMemberView,
     assignMember: allocationsAssignMember,
-    removeMemberFromFeature: allocationsRemoveMemberFromFeature,
+    removeMemberFromEpic: allocationsRemoveMemberFromEpic,
     previewMemberAllocation: allocationsPreviewMemberAllocation,
     updateTotal: allocationsUpdateTotal,
     updateMemberAllocation: allocationsUpdateMemberAllocation,
     moveQuarter: allocationsMoveQuarter,
   },
   export: {
-    featureCSV: exportFeatureCSV,
+    epicCSV: exportEpicCSV,
     memberCSV: exportMemberCSV,
     allocationCSV: exportAllocationCSV,
     allocationTSV: exportAllocationTSV,
-    featureMetadataCSV: exportFeatureMetadataCSV,
     epicMetadataCSV: exportEpicMetadataCSV,
+    initiativeMetadataCSV: exportInitiativeMetadataCSV,
   },
   import: {
     csvImport,
     tsvImport,
-    featureMetadataCSVImport,
-    memberTSVImport,
     epicMetadataCSVImport,
+    memberTSVImport,
+    initiativeMetadataCSVImport,
   },
 };
 

@@ -35,8 +35,8 @@ type CapacityAggMode = "total" | "average";
 type Month = { id: number; year: number; month: number; quarterId: number };
 type Quarter = { id: number; year: number; quarter: number; months: Month[] };
 type Member = { id: number; name: string; maxCapacity: number | null };
-type CellType = "feature" | "member";
-type FeatureLink = {
+type CellType = "epic" | "member";
+type EpicLink = {
   id?: number;
   title: string;
   url: string;
@@ -50,24 +50,24 @@ type MonthData = {
   memberAllocations: Array<{ memberId: number; capacity: number }>;
 };
 
-type FeatureRow = {
+type EpicRow = {
   id: number;
   name: string;
   description: string | null;
-  epicId: number;
+  initiativeId: number;
   position: number;
-  links: FeatureLink[];
+  links: EpicLink[];
   expanded: boolean;
   months: Map<number, MonthData>;
 };
 
-type EpicRow = {
+type InitiativeRow = {
   id: number;
   name: string;
   description: string | null;
   position: number;
   isDefault: boolean;
-  links: FeatureLink[];
+  links: EpicLink[];
   collapsed: boolean;
 };
 
@@ -86,8 +86,8 @@ type CapacityConflictResolution =
   | "rebalanceOthersProportionally"
   | "rebalanceAllProportionally";
 
-type FeatureMonthUpdate = {
-  featureId: number;
+type EpicMonthUpdate = {
+  epicId: number;
   months: Array<{
     monthId: number;
     totalCapacity: number;
@@ -97,7 +97,7 @@ type FeatureMonthUpdate = {
 };
 
 type PendingCapacityConflict = {
-  featureId: number;
+  epicId: number;
   periodType: ViewMode;
   monthId?: number;
   quarterId?: number;
@@ -109,7 +109,7 @@ type PendingCapacityConflict = {
 };
 
 type PendingMaxCapacityOverflow = {
-  featureId: number;
+  epicId: number;
   periodType: ViewMode;
   monthId?: number;
   quarterId?: number;
@@ -121,14 +121,14 @@ type PendingMaxCapacityOverflow = {
 };
 
 type RebalancePreview = {
-  featureName: string;
+  epicName: string;
   currentCapacity: number;
   nextCapacity: number;
 };
 
 type SelectableRow =
-  | { type: "feature"; featureId: number }
-  | { type: "member"; featureId: number; memberId: number };
+  | { type: "epic"; epicId: number }
+  | { type: "member"; epicId: number; memberId: number };
 
 type SelectionRect = {
   minRow: number;
@@ -149,10 +149,10 @@ type GridPasteTarget = {
 };
 
 type PasteOp =
-  | { kind: "feature"; featureId: number; column: PeriodColumn; value: number }
+  | { kind: "epic"; epicId: number; column: PeriodColumn; value: number }
   | {
       kind: "member";
-      featureId: number;
+      epicId: number;
       memberId: number;
       column: PeriodColumn;
       value: number;
@@ -172,8 +172,8 @@ type PasteConflictState = {
 };
 
 type DragItem =
-  | { type: "epic"; epicId: number }
-  | { type: "feature"; featureId: number; epicId: number };
+  | { type: "initiative"; initiativeId: number }
+  | { type: "epic"; epicId: number; initiativeId: number };
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -238,7 +238,7 @@ function emptyMonthData(): MonthData {
   return { totalCapacity: 0, unassignedCapacity: 0, memberAllocations: [] };
 }
 
-function isOpenableFeatureUrl(url: string): boolean {
+function isOpenableEpicUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
     return parsed.protocol === "http:" || parsed.protocol === "https:";
@@ -530,7 +530,7 @@ function HeatmapMemberCell({
   );
 }
 
-function FeatureNameCell({
+function EpicNameCell({
   name,
   hasDescription,
   links,
@@ -601,7 +601,7 @@ function FeatureNameCell({
       <div className="name-edit-row">
         <input
           ref={inputRef}
-          className="feature-name-input"
+          className="epic-name-input"
           value={val}
           disabled={saving}
           aria-invalid={error ? true : undefined}
@@ -629,10 +629,10 @@ function FeatureNameCell({
   }
 
   return (
-    <div className="feature-name-row">
+    <div className="epic-name-row">
       <button
         type="button"
-        className="feature-name"
+        className="epic-name"
         onClick={startEdit}
         title="クリックで名前を編集"
       >
@@ -640,20 +640,20 @@ function FeatureNameCell({
       </button>
       <button
         type="button"
-        className={`feature-meta-btn${hasDescription ? " active" : ""}`}
+        className={`epic-meta-btn${hasDescription ? " active" : ""}`}
         onClick={(e) => {
           e.stopPropagation();
           onEditDetails();
         }}
-        title={hasDescription ? "説明あり" : "Feature詳細を編集"}
-        aria-label="Feature詳細を編集"
+        title={hasDescription ? "説明あり" : "Epic詳細を編集"}
+        aria-label="Epic詳細を編集"
       >
         <Info size={13} />
       </button>
       {links.length > 0 && (
         <button
           type="button"
-          className="feature-meta-btn active"
+          className="epic-meta-btn active"
           onClick={(e) => {
             e.stopPropagation();
             for (const link of links) {
@@ -674,7 +674,7 @@ function FeatureNameCell({
           e.stopPropagation();
           onDelete();
         }}
-        title="Featureを削除"
+        title="Epicを削除"
       >
         ×
       </button>
@@ -682,28 +682,28 @@ function FeatureNameCell({
   );
 }
 
-function FeatureDetailsDialog({
-  feature,
-  epics,
+function EpicDetailsDialog({
+  epic,
+  initiatives,
   onSave,
   onClose,
 }: {
-  feature: FeatureRow;
-  epics: EpicRow[];
+  epic: EpicRow;
+  initiatives: InitiativeRow[];
   onSave: (input: {
     name: string;
-    epicId: number;
+    initiativeId: number;
     description: string | null;
     links: Array<{ title: string; url: string }>;
   }) => Promise<void>;
   onClose: () => void;
 }) {
-  const [name, setName] = useState(feature.name);
-  const [epicId, setEpicId] = useState(feature.epicId);
-  const [description, setDescription] = useState(feature.description ?? "");
-  const [links, setLinks] = useState<FeatureLink[]>(
-    feature.links.length > 0
-      ? feature.links.map((link) => ({
+  const [name, setName] = useState(epic.name);
+  const [initiativeId, setInitiativeId] = useState(epic.initiativeId);
+  const [description, setDescription] = useState(epic.description ?? "");
+  const [links, setLinks] = useState<EpicLink[]>(
+    epic.links.length > 0
+      ? epic.links.map((link) => ({
           ...link,
           clientKey: `saved-${link.id ?? crypto.randomUUID()}`,
         }))
@@ -749,7 +749,7 @@ function FeatureDetailsDialog({
     try {
       await onSave({
         name: trimmedName,
-        epicId,
+        initiativeId,
         description: description.trim().length > 0 ? description : null,
         links: links.map((link) => ({ title: link.title, url: link.url })),
       });
@@ -777,21 +777,21 @@ function FeatureDetailsDialog({
       <div
         role="dialog"
         aria-modal="true"
-        className="confirm-dialog feature-details-dialog"
+        className="confirm-dialog epic-details-dialog"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           e.stopPropagation();
           if (e.key === "Escape" && !saving) onClose();
         }}
       >
-        <div className="feature-details-header">
-          <p className="confirm-msg">Feature詳細</p>
+        <div className="epic-details-header">
+          <p className="confirm-msg">Epic詳細</p>
         </div>
 
-        <label className="feature-details-label">
+        <label className="epic-details-label">
           <span>名前</span>
           <input
-            className="feature-details-input"
+            className="epic-details-input"
             value={name}
             disabled={saving}
             onChange={(e) => {
@@ -801,26 +801,26 @@ function FeatureDetailsDialog({
           />
         </label>
 
-        <label className="feature-details-label">
-          <span>Epic</span>
+        <label className="epic-details-label">
+          <span>Initiative</span>
           <select
-            className="feature-details-input"
-            value={epicId}
+            className="epic-details-input"
+            value={initiativeId}
             disabled={saving}
-            onChange={(e) => setEpicId(Number(e.target.value))}
+            onChange={(e) => setInitiativeId(Number(e.target.value))}
           >
-            {epics.map((epic) => (
-              <option key={epic.id} value={epic.id}>
-                {epic.name}
+            {initiatives.map((initiative) => (
+              <option key={initiative.id} value={initiative.id}>
+                {initiative.name}
               </option>
             ))}
           </select>
         </label>
 
-        <label className="feature-details-label">
+        <label className="epic-details-label">
           <span>説明</span>
           <textarea
-            className="feature-details-textarea"
+            className="epic-details-textarea"
             value={description}
             disabled={saving}
             maxLength={2000}
@@ -828,11 +828,11 @@ function FeatureDetailsDialog({
           />
         </label>
 
-        <div className="feature-details-links">
+        <div className="epic-details-links">
           {links.map((link, index) => (
-            <div className="feature-details-link-row" key={link.clientKey}>
+            <div className="epic-details-link-row" key={link.clientKey}>
               <input
-                className="feature-details-input"
+                className="epic-details-input"
                 value={link.title}
                 disabled={saving}
                 maxLength={100}
@@ -840,16 +840,16 @@ function FeatureDetailsDialog({
                 onChange={(e) => updateLink(index, "title", e.target.value)}
               />
               <input
-                className="feature-details-input"
+                className="epic-details-input"
                 value={link.url}
                 disabled={saving}
                 maxLength={2048}
                 placeholder="https://example.com"
                 onChange={(e) => updateLink(index, "url", e.target.value)}
               />
-              {isOpenableFeatureUrl(link.url.trim()) && (
+              {isOpenableEpicUrl(link.url.trim()) && (
                 <a
-                  className="feature-details-icon-btn"
+                  className="epic-details-icon-btn"
                   href={link.url.trim()}
                   target="_blank"
                   rel="noreferrer"
@@ -861,7 +861,7 @@ function FeatureDetailsDialog({
               )}
               <button
                 type="button"
-                className="feature-details-icon-btn"
+                className="epic-details-icon-btn"
                 onClick={() => moveLink(index, -1)}
                 disabled={saving || index === 0}
                 title="上へ"
@@ -871,7 +871,7 @@ function FeatureDetailsDialog({
               </button>
               <button
                 type="button"
-                className="feature-details-icon-btn"
+                className="epic-details-icon-btn"
                 onClick={() => moveLink(index, 1)}
                 disabled={saving || index === links.length - 1}
                 title="下へ"
@@ -881,7 +881,7 @@ function FeatureDetailsDialog({
               </button>
               <button
                 type="button"
-                className="feature-details-icon-btn danger"
+                className="epic-details-icon-btn danger"
                 onClick={() => removeLink(index)}
                 disabled={saving}
                 title="削除"
@@ -895,7 +895,7 @@ function FeatureDetailsDialog({
 
         <button
           type="button"
-          className="feature-details-add-link-btn"
+          className="epic-details-add-link-btn"
           onClick={() =>
             setLinks((current) => [
               ...current,
@@ -911,7 +911,7 @@ function FeatureDetailsDialog({
         </button>
 
         {error && (
-          <span className="name-warning feature-details-error" role="alert">
+          <span className="name-warning epic-details-error" role="alert">
             {error}
           </span>
         )}
@@ -939,12 +939,12 @@ function FeatureDetailsDialog({
   );
 }
 
-function EpicDetailsDialog({
-  epic,
+function InitiativeDetailsDialog({
+  initiative,
   onSave,
   onClose,
 }: {
-  epic: EpicRow;
+  initiative: InitiativeRow;
   onSave: (input: {
     name: string;
     description: string | null;
@@ -952,11 +952,11 @@ function EpicDetailsDialog({
   }) => Promise<void>;
   onClose: () => void;
 }) {
-  const [name, setName] = useState(epic.name);
-  const [description, setDescription] = useState(epic.description ?? "");
-  const [links, setLinks] = useState<FeatureLink[]>(
-    epic.links.length > 0
-      ? epic.links.map((link) => ({
+  const [name, setName] = useState(initiative.name);
+  const [description, setDescription] = useState(initiative.description ?? "");
+  const [links, setLinks] = useState<EpicLink[]>(
+    initiative.links.length > 0
+      ? initiative.links.map((link) => ({
           ...link,
           clientKey: `saved-${link.id ?? crypto.randomUUID()}`,
         }))
@@ -1003,15 +1003,15 @@ function EpicDetailsDialog({
       <div
         role="dialog"
         aria-modal="true"
-        className="confirm-dialog feature-details-dialog"
+        className="confirm-dialog epic-details-dialog"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.stopPropagation()}
       >
-        <div className="feature-details-header">
-          <p className="confirm-msg">Epic詳細</p>
+        <div className="epic-details-header">
+          <p className="confirm-msg">Initiative詳細</p>
           <button
             type="button"
-            className="feature-details-icon-btn"
+            className="epic-details-icon-btn"
             onClick={() =>
               setLinks((current) => [
                 ...current,
@@ -1025,10 +1025,10 @@ function EpicDetailsDialog({
             <Plus size={14} />
           </button>
         </div>
-        <label className="feature-details-label">
+        <label className="epic-details-label">
           <span>名前</span>
           <input
-            className="feature-details-input"
+            className="epic-details-input"
             value={name}
             disabled={saving}
             onChange={(e) => {
@@ -1037,21 +1037,21 @@ function EpicDetailsDialog({
             }}
           />
         </label>
-        <label className="feature-details-label">
+        <label className="epic-details-label">
           <span>説明</span>
           <textarea
-            className="feature-details-textarea"
+            className="epic-details-textarea"
             value={description}
             disabled={saving}
             maxLength={2000}
             onChange={(e) => setDescription(e.target.value)}
           />
         </label>
-        <div className="feature-details-links">
+        <div className="epic-details-links">
           {links.map((link, index) => (
-            <div className="feature-details-link-row" key={link.clientKey}>
+            <div className="epic-details-link-row" key={link.clientKey}>
               <input
-                className="feature-details-input"
+                className="epic-details-input"
                 value={link.title}
                 disabled={saving}
                 maxLength={100}
@@ -1065,7 +1065,7 @@ function EpicDetailsDialog({
                 }
               />
               <input
-                className="feature-details-input"
+                className="epic-details-input"
                 value={link.url}
                 disabled={saving}
                 maxLength={2048}
@@ -1080,7 +1080,7 @@ function EpicDetailsDialog({
               />
               <button
                 type="button"
-                className="feature-details-icon-btn danger"
+                className="epic-details-icon-btn danger"
                 onClick={() =>
                   setLinks((current) => current.filter((_, i) => i !== index))
                 }
@@ -1094,7 +1094,7 @@ function EpicDetailsDialog({
           ))}
         </div>
         {error && (
-          <span className="name-warning feature-details-error" role="alert">
+          <span className="name-warning epic-details-error" role="alert">
             {error}
           </span>
         )}
@@ -1238,10 +1238,10 @@ function CapacityConflictPopover({
             <span className="capacity-conflict-preview-list">
               {rebalancePreview.map((change) => (
                 <span
-                  key={change.featureName}
+                  key={change.epicName}
                   className="capacity-conflict-preview-item"
                 >
-                  {change.featureName}: {fmt(change.currentCapacity / d)}→
+                  {change.epicName}: {fmt(change.currentCapacity / d)}→
                   {fmt(change.nextCapacity / d)}
                 </span>
               ))}
@@ -1261,10 +1261,10 @@ function CapacityConflictPopover({
             </span>
             {rebalanceAllPreview.othersPreview.map((change) => (
               <span
-                key={change.featureName}
+                key={change.epicName}
                 className="capacity-conflict-preview-item"
               >
-                {change.featureName}: {fmt(change.currentCapacity / d)}→
+                {change.epicName}: {fmt(change.currentCapacity / d)}→
                 {fmt(change.nextCapacity / d)}
               </span>
             ))}
@@ -1388,8 +1388,8 @@ export function CapacityView({
   const rangeEndRef = useRef(rangeEnd);
   rangeEndRef.current = rangeEnd;
   const [members, setMembers] = useState<Member[]>([]);
+  const [initiativeRows, setInitiativeRows] = useState<InitiativeRow[]>([]);
   const [epicRows, setEpicRows] = useState<EpicRow[]>([]);
-  const [featureRows, setFeatureRows] = useState<FeatureRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [actionWarning, setActionWarning] = useState<string | null>(null);
@@ -1401,33 +1401,31 @@ export function CapacityView({
     errors: { row: number; message: string }[];
   } | null>(null);
   const [importing, setImporting] = useState(false);
-  const [assigningFeatureId, setAssigningFeatureId] = useState<number | null>(
-    null,
-  );
-  const [editingFeatureDetails, setEditingFeatureDetails] =
-    useState<FeatureRow | null>(null);
+  const [assigningEpicId, setAssigningEpicId] = useState<number | null>(null);
   const [editingEpicDetails, setEditingEpicDetails] = useState<EpicRow | null>(
     null,
   );
+  const [editingInitiativeDetails, setEditingInitiativeDetails] =
+    useState<InitiativeRow | null>(null);
   const [dragItem, setDragItem] = useState<DragItem | null>(null);
   const [removeConfirm, setRemoveConfirm] = useState<{
-    featureId: number;
+    epicId: number;
     memberId: number;
     memberName: string;
-    featureName: string;
+    epicName: string;
   } | null>(null);
   const [capacityConflict, setCapacityConflict] =
     useState<PendingCapacityConflict | null>(null);
   const [maxCapacityOverflow, setMaxCapacityOverflow] =
     useState<PendingMaxCapacityOverflow | null>(null);
   const [highlightTarget, setHighlightTarget] = useState<{
-    featureId: number;
+    epicId: number;
     memberId: number;
   } | null>(null);
   const highlightRowRef = useRef<HTMLTableRowElement | null>(null);
   // URLパラメータで指定されたハイライト対象をloadAll完了時に適用するための一時保存
   const pendingHighlightRef = useRef<{
-    featureId: number;
+    epicId: number;
     memberId: number;
   } | null>(null);
 
@@ -1476,7 +1474,7 @@ export function CapacityView({
   const renderLabelResizeBorder = () => (
     <button
       type="button"
-      aria-label="Resize feature name column"
+      aria-label="Resize epic name column"
       className="col-resize-border"
       tabIndex={-1}
       onMouseDown={startLabelColumnResize}
@@ -1525,16 +1523,16 @@ export function CapacityView({
   // Flat list of selectable rows in visual order
   const selectableRows = useMemo<SelectableRow[]>(() => {
     const rows: SelectableRow[] = [];
-    for (const epic of epicRows) {
-      if (epic.collapsed) continue;
-      const epicFeatures = featureRows
-        .filter((feature) => feature.epicId === epic.id)
+    for (const initiative of initiativeRows) {
+      if (initiative.collapsed) continue;
+      const initiativeEpics = epicRows
+        .filter((epic) => epic.initiativeId === initiative.id)
         .sort((a, b) => a.position - b.position || a.id - b.id);
-      for (const feature of epicFeatures) {
-        rows.push({ type: "feature", featureId: feature.id });
-        if (!feature.expanded) continue;
+      for (const epic of initiativeEpics) {
+        rows.push({ type: "epic", epicId: epic.id });
+        if (!epic.expanded) continue;
         const assignedMemberIds = new Set<number>();
-        for (const monthData of feature.months.values()) {
+        for (const monthData of epic.months.values()) {
           for (const a of monthData.memberAllocations) {
             assignedMemberIds.add(a.memberId);
           }
@@ -1543,7 +1541,7 @@ export function CapacityView({
           if (assignedMemberIds.has(member.id)) {
             rows.push({
               type: "member",
-              featureId: feature.id,
+              epicId: epic.id,
               memberId: member.id,
             });
           }
@@ -1551,16 +1549,16 @@ export function CapacityView({
       }
     }
     return rows;
-  }, [epicRows, featureRows, members]);
+  }, [initiativeRows, epicRows, members]);
 
   // Map from row key → index in selectableRows
   const rowIndexByKey = useMemo(() => {
     const map = new Map<string, number>();
     selectableRows.forEach((row, i) => {
-      if (row.type === "feature") {
-        map.set(`f-${row.featureId}`, i);
+      if (row.type === "epic") {
+        map.set(`f-${row.epicId}`, i);
       } else {
-        map.set(`m-${row.featureId}-${row.memberId}`, i);
+        map.set(`m-${row.epicId}-${row.memberId}`, i);
       }
     });
     return map;
@@ -1657,8 +1655,8 @@ export function CapacityView({
     setLoading(true);
     const [qs, eps, fs, ms] = await Promise.all([
       orpc.quarters.list({}),
+      orpc.initiatives.list({}),
       orpc.epics.list({}),
-      orpc.features.list({}),
       orpc.members.list({}),
     ]);
 
@@ -1669,11 +1667,11 @@ export function CapacityView({
       }))
       .sort((a, b) => a.year - b.year || a.quarter - b.quarter);
 
-    const featureViews = await Promise.all(
-      fs.map((f) => orpc.allocations.getFeatureView({ featureId: f.id })),
+    const epicViews = await Promise.all(
+      fs.map((f) => orpc.allocations.getEpicView({ epicId: f.id })),
     );
 
-    const rows: FeatureRow[] = featureViews.map((fv) => {
+    const rows: EpicRow[] = epicViews.map((fv) => {
       const monthMap = new Map<number, MonthData>();
       for (const qd of fv.quarters) {
         for (const md of qd.months) {
@@ -1688,12 +1686,12 @@ export function CapacityView({
         }
       }
       return {
-        id: fv.feature.id,
-        name: fv.feature.name,
-        description: fv.feature.description,
-        epicId: fv.feature.epicId,
-        position: fv.feature.position,
-        links: fv.feature.links.map((link) => ({
+        id: fv.epic.id,
+        name: fv.epic.name,
+        description: fv.epic.description,
+        initiativeId: fv.epic.initiativeId,
+        position: fv.epic.position,
+        links: fv.epic.links.map((link) => ({
           id: link.id,
           title: link.title,
           url: link.url,
@@ -1723,15 +1721,15 @@ export function CapacityView({
       }
     }
     setMembers(ms);
-    setEpicRows(
+    setInitiativeRows(
       eps
-        .map((epic) => ({
-          id: epic.id,
-          name: epic.name,
-          description: epic.description,
-          position: epic.position,
-          isDefault: epic.isDefault,
-          links: epic.links.map((link) => ({
+        .map((initiative) => ({
+          id: initiative.id,
+          name: initiative.name,
+          description: initiative.description,
+          position: initiative.position,
+          isDefault: initiative.isDefault,
+          links: initiative.links.map((link) => ({
             id: link.id,
             title: link.title,
             url: link.url,
@@ -1743,11 +1741,11 @@ export function CapacityView({
     );
     // pendingHighlightRefがあれば対象フィーチャーを展開し、既存のexpanded状態も保持
     const pending = pendingHighlightRef.current;
-    setFeatureRows((prevRows) => {
+    setEpicRows((prevRows) => {
       const expandedIds = new Set(
         prevRows.filter((r) => r.expanded).map((r) => r.id),
       );
-      if (pending) expandedIds.add(pending.featureId);
+      if (pending) expandedIds.add(pending.epicId);
       return rows.map((r) => ({ ...r, expanded: expandedIds.has(r.id) }));
     });
     if (pending) {
@@ -1760,12 +1758,12 @@ export function CapacityView({
   // マウント時にURLパラメータを読み取り、pendingHighlightRefに保存してURLをクリア
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const fid = parseInt(params.get("featureId") ?? "", 10);
+    const fid = parseInt(params.get("epicId") ?? "", 10);
     const mid = parseInt(params.get("memberId") ?? "", 10);
     if (!Number.isNaN(fid) && !Number.isNaN(mid) && fid > 0 && mid > 0) {
-      pendingHighlightRef.current = { featureId: fid, memberId: mid };
+      pendingHighlightRef.current = { epicId: fid, memberId: mid };
       const url = new URL(window.location.href);
-      url.searchParams.delete("featureId");
+      url.searchParams.delete("epicId");
       url.searchParams.delete("memberId");
       window.history.replaceState(null, "", url.toString());
     }
@@ -1798,14 +1796,17 @@ export function CapacityView({
     [capacityAggMode],
   );
 
-  const getColumnData = (row: FeatureRow, column: PeriodColumn): MonthData =>
+  const getColumnData = (row: EpicRow, column: PeriodColumn): MonthData =>
     aggregateMonthData(row.months, column.monthIds);
 
-  const getEpicColumnData = (epicId: number, column: PeriodColumn): MonthData =>
-    featureRows
-      .filter((feature) => feature.epicId === epicId)
-      .reduce<MonthData>((sum, feature) => {
-        const data = getColumnData(feature, column);
+  const getInitiativeColumnData = (
+    initiativeId: number,
+    column: PeriodColumn,
+  ): MonthData =>
+    epicRows
+      .filter((epic) => epic.initiativeId === initiativeId)
+      .reduce<MonthData>((sum, epic) => {
+        const data = getColumnData(epic, column);
         return {
           totalCapacity: sum.totalCapacity + data.totalCapacity,
           unassignedCapacity: sum.unassignedCapacity + data.unassignedCapacity,
@@ -1817,7 +1818,7 @@ export function CapacityView({
     memberId: number,
     column: PeriodColumn,
   ): number =>
-    featureRows.reduce((sum, row) => {
+    epicRows.reduce((sum, row) => {
       const alloc = getColumnData(row, column).memberAllocations.find(
         (a) => a.memberId === memberId,
       );
@@ -1840,17 +1841,17 @@ export function CapacityView({
   const getRebalancePreview = (
     memberId: number,
     column: PeriodColumn,
-    excludeFeatureId: number,
+    excludeEpicId: number,
     requestedCapacity: number,
   ): RebalancePreview[] => {
-    const otherAllocations = featureRows
-      .filter((row) => row.id !== excludeFeatureId)
+    const otherAllocations = epicRows
+      .filter((row) => row.id !== excludeEpicId)
       .map((row) => {
         const alloc = getColumnData(row, column).memberAllocations.find(
           (a) => a.memberId === memberId,
         );
         return {
-          featureName: row.name,
+          epicName: row.name,
           currentCapacity: alloc?.capacity ?? 0,
         };
       })
@@ -1874,17 +1875,17 @@ export function CapacityView({
   const getRebalanceAllPreview = (
     memberId: number,
     column: PeriodColumn,
-    excludeFeatureId: number,
+    excludeEpicId: number,
     requestedCapacity: number,
   ): { newCapacity: number; othersPreview: RebalancePreview[] } => {
-    const otherAllocations = featureRows
-      .filter((row) => row.id !== excludeFeatureId)
+    const otherAllocations = epicRows
+      .filter((row) => row.id !== excludeEpicId)
       .map((row) => {
         const alloc = getColumnData(row, column).memberAllocations.find(
           (a) => a.memberId === memberId,
         );
         return {
-          featureName: row.name,
+          epicName: row.name,
           currentCapacity: alloc?.capacity ?? 0,
         };
       })
@@ -1906,18 +1907,16 @@ export function CapacityView({
     };
   };
 
-  const toggleExpand = (featureId: number) => {
-    setFeatureRows((rows) =>
-      rows.map((r) =>
-        r.id === featureId ? { ...r, expanded: !r.expanded } : r,
-      ),
+  const toggleExpand = (epicId: number) => {
+    setEpicRows((rows) =>
+      rows.map((r) => (r.id === epicId ? { ...r, expanded: !r.expanded } : r)),
     );
   };
 
-  const toggleEpicCollapse = (epicId: number) => {
-    setEpicRows((rows) =>
+  const toggleInitiativeCollapse = (initiativeId: number) => {
+    setInitiativeRows((rows) =>
       rows.map((row) =>
-        row.id === epicId ? { ...row, collapsed: !row.collapsed } : row,
+        row.id === initiativeId ? { ...row, collapsed: !row.collapsed } : row,
       ),
     );
   };
@@ -1965,47 +1964,44 @@ export function CapacityView({
 
   // ── API actions ───────────────────────────────────────────────────────────
 
-  const applyFeatureMonthUpdates = useCallback(
-    (updates: FeatureMonthUpdate[]) => {
-      setFeatureRows((rows) =>
-        rows.map((r) => {
-          const rowUpdates = updates.filter((u) => u.featureId === r.id);
-          if (rowUpdates.length === 0) return r;
-          let newMap = new Map(r.months);
-          for (const update of rowUpdates) {
-            newMap = updateMonthResults(newMap, update.months);
-          }
-          return { ...r, months: newMap };
-        }),
-      );
-    },
-    [],
-  );
+  const applyEpicMonthUpdates = useCallback((updates: EpicMonthUpdate[]) => {
+    setEpicRows((rows) =>
+      rows.map((r) => {
+        const rowUpdates = updates.filter((u) => u.epicId === r.id);
+        if (rowUpdates.length === 0) return r;
+        let newMap = new Map(r.months);
+        for (const update of rowUpdates) {
+          newMap = updateMonthResults(newMap, update.months);
+        }
+        return { ...r, months: newMap };
+      }),
+    );
+  }, []);
 
   const updateTotal = useCallback(
-    async (featureId: number, column: PeriodColumn, totalCapacity: number) => {
+    async (epicId: number, column: PeriodColumn, totalCapacity: number) => {
       setBusy(true);
       try {
         await history.record("Capacityを変更", async () => {
           const result = await orpc.allocations.updateTotal({
-            featureId,
+            epicId,
             totalCapacity,
             periodType: column.type,
             monthId: column.monthId,
             quarterId: column.quarterId,
           });
-          applyFeatureMonthUpdates([{ featureId, months: result.months }]);
+          applyEpicMonthUpdates([{ epicId, months: result.months }]);
         });
       } finally {
         setBusy(false);
       }
     },
-    [applyFeatureMonthUpdates, history],
+    [applyEpicMonthUpdates, history],
   );
 
   const updateMemberAllocation = useCallback(
     async (
-      featureId: number,
+      epicId: number,
       column: PeriodColumn,
       memberId: number,
       capacity: number,
@@ -2017,8 +2013,8 @@ export function CapacityView({
         const limit = columnMemberLimit(column, getMemberMaxCap(memberId));
 
         if (capacity > limit) {
-          const usedElsewhere = featureRows
-            .filter((row) => row.id !== featureId)
+          const usedElsewhere = epicRows
+            .filter((row) => row.id !== epicId)
             .reduce((sum, row) => {
               const alloc = aggregateMonthData(
                 row.months,
@@ -2027,7 +2023,7 @@ export function CapacityView({
               return sum + (alloc?.capacity ?? 0);
             }, 0);
           setMaxCapacityOverflow({
-            featureId,
+            epicId,
             periodType: column.type,
             monthId: column.monthId,
             quarterId: column.quarterId,
@@ -2043,7 +2039,7 @@ export function CapacityView({
         }
 
         const preview = await orpc.allocations.previewMemberAllocation({
-          featureId,
+          epicId,
           memberId,
           capacity,
           periodType: column.type,
@@ -2052,7 +2048,7 @@ export function CapacityView({
         });
         if (preview.hasConflict) {
           setCapacityConflict({
-            featureId,
+            epicId,
             periodType: column.type,
             monthId: column.monthId,
             quarterId: column.quarterId,
@@ -2069,7 +2065,7 @@ export function CapacityView({
 
         await history.record("Member capacityを変更", async () => {
           const result = await orpc.allocations.updateMemberAllocation({
-            featureId,
+            epicId,
             memberId,
             capacity,
             periodType: column.type,
@@ -2077,13 +2073,13 @@ export function CapacityView({
             quarterId: column.quarterId,
             capacityConflictResolution: "fitWithinLimit",
           });
-          applyFeatureMonthUpdates(result.updatedFeatures);
+          applyEpicMonthUpdates(result.updatedEpics);
         });
       } finally {
         setBusy(false);
       }
     },
-    [applyFeatureMonthUpdates, members, getMemberMaxCap, featureRows, history],
+    [applyEpicMonthUpdates, members, getMemberMaxCap, epicRows, history],
   );
 
   const resolveCapacityConflict = useCallback(
@@ -2093,7 +2089,7 @@ export function CapacityView({
       try {
         await history.record("Capacity競合を解決", async () => {
           const result = await orpc.allocations.updateMemberAllocation({
-            featureId: capacityConflict.featureId,
+            epicId: capacityConflict.epicId,
             periodType: capacityConflict.periodType,
             monthId: capacityConflict.monthId,
             quarterId: capacityConflict.quarterId,
@@ -2101,14 +2097,14 @@ export function CapacityView({
             capacity: capacityConflict.requestedCapacity,
             capacityConflictResolution: resolution,
           });
-          applyFeatureMonthUpdates(result.updatedFeatures);
+          applyEpicMonthUpdates(result.updatedEpics);
         });
         setCapacityConflict(null);
       } finally {
         setBusy(false);
       }
     },
-    [applyFeatureMonthUpdates, capacityConflict, history],
+    [applyEpicMonthUpdates, capacityConflict, history],
   );
 
   const resolveMaxCapacityOverflow = useCallback(
@@ -2118,7 +2114,7 @@ export function CapacityView({
       try {
         await history.record("Max capacity超過を解決", async () => {
           const result = await orpc.allocations.updateMemberAllocation({
-            featureId: maxCapacityOverflow.featureId,
+            epicId: maxCapacityOverflow.epicId,
             periodType: maxCapacityOverflow.periodType,
             monthId: maxCapacityOverflow.monthId,
             quarterId: maxCapacityOverflow.quarterId,
@@ -2126,14 +2122,14 @@ export function CapacityView({
             capacity: maxCapacityOverflow.requestedCapacity,
             capacityConflictResolution: resolution,
           });
-          applyFeatureMonthUpdates(result.updatedFeatures);
+          applyEpicMonthUpdates(result.updatedEpics);
         });
         setMaxCapacityOverflow(null);
       } finally {
         setBusy(false);
       }
     },
-    [applyFeatureMonthUpdates, maxCapacityOverflow, history],
+    [applyEpicMonthUpdates, maxCapacityOverflow, history],
   );
 
   // ── Copy / Paste logic ────────────────────────────────────────────────────
@@ -2147,23 +2143,23 @@ export function CapacityView({
       const selRow = selectableRows[ri];
       if (!selRow || selRow.type !== type) continue;
       const rowData: number[] = [];
-      const feature = featureRows.find((f) => f.id === selRow.featureId);
-      if (!feature) continue;
+      const epic = epicRows.find((f) => f.id === selRow.epicId);
+      if (!epic) continue;
 
       for (let ci = minCol; ci <= maxCol; ci++) {
         const column = columns[ci];
         if (!column) continue;
         const div = colDivisor(column);
-        if (type === "feature") {
+        if (type === "epic") {
           rowData.push(
-            aggregateMonthData(feature.months, column.monthIds).totalCapacity /
+            aggregateMonthData(epic.months, column.monthIds).totalCapacity /
               div,
           );
         } else {
           const memberId = (selRow as { type: "member"; memberId: number })
             .memberId;
           const alloc = aggregateMonthData(
-            feature.months,
+            epic.months,
             column.monthIds,
           ).memberAllocations.find((a) => a.memberId === memberId);
           rowData.push((alloc?.capacity ?? 0) / div);
@@ -2182,22 +2178,15 @@ export function CapacityView({
     } catch {
       setPasteNotice("クリップボードへコピーできませんでした。");
     }
-  }, [
-    normalizedSel,
-    selectableRows,
-    featureRows,
-    columns,
-    viewMode,
-    colDivisor,
-  ]);
+  }, [normalizedSel, selectableRows, epicRows, columns, viewMode, colDivisor]);
 
   const getMemberUsedElsewhere = useCallback(
-    (memberId: number, featureId: number, monthIds: number[]): number => {
+    (memberId: number, epicId: number, monthIds: number[]): number => {
       let used = 0;
-      for (const feature of featureRows) {
-        if (feature.id === featureId) continue;
+      for (const epic of epicRows) {
+        if (epic.id === epicId) continue;
         for (const monthId of monthIds) {
-          const monthData = feature.months.get(monthId);
+          const monthData = epic.months.get(monthId);
           if (!monthData) continue;
           const alloc = monthData.memberAllocations.find(
             (a) => a.memberId === memberId,
@@ -2207,7 +2196,7 @@ export function CapacityView({
       }
       return used;
     },
-    [featureRows],
+    [epicRows],
   );
 
   const buildPasteOps = useCallback(
@@ -2231,10 +2220,10 @@ export function CapacityView({
           const column = columns[anchorCol + ci];
           if (!column) break; // range clip
           const value = rowData[ci] ?? 0;
-          if (type === "feature") {
+          if (type === "epic") {
             ops.push({
-              kind: "feature",
-              featureId: selRow.featureId,
+              kind: "epic",
+              epicId: selRow.epicId,
               column,
               value,
             });
@@ -2243,7 +2232,7 @@ export function CapacityView({
               .memberId;
             ops.push({
               kind: "member",
-              featureId: selRow.featureId,
+              epicId: selRow.epicId,
               memberId,
               column,
               value,
@@ -2265,15 +2254,15 @@ export function CapacityView({
         const maxCap = columnMemberLimit(op.column, member?.maxCapacity ?? 1);
         const usedElsewhere = getMemberUsedElsewhere(
           op.memberId,
-          op.featureId,
+          op.epicId,
           op.column.monthIds,
         );
         const div = colDivisor(op.column);
         const available = Math.max(0, maxCap - usedElsewhere) / div;
         if (op.value > available + 0.000001) {
-          const feature = featureRows.find((f) => f.id === op.featureId);
+          const epic = epicRows.find((f) => f.id === op.epicId);
           conflicts.push({
-            rowLabel: `${member?.name ?? "?"} @ ${feature?.name ?? "?"}`,
+            rowLabel: `${member?.name ?? "?"} @ ${epic?.name ?? "?"}`,
             colLabel: op.column.label,
             sourceValue: op.value,
             cappedValue: r2(available),
@@ -2282,7 +2271,7 @@ export function CapacityView({
       }
       return conflicts;
     },
-    [members, featureRows, getMemberUsedElsewhere, colDivisor],
+    [members, epicRows, getMemberUsedElsewhere, colDivisor],
   );
 
   const executePaste = useCallback(
@@ -2292,20 +2281,20 @@ export function CapacityView({
         await history.record("Capacityを貼り付け", async () => {
           for (const op of ops) {
             const div = colDivisor(op.column);
-            if (op.kind === "feature") {
+            if (op.kind === "epic") {
               const result = await orpc.allocations.updateTotal({
-                featureId: op.featureId,
+                epicId: op.epicId,
                 totalCapacity: op.value * div,
                 periodType: op.column.type,
                 monthId: op.column.monthId,
                 quarterId: op.column.quarterId,
               });
-              applyFeatureMonthUpdates([
-                { featureId: op.featureId, months: result.months },
+              applyEpicMonthUpdates([
+                { epicId: op.epicId, months: result.months },
               ]);
             } else {
               const result = await orpc.allocations.updateMemberAllocation({
-                featureId: op.featureId,
+                epicId: op.epicId,
                 memberId: op.memberId,
                 capacity: op.value * div,
                 periodType: op.column.type,
@@ -2315,7 +2304,7 @@ export function CapacityView({
                   ? "allowOverflow"
                   : "fitWithinLimit",
               });
-              applyFeatureMonthUpdates(result.updatedFeatures);
+              applyEpicMonthUpdates(result.updatedEpics);
             }
           }
         });
@@ -2327,7 +2316,7 @@ export function CapacityView({
         clearSelection();
       }
     },
-    [applyFeatureMonthUpdates, clearSelection, colDivisor, history],
+    [applyEpicMonthUpdates, clearSelection, colDivisor, history],
   );
 
   const handleGridPaste = useCallback(
@@ -2352,7 +2341,7 @@ export function CapacityView({
           const maxCap = columnMemberLimit(op.column, member?.maxCapacity ?? 1);
           const usedElsewhere = getMemberUsedElsewhere(
             op.memberId,
-            op.featureId,
+            op.epicId,
             op.column.monthIds,
           );
           const div = colDivisor(op.column);
@@ -2441,28 +2430,28 @@ export function CapacityView({
     return () => window.removeEventListener("paste", onPaste);
   }, [handleGridPaste, lastGridPasteTarget, normalizedSel]);
 
-  // ── Feature actions ────────────────────────────────────────────────────────
+  // ── Epic actions ────────────────────────────────────────────────────────
 
-  const addEpic = async () => {
+  const addInitiative = async () => {
     setBusy(true);
     setActionWarning(null);
     try {
-      const epic = await orpc.epics.create({
+      const initiative = await orpc.initiatives.create({
         name: nextAvailableGeneratedName(
-          "Epic",
-          epicRows.map((row) => row.name),
+          "Initiative",
+          initiativeRows.map((row) => row.name),
         ),
       });
-      if (!epic) return;
-      setEpicRows((rows) => [
+      if (!initiative) return;
+      setInitiativeRows((rows) => [
         ...rows,
         {
-          id: epic.id,
-          name: epic.name,
-          description: epic.description,
-          position: epic.position,
-          isDefault: epic.isDefault,
-          links: epic.links,
+          id: initiative.id,
+          name: initiative.name,
+          description: initiative.description,
+          position: initiative.position,
+          isDefault: initiative.isDefault,
+          links: initiative.links,
           collapsed: false,
         },
       ]);
@@ -2475,27 +2464,27 @@ export function CapacityView({
     }
   };
 
-  const addFeature = async (epicId: number) => {
+  const addEpic = async (initiativeId: number) => {
     setBusy(true);
     setActionWarning(null);
     try {
-      const f = await history.record("Featureを追加", async () => {
-        return orpc.features.create({
-          epicId,
+      const f = await history.record("Epicを追加", async () => {
+        return orpc.epics.create({
+          initiativeId,
           name: nextAvailableGeneratedName(
-            "Feature",
-            featureRows.map((row) => row.name),
+            "Epic",
+            epicRows.map((row) => row.name),
           ),
         });
       });
       if (!f) return;
-      setFeatureRows((rows) => [
+      setEpicRows((rows) => [
         ...rows,
         {
           id: f.id,
           name: f.name,
           description: f.description,
-          epicId: f.epicId,
+          initiativeId: f.initiativeId,
           position: f.position,
           links: f.links,
           expanded: false,
@@ -2511,38 +2500,38 @@ export function CapacityView({
     }
   };
 
-  const renameEpic = useCallback(async (id: number, name: string) => {
-    const epic = await orpc.epics.rename({ id, name });
-    if (!epic) return name;
-    setEpicRows((rows) =>
+  const renameInitiative = useCallback(async (id: number, name: string) => {
+    const initiative = await orpc.initiatives.rename({ id, name });
+    if (!initiative) return name;
+    setInitiativeRows((rows) =>
       rows.map((row) =>
         row.id === id
           ? {
               ...row,
-              name: epic.name,
-              description: epic.description,
-              links: epic.links,
+              name: initiative.name,
+              description: initiative.description,
+              links: initiative.links,
             }
           : row,
       ),
     );
-    return epic.name;
+    return initiative.name;
   }, []);
 
-  const renameFeature = useCallback(
+  const renameEpic = useCallback(
     async (id: number, name: string) => {
-      const f = await history.record("Feature名を変更", async () => {
-        return orpc.features.rename({ id, name });
+      const f = await history.record("Epic名を変更", async () => {
+        return orpc.epics.rename({ id, name });
       });
       if (!f) return name;
-      setFeatureRows((rows) =>
+      setEpicRows((rows) =>
         rows.map((r) =>
           r.id === id
             ? {
                 ...r,
                 name: f.name,
                 description: f.description,
-                epicId: f.epicId,
+                initiativeId: f.initiativeId,
                 position: f.position,
                 links: f.links,
               }
@@ -2554,40 +2543,40 @@ export function CapacityView({
     [history],
   );
 
-  const saveFeatureDetails = useCallback(
+  const saveEpicDetails = useCallback(
     async (
       id: number,
       input: {
         name: string;
-        epicId: number;
+        initiativeId: number;
         description: string | null;
         links: Array<{ title: string; url: string }>;
       },
     ) => {
-      const f = await history.record("Feature詳細を変更", async () => {
-        return orpc.features.rename({ id, ...input });
+      const f = await history.record("Epic詳細を変更", async () => {
+        return orpc.epics.rename({ id, ...input });
       });
       if (!f) return;
-      setFeatureRows((rows) =>
+      setEpicRows((rows) =>
         rows.map((r) =>
           r.id === id
             ? {
                 ...r,
                 name: f.name,
                 description: f.description,
-                epicId: f.epicId,
+                initiativeId: f.initiativeId,
                 position: f.position,
                 links: f.links,
               }
             : r,
         ),
       );
-      setEditingFeatureDetails((current) =>
+      setEditingEpicDetails((current) =>
         current?.id === id
           ? {
               ...current,
               name: f.name,
-              epicId: f.epicId,
+              initiativeId: f.initiativeId,
               position: f.position,
               description: f.description,
               links: f.links,
@@ -2598,7 +2587,7 @@ export function CapacityView({
     [history],
   );
 
-  const saveEpicDetails = useCallback(
+  const saveInitiativeDetails = useCallback(
     async (
       id: number,
       input: {
@@ -2607,27 +2596,27 @@ export function CapacityView({
         links: Array<{ title: string; url: string }>;
       },
     ) => {
-      const epic = await orpc.epics.rename({ id, ...input });
-      if (!epic) return;
-      setEpicRows((rows) =>
+      const initiative = await orpc.initiatives.rename({ id, ...input });
+      if (!initiative) return;
+      setInitiativeRows((rows) =>
         rows.map((row) =>
           row.id === id
             ? {
                 ...row,
-                name: epic.name,
-                description: epic.description,
-                links: epic.links,
+                name: initiative.name,
+                description: initiative.description,
+                links: initiative.links,
               }
             : row,
         ),
       );
-      setEditingEpicDetails((current) =>
+      setEditingInitiativeDetails((current) =>
         current?.id === id
           ? {
               ...current,
-              name: epic.name,
-              description: epic.description,
-              links: epic.links,
+              name: initiative.name,
+              description: initiative.description,
+              links: initiative.links,
             }
           : current,
       );
@@ -2635,13 +2624,13 @@ export function CapacityView({
     [],
   );
 
-  const deleteFeature = useCallback(
+  const deleteEpic = useCallback(
     async (id: number) => {
       setBusy(true);
       try {
-        await history.record("Featureを削除", async () => {
-          await orpc.features.delete({ id });
-          setFeatureRows((rows) => rows.filter((r) => r.id !== id));
+        await history.record("Epicを削除", async () => {
+          await orpc.epics.delete({ id });
+          setEpicRows((rows) => rows.filter((r) => r.id !== id));
         });
       } finally {
         setBusy(false);
@@ -2650,43 +2639,53 @@ export function CapacityView({
     [history],
   );
 
-  const deleteEpic = useCallback(async (id: number) => {
+  const deleteInitiative = useCallback(async (id: number) => {
     setBusy(true);
     setActionWarning(null);
     try {
-      await orpc.epics.delete({ id });
-      setEpicRows((rows) => rows.filter((row) => row.id !== id));
+      await orpc.initiatives.delete({ id });
+      setInitiativeRows((rows) => rows.filter((row) => row.id !== id));
     } catch (error) {
       setActionWarning(
-        error instanceof Error ? error.message : "Epicを削除できませんでした。",
+        error instanceof Error
+          ? error.message
+          : "Initiativeを削除できませんでした。",
       );
     } finally {
       setBusy(false);
     }
   }, []);
 
-  const moveEpic = useCallback(async (epicId: number, beforeId: number) => {
-    if (epicId === beforeId) return;
-    const updated = await orpc.epics.move({ id: epicId, beforeId });
-    setEpicRows((rows) => {
-      const collapsedById = new Map(rows.map((row) => [row.id, row.collapsed]));
-      return updated.map((epic) => ({
-        id: epic.id,
-        name: epic.name,
-        description: epic.description,
-        position: epic.position,
-        isDefault: epic.isDefault,
-        links: epic.links,
-        collapsed: collapsedById.get(epic.id) ?? false,
-      }));
-    });
-  }, []);
+  const moveInitiative = useCallback(
+    async (initiativeId: number, beforeId: number) => {
+      if (initiativeId === beforeId) return;
+      const updated = await orpc.initiatives.move({
+        id: initiativeId,
+        beforeId,
+      });
+      setInitiativeRows((rows) => {
+        const collapsedById = new Map(
+          rows.map((row) => [row.id, row.collapsed]),
+        );
+        return updated.map((initiative) => ({
+          id: initiative.id,
+          name: initiative.name,
+          description: initiative.description,
+          position: initiative.position,
+          isDefault: initiative.isDefault,
+          links: initiative.links,
+          collapsed: collapsedById.get(initiative.id) ?? false,
+        }));
+      });
+    },
+    [],
+  );
 
-  const moveFeature = useCallback(
-    async (featureId: number, epicId: number, beforeId?: number) => {
-      const moved = await orpc.features.move({
-        id: featureId,
-        epicId,
+  const moveEpic = useCallback(
+    async (epicId: number, initiativeId: number, beforeId?: number) => {
+      const moved = await orpc.epics.move({
+        id: epicId,
+        initiativeId,
         beforeId,
       });
       if (!moved) return;
@@ -2758,8 +2757,8 @@ export function CapacityView({
     }
   };
 
-  const refreshFeatureRow = useCallback(async (featureId: number) => {
-    const fv = await orpc.allocations.getFeatureView({ featureId });
+  const refreshEpicRow = useCallback(async (epicId: number) => {
+    const fv = await orpc.allocations.getEpicView({ epicId });
     const monthMap = new Map<number, MonthData>();
     for (const qd of fv.quarters) {
       for (const md of qd.months) {
@@ -2773,16 +2772,16 @@ export function CapacityView({
         });
       }
     }
-    setFeatureRows((rows) =>
+    setEpicRows((rows) =>
       rows.map((r) =>
-        r.id === featureId
+        r.id === epicId
           ? {
               ...r,
-              name: fv.feature.name,
-              description: fv.feature.description,
-              epicId: fv.feature.epicId,
-              position: fv.feature.position,
-              links: fv.feature.links,
+              name: fv.epic.name,
+              description: fv.epic.description,
+              initiativeId: fv.epic.initiativeId,
+              position: fv.epic.position,
+              links: fv.epic.links,
               months: monthMap,
             }
           : r,
@@ -2790,37 +2789,37 @@ export function CapacityView({
     );
   }, []);
 
-  const assignMemberToFeature = useCallback(
-    async (featureId: number, memberId: number) => {
+  const assignMemberToEpic = useCallback(
+    async (epicId: number, memberId: number) => {
       setBusy(true);
       try {
-        await history.record("MemberをFeatureに割り当て", async () => {
-          await orpc.allocations.assignMember({ featureId, memberId });
-          await refreshFeatureRow(featureId);
+        await history.record("MemberをEpicに割り当て", async () => {
+          await orpc.allocations.assignMember({ epicId, memberId });
+          await refreshEpicRow(epicId);
         });
       } finally {
         setBusy(false);
       }
     },
-    [refreshFeatureRow, history],
+    [refreshEpicRow, history],
   );
 
-  const removeMemberFromFeature = useCallback(
-    async (featureId: number, memberId: number) => {
+  const removeMemberFromEpic = useCallback(
+    async (epicId: number, memberId: number) => {
       setBusy(true);
       try {
-        await history.record("MemberをFeatureから削除", async () => {
-          await orpc.allocations.removeMemberFromFeature({
-            featureId,
+        await history.record("MemberをEpicから削除", async () => {
+          await orpc.allocations.removeMemberFromEpic({
+            epicId,
             memberId,
           });
-          await refreshFeatureRow(featureId);
+          await refreshEpicRow(epicId);
         });
       } finally {
         setBusy(false);
       }
     },
-    [refreshFeatureRow, history],
+    [refreshEpicRow, history],
   );
 
   const copyAllocationTSV = useCallback(async () => {
@@ -2854,9 +2853,9 @@ export function CapacityView({
             <button
               type="button"
               className="cv-nav-link active"
-              onClick={() => navigate("/features")}
+              onClick={() => navigate("/epics")}
             >
-              Features
+              Epics
             </button>
             <button
               type="button"
@@ -2884,9 +2883,9 @@ export function CapacityView({
           <button
             type="button"
             className="cv-nav-link active"
-            onClick={() => navigate("/features")}
+            onClick={() => navigate("/epics")}
           >
-            Features
+            Epics
           </button>
           <button
             type="button"
@@ -3040,7 +3039,7 @@ export function CapacityView({
             <thead>
               <tr>
                 <th className="th-label">
-                  Feature
+                  Epic
                   {renderLabelResizeBorder()}
                 </th>
                 {columns.map((column) => (
@@ -3055,36 +3054,43 @@ export function CapacityView({
               </tr>
             </thead>
             <tbody>
-              {epicRows.flatMap((epic, epicIndex) => {
+              {initiativeRows.flatMap((initiative, initiativeIndex) => {
                 const rows: React.ReactNode[] = [];
-                const epicFeatures = featureRows
-                  .filter((feature) => feature.epicId === epic.id)
+                const initiativeEpics = epicRows
+                  .filter((epic) => epic.initiativeId === initiative.id)
                   .sort((a, b) => a.position - b.position || a.id - b.id);
-                const epicHasOverflow = columns.some(
+                const initiativeHasOverflow = columns.some(
                   (column) =>
-                    getEpicColumnData(epic.id, column).unassignedCapacity > 0,
+                    getInitiativeColumnData(initiative.id, column)
+                      .unassignedCapacity > 0,
                 );
-                if (epicIndex > 0) {
+                if (initiativeIndex > 0) {
                   rows.push(
-                    <tr key={`epic-sep-${epic.id}`} className="cv-section-sep">
+                    <tr
+                      key={`initiative-sep-${initiative.id}`}
+                      className="cv-section-sep"
+                    >
                       <td colSpan={columns.length + 1} />
                     </tr>,
                   );
                 }
                 rows.push(
                   <tr
-                    key={`epic-${epic.id}`}
-                    className="tr-epic"
+                    key={`initiative-${initiative.id}`}
+                    className="tr-initiative"
                     onDragOver={(e) => {
                       if (dragItem) e.preventDefault();
                     }}
                     onDrop={(e) => {
                       e.preventDefault();
-                      if (dragItem?.type === "feature") {
-                        void moveFeature(dragItem.featureId, epic.id);
-                      }
                       if (dragItem?.type === "epic") {
-                        void moveEpic(dragItem.epicId, epic.id);
+                        void moveEpic(dragItem.epicId, initiative.id);
+                      }
+                      if (dragItem?.type === "initiative") {
+                        void moveInitiative(
+                          dragItem.initiativeId,
+                          initiative.id,
+                        );
                       }
                       setDragItem(null);
                     }}
@@ -3096,33 +3102,42 @@ export function CapacityView({
                           className="drag-handle"
                           draggable
                           onDragStart={() =>
-                            setDragItem({ type: "epic", epicId: epic.id })
+                            setDragItem({
+                              type: "initiative",
+                              initiativeId: initiative.id,
+                            })
                           }
                           onDragEnd={() => setDragItem(null)}
-                          title="Epicを移動"
-                          aria-label="Epicを移動"
+                          title="Initiativeを移動"
+                          aria-label="Initiativeを移動"
                         >
                           <GripVertical size={14} />
                         </button>
                         <button
                           type="button"
                           className="toggle-btn"
-                          onClick={() => toggleEpicCollapse(epic.id)}
-                          title={epic.collapsed ? "展開" : "折りたたむ"}
-                        >
-                          {epic.collapsed ? "+" : "−"}
-                        </button>
-                        <FeatureNameCell
-                          name={epic.name}
-                          hasDescription={
-                            (epic.description?.trim().length ?? 0) > 0
+                          onClick={() =>
+                            toggleInitiativeCollapse(initiative.id)
                           }
-                          links={epic.links}
-                          onRename={(name) => renameEpic(epic.id, name)}
-                          onDelete={() => deleteEpic(epic.id)}
-                          onEditDetails={() => setEditingEpicDetails(epic)}
+                          title={initiative.collapsed ? "展開" : "折りたたむ"}
+                        >
+                          {initiative.collapsed ? "+" : "−"}
+                        </button>
+                        <EpicNameCell
+                          name={initiative.name}
+                          hasDescription={
+                            (initiative.description?.trim().length ?? 0) > 0
+                          }
+                          links={initiative.links}
+                          onRename={(name) =>
+                            renameInitiative(initiative.id, name)
+                          }
+                          onDelete={() => deleteInitiative(initiative.id)}
+                          onEditDetails={() =>
+                            setEditingInitiativeDetails(initiative)
+                          }
                         />
-                        {epicHasOverflow && (
+                        {initiativeHasOverflow && (
                           <span
                             className="overflow-dot"
                             title="未アサインあり"
@@ -3132,7 +3147,10 @@ export function CapacityView({
                       {renderLabelResizeBorder()}
                     </td>
                     {columns.map((column) => {
-                      const data = getEpicColumnData(epic.id, column);
+                      const data = getInitiativeColumnData(
+                        initiative.id,
+                        column,
+                      );
                       const div = colDivisor(column);
                       const { bg, fg } = heatBg(
                         data.totalCapacity / div,
@@ -3141,7 +3159,7 @@ export function CapacityView({
                       return (
                         <td
                           key={column.key}
-                          className="td-quarter epic-total-cell"
+                          className="td-quarter initiative-total-cell"
                           style={{
                             width: COL_W,
                             minWidth: COL_W,
@@ -3158,42 +3176,43 @@ export function CapacityView({
                             {fmt(data.totalCapacity / div)}
                           </span>
                           {data.unassignedCapacity > 0 && (
-                            <span className="epic-overflow-dot" />
+                            <span className="initiative-overflow-dot" />
                           )}
                         </td>
                       );
                     })}
                   </tr>,
                 );
-                if (epic.collapsed) return rows;
+                if (initiative.collapsed) return rows;
 
-                for (const feature of epicFeatures) {
+                for (const epic of initiativeEpics) {
                   const hasOverflow = columns.some(
                     (column) =>
-                      (getColumnData(feature, column).unassignedCapacity ?? 0) >
-                      0,
+                      (getColumnData(epic, column).unassignedCapacity ?? 0) > 0,
                   );
-                  const featureRowIndex =
-                    rowIndexByKey.get(`f-${feature.id}`) ?? -1;
+                  const epicRowIndex = rowIndexByKey.get(`f-${epic.id}`) ?? -1;
 
                   rows.push(
                     <tr
-                      key={feature.id}
-                      className="tr-feature tr-capacity-feature"
+                      key={epic.id}
+                      className="tr-epic tr-capacity-epic"
                       onDragOver={(e) => {
                         if (dragItem) e.preventDefault();
                       }}
                       onDrop={(e) => {
                         e.preventDefault();
-                        if (dragItem?.type === "feature") {
-                          void moveFeature(
-                            dragItem.featureId,
-                            feature.epicId,
-                            feature.id,
+                        if (dragItem?.type === "epic") {
+                          void moveEpic(
+                            dragItem.epicId,
+                            epic.initiativeId,
+                            epic.id,
                           );
                         }
-                        if (dragItem?.type === "epic") {
-                          void moveEpic(dragItem.epicId, epic.id);
+                        if (dragItem?.type === "initiative") {
+                          void moveInitiative(
+                            dragItem.initiativeId,
+                            initiative.id,
+                          );
                         }
                         setDragItem(null);
                       }}
@@ -3206,38 +3225,34 @@ export function CapacityView({
                             draggable
                             onDragStart={() =>
                               setDragItem({
-                                type: "feature",
-                                featureId: feature.id,
-                                epicId: feature.epicId,
+                                type: "epic",
+                                epicId: epic.id,
+                                initiativeId: epic.initiativeId,
                               })
                             }
                             onDragEnd={() => setDragItem(null)}
-                            title="Featureを移動"
-                            aria-label="Featureを移動"
+                            title="Epicを移動"
+                            aria-label="Epicを移動"
                           >
                             <GripVertical size={14} />
                           </button>
                           <button
                             type="button"
                             className="toggle-btn"
-                            onClick={() => toggleExpand(feature.id)}
-                            title={
-                              feature.expanded ? "折りたたむ" : "詳細を展開"
-                            }
+                            onClick={() => toggleExpand(epic.id)}
+                            title={epic.expanded ? "折りたたむ" : "詳細を展開"}
                           >
-                            {feature.expanded ? "−" : "+"}
+                            {epic.expanded ? "−" : "+"}
                           </button>
-                          <FeatureNameCell
-                            name={feature.name}
+                          <EpicNameCell
+                            name={epic.name}
                             hasDescription={
-                              (feature.description?.trim().length ?? 0) > 0
+                              (epic.description?.trim().length ?? 0) > 0
                             }
-                            links={feature.links}
-                            onRename={(name) => renameFeature(feature.id, name)}
-                            onDelete={() => deleteFeature(feature.id)}
-                            onEditDetails={() =>
-                              setEditingFeatureDetails(feature)
-                            }
+                            links={epic.links}
+                            onRename={(name) => renameEpic(epic.id, name)}
+                            onDelete={() => deleteEpic(epic.id)}
+                            onEditDetails={() => setEditingEpicDetails(epic)}
                           />
                           {hasOverflow && (
                             <span
@@ -3249,16 +3264,12 @@ export function CapacityView({
                         {renderLabelResizeBorder()}
                       </td>
                       {columns.map((column, ci) => {
-                        const data = getColumnData(feature, column);
-                        const selected = isCellInSel(
-                          featureRowIndex,
-                          ci,
-                          "feature",
-                        );
+                        const data = getColumnData(epic, column);
+                        const selected = isCellInSel(epicRowIndex, ci, "epic");
                         const copied = isCellInClipSrc(
-                          featureRowIndex,
+                          epicRowIndex,
                           ci,
-                          "feature",
+                          "epic",
                         );
                         return (
                           <td
@@ -3274,7 +3285,7 @@ export function CapacityView({
                               maxVal={FEATURE_MAX_VAL / colDivisor(column)}
                               onCommit={(v) =>
                                 updateTotal(
-                                  feature.id,
+                                  epic.id,
                                   column,
                                   v * colDivisor(column),
                                 )
@@ -3284,18 +3295,10 @@ export function CapacityView({
                               isCopied={copied}
                               editCancelToken={editCancelToken}
                               onCellMouseDown={() =>
-                                handleCellMouseDown(
-                                  featureRowIndex,
-                                  ci,
-                                  "feature",
-                                )
+                                handleCellMouseDown(epicRowIndex, ci, "epic")
                               }
                               onCellMouseEnter={() =>
-                                handleCellMouseEnter(
-                                  featureRowIndex,
-                                  ci,
-                                  "feature",
-                                )
+                                handleCellMouseEnter(epicRowIndex, ci, "epic")
                               }
                             />
                           </td>
@@ -3304,9 +3307,9 @@ export function CapacityView({
                     </tr>,
                   );
 
-                  if (feature.expanded) {
+                  if (epic.expanded) {
                     const assignedMemberIds = new Set<number>();
-                    for (const monthData of feature.months.values()) {
+                    for (const monthData of epic.months.values()) {
                       for (const a of monthData.memberAllocations) {
                         assignedMemberIds.add(a.memberId);
                       }
@@ -3317,11 +3320,11 @@ export function CapacityView({
 
                     for (const member of assignedMembers) {
                       const memberRowIndex =
-                        rowIndexByKey.get(`m-${feature.id}-${member.id}`) ?? -1;
+                        rowIndexByKey.get(`m-${epic.id}-${member.id}`) ?? -1;
                       const isOverflow = columns.some((column) => {
                         return (
                           isMemberColumnOverflow(member.id, column) ||
-                          (capacityConflict?.featureId === feature.id &&
+                          (capacityConflict?.epicId === epic.id &&
                             capacityConflict.memberId === member.id &&
                             capacityConflict.periodType === column.type &&
                             capacityConflict.monthId === column.monthId &&
@@ -3330,11 +3333,11 @@ export function CapacityView({
                       });
 
                       const isHighlighted =
-                        highlightTarget?.featureId === feature.id &&
+                        highlightTarget?.epicId === epic.id &&
                         highlightTarget?.memberId === member.id;
                       rows.push(
                         <tr
-                          key={`${feature.id}-${member.id}`}
+                          key={`${epic.id}-${member.id}`}
                           ref={isHighlighted ? highlightRowRef : null}
                           className={`tr-member${isOverflow ? " is-overflow" : ""}${isHighlighted ? " is-highlighted" : ""}`}
                         >
@@ -3346,13 +3349,13 @@ export function CapacityView({
                                 className="del-member-btn"
                                 onClick={() =>
                                   setRemoveConfirm({
-                                    featureId: feature.id,
+                                    epicId: epic.id,
                                     memberId: member.id,
                                     memberName: member.name,
-                                    featureName: feature.name,
+                                    epicName: epic.name,
                                   })
                                 }
-                                title="このFeatureから削除"
+                                title="このEpicから削除"
                               >
                                 ×
                               </button>
@@ -3360,13 +3363,13 @@ export function CapacityView({
                             {renderLabelResizeBorder()}
                           </td>
                           {columns.map((column, ci) => {
-                            const data = getColumnData(feature, column);
+                            const data = getColumnData(epic, column);
                             const alloc = data.memberAllocations.find(
                               (a) => a.memberId === member.id,
                             );
                             const matchingCapacityConflict =
                               capacityConflict &&
-                              capacityConflict.featureId === feature.id &&
+                              capacityConflict.epicId === epic.id &&
                               capacityConflict.periodType === column.type &&
                               capacityConflict.monthId === column.monthId &&
                               capacityConflict.quarterId === column.quarterId &&
@@ -3375,7 +3378,7 @@ export function CapacityView({
                                 : null;
                             const matchingMaxCapacityOverflow =
                               maxCapacityOverflow &&
-                              maxCapacityOverflow.featureId === feature.id &&
+                              maxCapacityOverflow.epicId === epic.id &&
                               maxCapacityOverflow.periodType === column.type &&
                               maxCapacityOverflow.monthId === column.monthId &&
                               maxCapacityOverflow.quarterId ===
@@ -3421,7 +3424,7 @@ export function CapacityView({
                                   isOverflow={cellOv}
                                   onCommit={(v) =>
                                     updateMemberAllocation(
-                                      feature.id,
+                                      epic.id,
                                       column,
                                       member.id,
                                       v * div,
@@ -3481,13 +3484,13 @@ export function CapacityView({
                                     rebalancePreview={getRebalancePreview(
                                       matchingCapacityConflict.memberId,
                                       column,
-                                      matchingCapacityConflict.featureId,
+                                      matchingCapacityConflict.epicId,
                                       matchingCapacityConflict.requestedCapacity,
                                     )}
                                     rebalanceAllPreview={getRebalanceAllPreview(
                                       matchingCapacityConflict.memberId,
                                       column,
-                                      matchingCapacityConflict.featureId,
+                                      matchingCapacityConflict.epicId,
                                       matchingCapacityConflict.requestedCapacity,
                                     )}
                                     onResolve={resolveCapacityConflict}
@@ -3507,11 +3510,11 @@ export function CapacityView({
                     );
                     rows.push(
                       <tr
-                        key={`${feature.id}-assign`}
+                        key={`${epic.id}-assign`}
                         className="tr-assign-member"
                       >
                         <td className="td-assign td-assign-member">
-                          {assigningFeatureId === feature.id ? (
+                          {assigningEpicId === epic.id ? (
                             <select
                               className="assign-select"
                               // biome-ignore lint/a11y/noAutofocus: intentional focus for inline dropdown
@@ -3519,10 +3522,10 @@ export function CapacityView({
                               defaultValue=""
                               onChange={(e) => {
                                 const id = Number(e.target.value);
-                                if (id) assignMemberToFeature(feature.id, id);
-                                setAssigningFeatureId(null);
+                                if (id) assignMemberToEpic(epic.id, id);
+                                setAssigningEpicId(null);
                               }}
-                              onBlur={() => setAssigningFeatureId(null)}
+                              onBlur={() => setAssigningEpicId(null)}
                             >
                               <option value="" disabled>
                                 -- メンバーを選択 --
@@ -3538,7 +3541,7 @@ export function CapacityView({
                               type="button"
                               className="btn-assign"
                               disabled={busy || unassignedMembers.length === 0}
-                              onClick={() => setAssigningFeatureId(feature.id)}
+                              onClick={() => setAssigningEpicId(epic.id)}
                             >
                               + メンバーを割り当て
                             </button>
@@ -3552,7 +3555,7 @@ export function CapacityView({
                     if (hasOverflow) {
                       rows.push(
                         <tr
-                          key={`${feature.id}-ua`}
+                          key={`${epic.id}-ua`}
                           className="tr-unassigned-member"
                         >
                           <td className="td-label td-unassigned-label">
@@ -3561,8 +3564,8 @@ export function CapacityView({
                           </td>
                           {columns.map((column) => {
                             const uv =
-                              getColumnData(feature, column)
-                                .unassignedCapacity / colDivisor(column);
+                              getColumnData(epic, column).unassignedCapacity /
+                              colDivisor(column);
                             return (
                               <td
                                 key={column.key}
@@ -3586,15 +3589,18 @@ export function CapacityView({
                 }
 
                 rows.push(
-                  <tr key={`epic-${epic.id}-add`} className="tr-assign-member">
+                  <tr
+                    key={`initiative-${initiative.id}-add`}
+                    className="tr-assign-member"
+                  >
                     <td className="td-assign">
                       <button
                         type="button"
                         className="btn-assign"
                         disabled={busy}
-                        onClick={() => addFeature(epic.id)}
+                        onClick={() => addEpic(initiative.id)}
                       >
-                        + Feature
+                        + Epic
                       </button>
                       {renderLabelResizeBorder()}
                     </td>
@@ -3612,10 +3618,10 @@ export function CapacityView({
           <button
             type="button"
             className="btn-sm"
-            onClick={addEpic}
+            onClick={addInitiative}
             disabled={busy}
           >
-            + Epic
+            + Initiative
           </button>
           <button
             type="button"
@@ -3689,7 +3695,7 @@ export function CapacityView({
                 value={importTsv}
                 onChange={(e) => setImportTsv(e.target.value)}
                 placeholder={
-                  "機能\t担当者\tキャパシティ\t月\nFeature A\tAlice\t0.5\t2026-04"
+                  "機能\t担当者\tキャパシティ\t月\nEpic A\tAlice\t0.5\t2026-04"
                 }
                 rows={8}
                 disabled={importing}
@@ -3736,22 +3742,22 @@ export function CapacityView({
         </div>
       )}
 
-      {editingFeatureDetails && (
-        <FeatureDetailsDialog
-          feature={editingFeatureDetails}
-          epics={epicRows}
-          onSave={(input) =>
-            saveFeatureDetails(editingFeatureDetails.id, input)
-          }
-          onClose={() => setEditingFeatureDetails(null)}
-        />
-      )}
-
       {editingEpicDetails && (
         <EpicDetailsDialog
           epic={editingEpicDetails}
+          initiatives={initiativeRows}
           onSave={(input) => saveEpicDetails(editingEpicDetails.id, input)}
           onClose={() => setEditingEpicDetails(null)}
+        />
+      )}
+
+      {editingInitiativeDetails && (
+        <InitiativeDetailsDialog
+          initiative={editingInitiativeDetails}
+          onSave={(input) =>
+            saveInitiativeDetails(editingInitiativeDetails.id, input)
+          }
+          onClose={() => setEditingInitiativeDetails(null)}
         />
       )}
 
@@ -3770,7 +3776,7 @@ export function CapacityView({
             }}
           >
             <p className="confirm-msg">
-              「{removeConfirm.memberName}」を「{removeConfirm.featureName}
+              「{removeConfirm.memberName}」を「{removeConfirm.epicName}
               」から削除しますか？
             </p>
             <div className="confirm-btns">
@@ -3785,8 +3791,8 @@ export function CapacityView({
                 type="button"
                 className="btn-sm btn-danger"
                 onClick={() => {
-                  removeMemberFromFeature(
-                    removeConfirm.featureId,
+                  removeMemberFromEpic(
+                    removeConfirm.epicId,
                     removeConfirm.memberId,
                   );
                   setRemoveConfirm(null);

@@ -33,13 +33,13 @@ type CapacityConflictResolution =
   | "rebalanceAllProportionally";
 
 type RebalancePreview = {
-  featureName: string;
+  epicName: string;
   currentCapacity: number;
   nextCapacity: number;
 };
 
 type PendingCapacityConflict = {
-  featureId: number;
+  epicId: number;
   periodType: ViewMode;
   monthId?: number;
   quarterId?: number;
@@ -51,7 +51,7 @@ type PendingCapacityConflict = {
 };
 
 type PendingMaxCapacityOverflow = {
-  featureId: number;
+  epicId: number;
   periodType: ViewMode;
   monthId?: number;
   quarterId?: number;
@@ -64,10 +64,10 @@ type PendingMaxCapacityOverflow = {
 
 type MemberMonthData = {
   totalCapacity: number;
-  featureAllocations: Array<{
-    featureId: number;
-    featureName: string;
-    epicName: string | null;
+  epicAllocations: Array<{
+    epicId: number;
+    epicName: string;
+    initiativeName: string | null;
     capacity: number;
   }>;
 };
@@ -150,7 +150,7 @@ function isQuarterInRange(
 }
 
 function emptyMemberMonthData(): MemberMonthData {
-  return { totalCapacity: 0, featureAllocations: [] };
+  return { totalCapacity: 0, epicAllocations: [] };
 }
 
 const r2 = (v: number) => Math.round(v * 100) / 100;
@@ -163,24 +163,24 @@ function aggregateMemberMonthData(
   monthMap: Map<number, MemberMonthData>,
   monthIds: number[],
 ): MemberMonthData {
-  const featureTotals = new Map<
+  const epicTotals = new Map<
     number,
-    { featureName: string; epicName: string | null; capacity: number }
+    { epicName: string; initiativeName: string | null; capacity: number }
   >();
   let totalCapacity = 0;
 
   for (const monthId of monthIds) {
     const data = monthMap.get(monthId) ?? emptyMemberMonthData();
     totalCapacity += data.totalCapacity;
-    for (const allocation of data.featureAllocations) {
-      const current = featureTotals.get(allocation.featureId) ?? {
-        featureName: allocation.featureName,
+    for (const allocation of data.epicAllocations) {
+      const current = epicTotals.get(allocation.epicId) ?? {
         epicName: allocation.epicName,
+        initiativeName: allocation.initiativeName,
         capacity: 0,
       };
-      featureTotals.set(allocation.featureId, {
-        featureName: allocation.featureName,
+      epicTotals.set(allocation.epicId, {
         epicName: allocation.epicName,
+        initiativeName: allocation.initiativeName,
         capacity: current.capacity + allocation.capacity,
       });
     }
@@ -188,10 +188,10 @@ function aggregateMemberMonthData(
 
   return {
     totalCapacity,
-    featureAllocations: [...featureTotals].map(([featureId, data]) => ({
-      featureId,
-      featureName: data.featureName,
+    epicAllocations: [...epicTotals].map(([epicId, data]) => ({
+      epicId,
       epicName: data.epicName,
+      initiativeName: data.initiativeName,
       capacity: data.capacity,
     })),
   };
@@ -324,7 +324,7 @@ function MemberNameCell({
       <div className="name-edit-row">
         <input
           ref={inputRef}
-          className="feature-name-input"
+          className="epic-name-input"
           value={val}
           disabled={saving}
           aria-invalid={error ? true : undefined}
@@ -353,7 +353,7 @@ function MemberNameCell({
     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
       <button
         type="button"
-        className="feature-name"
+        className="epic-name"
         onClick={startEdit}
         title="クリックで名前を編集"
       >
@@ -439,7 +439,7 @@ function MaxCapacityCell({
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <input
           ref={inputRef}
-          className="feature-name-input"
+          className="epic-name-input"
           style={{ width: 64, textAlign: "right" }}
           type="number"
           min="0.001"
@@ -474,7 +474,7 @@ function MaxCapacityCell({
   return (
     <button
       type="button"
-      className="feature-name"
+      className="epic-name"
       style={{ minWidth: 40, textAlign: "right" }}
       onClick={startEdit}
       title="クリックでMax Capacityを編集（空白でリセット）"
@@ -484,7 +484,7 @@ function MaxCapacityCell({
   );
 }
 
-function HeatmapEditableFeatureCell({
+function HeatmapEditableEpicCell({
   value,
   maxVal,
   isOverflow,
@@ -665,10 +665,10 @@ function CapacityConflictPopover({
             <span className="capacity-conflict-preview-list">
               {rebalancePreview.map((change) => (
                 <span
-                  key={change.featureName}
+                  key={change.epicName}
                   className="capacity-conflict-preview-item"
                 >
-                  {change.featureName}: {fmt(change.currentCapacity / d)}→
+                  {change.epicName}: {fmt(change.currentCapacity / d)}→
                   {fmt(change.nextCapacity / d)}
                 </span>
               ))}
@@ -688,10 +688,10 @@ function CapacityConflictPopover({
             </span>
             {rebalanceAllPreview.othersPreview.map((change) => (
               <span
-                key={change.featureName}
+                key={change.epicName}
                 className="capacity-conflict-preview-item"
               >
-                {change.featureName}: {fmt(change.currentCapacity / d)}→
+                {change.epicName}: {fmt(change.currentCapacity / d)}→
                 {fmt(change.nextCapacity / d)}
               </span>
             ))}
@@ -888,10 +888,10 @@ export function MembersView({
         for (const md of qd.months) {
           monthMap.set(md.month.id, {
             totalCapacity: md.totalCapacity,
-            featureAllocations: md.featureAllocations.map((fa) => ({
-              featureId: fa.feature.id,
-              featureName: fa.feature.name,
-              epicName: fa.feature.epic?.name ?? null,
+            epicAllocations: md.epicAllocations.map((fa) => ({
+              epicId: fa.epic.id,
+              epicName: fa.epic.name,
+              initiativeName: fa.epic.initiative?.name ?? null,
               capacity: fa.capacity,
             })),
           });
@@ -960,8 +960,8 @@ export function MembersView({
 
   const applyAllocationUpdate = useCallback(
     (
-      updatedFeatures: Array<{
-        featureId: number;
+      updatedEpics: Array<{
+        epicId: number;
         months: Array<{
           monthId: number;
           totalCapacity: number;
@@ -974,40 +974,40 @@ export function MembersView({
         rows.map((member) => {
           let changed = false;
           const newMonths = new Map(member.months);
-          for (const updatedFeature of updatedFeatures) {
-            for (const updatedMonth of updatedFeature.months) {
+          for (const updatedEpic of updatedEpics) {
+            for (const updatedMonth of updatedEpic.months) {
               const existing =
                 newMonths.get(updatedMonth.monthId) ?? emptyMemberMonthData();
               const memberAlloc = updatedMonth.memberAllocations.find(
                 (a) => a.memberId === member.id,
               );
               const newCapacity = memberAlloc?.capacity ?? 0;
-              const existingAlloc = existing.featureAllocations.find(
-                (fa) => fa.featureId === updatedFeature.featureId,
+              const existingAlloc = existing.epicAllocations.find(
+                (fa) => fa.epicId === updatedEpic.epicId,
               );
               if (existingAlloc?.capacity === newCapacity) continue;
               changed = true;
-              let newFeatureAllocations: MemberMonthData["featureAllocations"];
+              let newEpicAllocations: MemberMonthData["epicAllocations"];
               if (newCapacity === 0) {
-                newFeatureAllocations = existing.featureAllocations.filter(
-                  (fa) => fa.featureId !== updatedFeature.featureId,
+                newEpicAllocations = existing.epicAllocations.filter(
+                  (fa) => fa.epicId !== updatedEpic.epicId,
                 );
               } else if (existingAlloc) {
-                newFeatureAllocations = existing.featureAllocations.map((fa) =>
-                  fa.featureId === updatedFeature.featureId
+                newEpicAllocations = existing.epicAllocations.map((fa) =>
+                  fa.epicId === updatedEpic.epicId
                     ? { ...fa, capacity: newCapacity }
                     : fa,
                 );
               } else {
-                newFeatureAllocations = existing.featureAllocations;
+                newEpicAllocations = existing.epicAllocations;
               }
-              const newTotalCapacity = newFeatureAllocations.reduce(
+              const newTotalCapacity = newEpicAllocations.reduce(
                 (sum, fa) => sum + fa.capacity,
                 0,
               );
               newMonths.set(updatedMonth.monthId, {
                 totalCapacity: newTotalCapacity,
-                featureAllocations: newFeatureAllocations,
+                epicAllocations: newEpicAllocations,
               });
             }
           }
@@ -1022,29 +1022,29 @@ export function MembersView({
     (
       member: MemberRow,
       column: PeriodColumn,
-      excludeFeatureId: number,
+      excludeEpicId: number,
       requestedCapacity: number,
     ): RebalancePreview[] => {
-      const featureTotals = new Map<
+      const epicTotals = new Map<
         number,
-        { featureName: string; capacity: number }
+        { epicName: string; capacity: number }
       >();
       for (const monthId of column.monthIds) {
         const monthData = member.months.get(monthId);
         if (!monthData) continue;
-        for (const fa of monthData.featureAllocations) {
-          if (fa.featureId === excludeFeatureId) continue;
-          const current = featureTotals.get(fa.featureId) ?? {
-            featureName: fa.featureName,
+        for (const fa of monthData.epicAllocations) {
+          if (fa.epicId === excludeEpicId) continue;
+          const current = epicTotals.get(fa.epicId) ?? {
+            epicName: fa.epicName,
             capacity: 0,
           };
-          featureTotals.set(fa.featureId, {
-            featureName: current.featureName || fa.featureName,
+          epicTotals.set(fa.epicId, {
+            epicName: current.epicName || fa.epicName,
             capacity: current.capacity + fa.capacity,
           });
         }
       }
-      const otherAllocations = [...featureTotals.values()].filter(
+      const otherAllocations = [...epicTotals.values()].filter(
         (f) => f.capacity > 0,
       );
       const usedElsewhere = otherAllocations.reduce(
@@ -1057,7 +1057,7 @@ export function MembersView({
           ? Math.max(0, (limit - requestedCapacity) / usedElsewhere)
           : 1;
       return otherAllocations.map((f) => ({
-        featureName: f.featureName,
+        epicName: f.epicName,
         currentCapacity: f.capacity,
         nextCapacity: r2(f.capacity * scale),
       }));
@@ -1069,29 +1069,29 @@ export function MembersView({
     (
       member: MemberRow,
       column: PeriodColumn,
-      excludeFeatureId: number,
+      excludeEpicId: number,
       requestedCapacity: number,
     ): { newCapacity: number; othersPreview: RebalancePreview[] } => {
-      const featureTotals = new Map<
+      const epicTotals = new Map<
         number,
-        { featureName: string; capacity: number }
+        { epicName: string; capacity: number }
       >();
       for (const monthId of column.monthIds) {
         const monthData = member.months.get(monthId);
         if (!monthData) continue;
-        for (const fa of monthData.featureAllocations) {
-          if (fa.featureId === excludeFeatureId) continue;
-          const current = featureTotals.get(fa.featureId) ?? {
-            featureName: fa.featureName,
+        for (const fa of monthData.epicAllocations) {
+          if (fa.epicId === excludeEpicId) continue;
+          const current = epicTotals.get(fa.epicId) ?? {
+            epicName: fa.epicName,
             capacity: 0,
           };
-          featureTotals.set(fa.featureId, {
-            featureName: current.featureName || fa.featureName,
+          epicTotals.set(fa.epicId, {
+            epicName: current.epicName || fa.epicName,
             capacity: current.capacity + fa.capacity,
           });
         }
       }
-      const otherAllocations = [...featureTotals.values()].filter(
+      const otherAllocations = [...epicTotals.values()].filter(
         (f) => f.capacity > 0,
       );
       const usedElsewhere = otherAllocations.reduce(
@@ -1104,7 +1104,7 @@ export function MembersView({
       return {
         newCapacity: r2(requestedCapacity * scale),
         othersPreview: otherAllocations.map((f) => ({
-          featureName: f.featureName,
+          epicName: f.epicName,
           currentCapacity: f.capacity,
           nextCapacity: r2(f.capacity * scale),
         })),
@@ -1115,7 +1115,7 @@ export function MembersView({
 
   const handleUpdateMemberAllocation = useCallback(
     async (
-      featureId: number,
+      epicId: number,
       member: MemberRow,
       column: PeriodColumn,
       capacity: number,
@@ -1131,13 +1131,13 @@ export function MembersView({
             const monthData = member.months.get(monthId);
             return (
               sum +
-              (monthData?.featureAllocations
-                .filter((a) => a.featureId !== featureId)
+              (monthData?.epicAllocations
+                .filter((a) => a.epicId !== epicId)
                 .reduce((s, a) => s + a.capacity, 0) ?? 0)
             );
           }, 0);
           setMaxCapacityOverflow({
-            featureId,
+            epicId,
             periodType: column.type,
             monthId: column.monthId,
             quarterId: column.quarterId,
@@ -1151,7 +1151,7 @@ export function MembersView({
         }
 
         const preview = await orpc.allocations.previewMemberAllocation({
-          featureId,
+          epicId,
           memberId: member.id,
           capacity,
           periodType: column.type,
@@ -1160,7 +1160,7 @@ export function MembersView({
         });
         if (preview.hasConflict) {
           setCapacityConflict({
-            featureId,
+            epicId,
             periodType: column.type,
             monthId: column.monthId,
             quarterId: column.quarterId,
@@ -1175,7 +1175,7 @@ export function MembersView({
 
         await history.record("Member capacityを変更", async () => {
           const result = await orpc.allocations.updateMemberAllocation({
-            featureId,
+            epicId,
             memberId: member.id,
             capacity,
             periodType: column.type,
@@ -1183,7 +1183,7 @@ export function MembersView({
             quarterId: column.quarterId,
             capacityConflictResolution: "fitWithinLimit",
           });
-          applyAllocationUpdate(result.updatedFeatures);
+          applyAllocationUpdate(result.updatedEpics);
         });
       } finally {
         setBusy(false);
@@ -1199,7 +1199,7 @@ export function MembersView({
       try {
         await history.record("Capacity競合を解決", async () => {
           const result = await orpc.allocations.updateMemberAllocation({
-            featureId: capacityConflict.featureId,
+            epicId: capacityConflict.epicId,
             periodType: capacityConflict.periodType,
             monthId: capacityConflict.monthId,
             quarterId: capacityConflict.quarterId,
@@ -1207,7 +1207,7 @@ export function MembersView({
             capacity: capacityConflict.requestedCapacity,
             capacityConflictResolution: resolution,
           });
-          applyAllocationUpdate(result.updatedFeatures);
+          applyAllocationUpdate(result.updatedEpics);
         });
         setCapacityConflict(null);
       } finally {
@@ -1224,7 +1224,7 @@ export function MembersView({
       try {
         await history.record("Max capacity超過を解決", async () => {
           const result = await orpc.allocations.updateMemberAllocation({
-            featureId: maxCapacityOverflow.featureId,
+            epicId: maxCapacityOverflow.epicId,
             periodType: maxCapacityOverflow.periodType,
             monthId: maxCapacityOverflow.monthId,
             quarterId: maxCapacityOverflow.quarterId,
@@ -1232,7 +1232,7 @@ export function MembersView({
             capacity: maxCapacityOverflow.requestedCapacity,
             capacityConflictResolution: resolution,
           });
-          applyAllocationUpdate(result.updatedFeatures);
+          applyAllocationUpdate(result.updatedEpics);
         });
         setMaxCapacityOverflow(null);
       } finally {
@@ -1416,9 +1416,9 @@ export function MembersView({
             <button
               type="button"
               className="cv-nav-link"
-              onClick={() => navigate("/features")}
+              onClick={() => navigate("/epics")}
             >
-              Features
+              Epics
             </button>
             <button
               type="button"
@@ -1446,9 +1446,9 @@ export function MembersView({
           <button
             type="button"
             className="cv-nav-link"
-            onClick={() => navigate("/features")}
+            onClick={() => navigate("/epics")}
           >
-            Features
+            Epics
           </button>
           <button
             type="button"
@@ -1624,7 +1624,7 @@ export function MembersView({
 
                 const memberMaxCap = member.maxCapacity ?? 1;
                 rows.push(
-                  <tr key={member.id} className="tr-feature">
+                  <tr key={member.id} className="tr-epic">
                     <td className="td-label">
                       <div className="td-label-inner">
                         <button
@@ -1676,20 +1676,20 @@ export function MembersView({
                 );
 
                 if (member.expanded) {
-                  const featureMap = new Map<
+                  const epicMap = new Map<
                     number,
-                    { featureName: string; epicName: string | null }
+                    { epicName: string; initiativeName: string | null }
                   >();
                   for (const monthData of member.months.values()) {
-                    for (const fa of monthData.featureAllocations) {
-                      featureMap.set(fa.featureId, {
-                        featureName: fa.featureName,
+                    for (const fa of monthData.epicAllocations) {
+                      epicMap.set(fa.epicId, {
                         epicName: fa.epicName,
+                        initiativeName: fa.initiativeName,
                       });
                     }
                   }
 
-                  if (featureMap.size === 0) {
+                  if (epicMap.size === 0) {
                     rows.push(
                       <tr key={`${member.id}-empty`} className="tr-member">
                         <td
@@ -1706,39 +1706,39 @@ export function MembersView({
                       </tr>,
                     );
                   } else {
-                    for (const [featureId, featureInfo] of featureMap) {
+                    for (const [epicId, epicInfo] of epicMap) {
                       const matchingCapacityConflict =
-                        capacityConflict?.featureId === featureId &&
+                        capacityConflict?.epicId === epicId &&
                         capacityConflict.memberId === member.id
                           ? capacityConflict
                           : null;
                       const matchingMaxCapacityOverflow =
-                        maxCapacityOverflow?.featureId === featureId &&
+                        maxCapacityOverflow?.epicId === epicId &&
                         maxCapacityOverflow.memberId === member.id
                           ? maxCapacityOverflow
                           : null;
                       rows.push(
                         <tr
-                          key={`${member.id}-${featureId}`}
+                          key={`${member.id}-${epicId}`}
                           className="tr-member"
                         >
                           <td className="td-label td-member-label">
                             <span className="member-name">
                               <button
                                 type="button"
-                                className="feature-link-btn"
+                                className="epic-link-btn"
                                 onClick={() =>
                                   navigate(
-                                    `/features?featureId=${featureId}&memberId=${member.id}`,
+                                    `/epics?epicId=${epicId}&memberId=${member.id}`,
                                   )
                                 }
-                                title="Features画面でこのメンバー行を表示"
+                                title="Epics画面でこのメンバー行を表示"
                               >
-                                {featureInfo.featureName}
+                                {epicInfo.epicName}
                               </button>
-                              {featureInfo.epicName && (
-                                <span className="member-feature-epic">
-                                  {featureInfo.epicName}
+                              {epicInfo.initiativeName && (
+                                <span className="member-epic-initiative">
+                                  {epicInfo.initiativeName}
                                 </span>
                               )}
                             </span>
@@ -1747,8 +1747,8 @@ export function MembersView({
                           <td style={{ width: 80, minWidth: 80 }} />
                           {columns.map((column) => {
                             const data = getColumnData(member, column);
-                            const fa = data.featureAllocations.find(
-                              (a) => a.featureId === featureId,
+                            const fa = data.epicAllocations.find(
+                              (a) => a.epicId === epicId,
                             );
                             const limit = columnMemberLimit(
                               column,
@@ -1797,13 +1797,13 @@ export function MembersView({
                                 className="td-member-val"
                                 style={{ width: COL_W, padding: 0 }}
                               >
-                                <HeatmapEditableFeatureCell
+                                <HeatmapEditableEpicCell
                                   value={displayValue}
                                   maxVal={displayLimit}
                                   isOverflow={isOverflow}
                                   onCommit={(v) =>
                                     void handleUpdateMemberAllocation(
-                                      featureId,
+                                      epicId,
                                       member,
                                       column,
                                       v * div,
@@ -1858,13 +1858,13 @@ export function MembersView({
                                       rebalancePreview={getRebalancePreview(
                                         member,
                                         column,
-                                        matchingCapacityConflict.featureId,
+                                        matchingCapacityConflict.epicId,
                                         matchingCapacityConflict.requestedCapacity,
                                       )}
                                       rebalanceAllPreview={getRebalanceAllPreview(
                                         member,
                                         column,
-                                        matchingCapacityConflict.featureId,
+                                        matchingCapacityConflict.epicId,
                                         matchingCapacityConflict.requestedCapacity,
                                       )}
                                       onResolve={resolveCapacityConflict}
@@ -1914,7 +1914,7 @@ export function MembersView({
               {actionWarning || history.warning}
             </span>
           )}
-          <span className="hint-text">+ でFeature展開</span>
+          <span className="hint-text">+ でEpic展開</span>
         </div>
       </div>
 

@@ -12,7 +12,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { orpc } from "./orpc-client";
 
-type ProcedureName = "features.list" | "members.list" | "quarters.list";
+type ProcedureName = "epics.list" | "members.list" | "quarters.list";
 
 export function APITester() {
   const responseInputRef = useRef<HTMLTextAreaElement>(null);
@@ -24,8 +24,8 @@ export function APITester() {
       const procedure = formData.get("procedure") as ProcedureName;
 
       let result: unknown;
-      if (procedure === "features.list") {
-        result = await orpc.features.list({});
+      if (procedure === "epics.list") {
+        result = await orpc.epics.list({});
       } else if (procedure === "members.list") {
         result = await orpc.members.list({});
       } else {
@@ -47,12 +47,12 @@ export function APITester() {
         <Label htmlFor="procedure" className="sr-only">
           Procedure
         </Label>
-        <Select name="procedure" defaultValue="features.list">
+        <Select name="procedure" defaultValue="epics.list">
           <SelectTrigger className="w-[180px]" id="procedure">
             <SelectValue placeholder="Procedure" />
           </SelectTrigger>
           <SelectContent align="start">
-            <SelectItem value="features.list">features.list</SelectItem>
+            <SelectItem value="epics.list">epics.list</SelectItem>
             <SelectItem value="members.list">members.list</SelectItem>
             <SelectItem value="quarters.list">quarters.list</SelectItem>
           </SelectContent>

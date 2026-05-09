@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * DB seed script — populates db.sqlite with sample data via the running server.
  *
@@ -8,15 +9,15 @@
  * Usage:
  *   PORT=<port> bun run db:seed
  *
- * Epics, Features, and Members are imported via the CLI import commands.
+ * Initiatives, Epics, and Members are imported via the CLI import commands.
  * Quarters (no CLI import available) are created via the oRPC client.
  */
 
-import { $ } from "bun";
 import { join } from "node:path";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
+import { $ } from "bun";
 import type { AppRouter } from "../router";
 import { getLocalBaseUrl } from "../runtime-config";
 
@@ -51,13 +52,13 @@ function nextQuarters(
   return result;
 }
 
-// 1. Epics — CLI import
+// 1. Initiatives — CLI import
+console.log("Importing initiatives...");
+await $`bun src/cli.ts initiatives import ${join(SEED_DIR, "initiatives.csv")}`;
+
+// 2. Epics — CLI import
 console.log("Importing epics...");
 await $`bun src/cli.ts epics import ${join(SEED_DIR, "epics.csv")}`;
-
-// 2. Features — CLI import
-console.log("Importing features...");
-await $`bun src/cli.ts features import ${join(SEED_DIR, "features.csv")}`;
 
 // 3. Members — CLI import
 console.log("Importing members...");

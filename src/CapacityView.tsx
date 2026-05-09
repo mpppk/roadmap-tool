@@ -8,7 +8,14 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import "./capacity.css";
 import { parseCapacityTSV } from "./capacity-clipboard";
 import type { HistoryController } from "./history-client";
@@ -1417,6 +1424,28 @@ export function CapacityView({
   const [labelWidth, setLabelWidth] = useState(220);
   const colResizeRef = useRef<{ startX: number; startWidth: number } | null>(
     null,
+  );
+  const startLabelColumnResize = useCallback(
+    (e: ReactMouseEvent<HTMLElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      colResizeRef.current = {
+        startX: e.clientX,
+        startWidth: labelWidth,
+      };
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    },
+    [labelWidth],
+  );
+  const renderLabelResizeBorder = () => (
+    <button
+      type="button"
+      aria-label="Resize feature name column"
+      className="col-resize-border"
+      tabIndex={-1}
+      onMouseDown={startLabelColumnResize}
+    />
   );
 
   useEffect(() => {
@@ -2940,20 +2969,7 @@ export function CapacityView({
               <tr>
                 <th className="th-label">
                   Feature
-                  <button
-                    type="button"
-                    aria-label="Resize label column"
-                    className="col-resize-handle"
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      colResizeRef.current = {
-                        startX: e.clientX,
-                        startWidth: labelWidth,
-                      };
-                      document.body.style.cursor = "col-resize";
-                      document.body.style.userSelect = "none";
-                    }}
-                  />
+                  {renderLabelResizeBorder()}
                 </th>
                 {columns.map((column) => (
                   <th
@@ -3041,6 +3057,7 @@ export function CapacityView({
                           />
                         )}
                       </div>
+                      {renderLabelResizeBorder()}
                     </td>
                     {columns.map((column) => {
                       const data = getEpicColumnData(epic.id, column);
@@ -3157,6 +3174,7 @@ export function CapacityView({
                             />
                           )}
                         </div>
+                        {renderLabelResizeBorder()}
                       </td>
                       {columns.map((column, ci) => {
                         const data = getColumnData(feature, column);
@@ -3263,6 +3281,7 @@ export function CapacityView({
                                 ×
                               </button>
                             </div>
+                            {renderLabelResizeBorder()}
                           </td>
                           {columns.map((column, ci) => {
                             const data = getColumnData(feature, column);
@@ -3448,6 +3467,7 @@ export function CapacityView({
                               + メンバーを割り当て
                             </button>
                           )}
+                          {renderLabelResizeBorder()}
                         </td>
                         {columns.length > 0 && <td colSpan={columns.length} />}
                       </tr>,
@@ -3461,6 +3481,7 @@ export function CapacityView({
                         >
                           <td className="td-label td-unassigned-label">
                             <span className="unassigned-name">未アサイン</span>
+                            {renderLabelResizeBorder()}
                           </td>
                           {columns.map((column) => {
                             const uv =
@@ -3499,6 +3520,7 @@ export function CapacityView({
                       >
                         + Feature
                       </button>
+                      {renderLabelResizeBorder()}
                     </td>
                     {columns.length > 0 && <td colSpan={columns.length} />}
                   </tr>,

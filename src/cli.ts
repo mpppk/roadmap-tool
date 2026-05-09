@@ -5,6 +5,7 @@ import type { RouterClient } from "@orpc/server";
 import { getNameErrorMessage } from "./name-errors";
 import type { AppRouter } from "./router";
 import { getLocalBaseUrl } from "./runtime-config";
+import { version } from "../package.json";
 
 class CliExit extends Error {
   constructor(readonly code: number) {
@@ -280,6 +281,10 @@ export async function runCli(
   activeCommandName = commandName;
   const [resource, command, ...args] = argv;
 
+  if (resource === "--version" || resource === "-v") {
+    console.log(version);
+    throw new CliExit(0);
+  }
   if (resource === "help" || resource === "--help" || resource === "-h") {
     help();
   }

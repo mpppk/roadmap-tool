@@ -1,7 +1,13 @@
 import tailwind from "bun-plugin-tailwind";
 
+// BUN_TARGET allows cross-compilation (e.g. "bun-linux-arm64" from an x64 host)
+const target = (Bun.env.BUN_TARGET ?? "bun") as Parameters<
+  typeof Bun.build
+>[0]["target"];
+
 const result = await Bun.build({
   entrypoints: ["./src/binary.ts"],
+  target,
   compile: {
     outfile: "./roadmap-tool",
   },

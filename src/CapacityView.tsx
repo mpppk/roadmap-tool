@@ -657,7 +657,8 @@ function FeatureNameCell({
           onClick={(e) => {
             e.stopPropagation();
             for (const link of links) {
-              if (link.url) window.open(link.url, "_blank", "noopener,noreferrer");
+              if (link.url)
+                window.open(link.url, "_blank", "noopener,noreferrer");
             }
           }}
           title={`${links.length}件のリンク`}

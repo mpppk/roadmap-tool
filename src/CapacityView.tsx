@@ -3415,7 +3415,7 @@ export function CapacityView({
                         key={`${feature.id}-assign`}
                         className="tr-assign-member"
                       >
-                        <td className="td-assign">
+                        <td className="td-assign td-assign-member">
                           {assigningFeatureId === feature.id ? (
                             <select
                               className="assign-select"

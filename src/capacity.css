@@ -770,6 +770,9 @@
   background: var(--surface);
   border-right: 1px solid var(--border);
 }
+.td-assign-member {
+  padding-left: 48px;
+}
 .btn-assign {
   background: none;
   border: none;

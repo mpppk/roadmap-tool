@@ -533,14 +533,14 @@ function HeatmapMemberCell({
 function FeatureNameCell({
   name,
   hasDescription,
-  linkCount,
+  links,
   onRename,
   onDelete,
   onEditDetails,
 }: {
   name: string;
   hasDescription: boolean;
-  linkCount: number;
+  links: Array<{ url: string }>;
   onRename: (name: string) => Promise<string | undefined>;
   onDelete: () => void;
   onEditDetails: () => void;
@@ -650,16 +650,18 @@ function FeatureNameCell({
       >
         <Info size={13} />
       </button>
-      {linkCount > 0 && (
+      {links.length > 0 && (
         <button
           type="button"
           className="feature-meta-btn active"
           onClick={(e) => {
             e.stopPropagation();
-            onEditDetails();
+            for (const link of links) {
+              if (link.url) window.open(link.url, "_blank", "noopener,noreferrer");
+            }
           }}
-          title={`${linkCount}件のリンク`}
-          aria-label={`${linkCount}件のリンクを表示`}
+          title={`${links.length}件のリンク`}
+          aria-label={`${links.length}件のリンクを別タブで開く`}
         >
           <LinkIcon size={13} />
         </button>
@@ -3045,7 +3047,7 @@ export function CapacityView({
                           hasDescription={
                             (epic.description?.trim().length ?? 0) > 0
                           }
-                          linkCount={epic.links.length}
+                          links={epic.links}
                           onRename={(name) => renameEpic(epic.id, name)}
                           onDelete={() => deleteEpic(epic.id)}
                           onEditDetails={() => setEditingEpicDetails(epic)}
@@ -3160,7 +3162,7 @@ export function CapacityView({
                             hasDescription={
                               (feature.description?.trim().length ?? 0) > 0
                             }
-                            linkCount={feature.links.length}
+                            links={feature.links}
                             onRename={(name) => renameFeature(feature.id, name)}
                             onDelete={() => deleteFeature(feature.id)}
                             onEditDetails={() =>

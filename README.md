@@ -7,13 +7,13 @@
 ### ワンライナー（推奨）
 
 ```sh
-curl -fsSL https://install.roadmap.nibo.sh | sh
+curl -fsSL https://roadmap.nibo.sh | sh
 ```
 
 インストール先を指定する場合:
 
 ```sh
-curl -fsSL https://install.roadmap.nibo.sh | sh -s -- -b ~/.local/bin
+curl -fsSL https://roadmap.nibo.sh | sh -s -- -b ~/.local/bin
 ```
 
 ### プラットフォーム別（手動）

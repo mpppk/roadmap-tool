@@ -1908,11 +1908,17 @@ export function MembersView({
       </div>
 
       {importModalOpen && (
-        <div className="confirm-overlay">
+        <div
+          className="confirm-overlay"
+          onClick={() => {
+            if (!importing) setImportModalOpen(false);
+          }}
+        >
           <div
             role="dialog"
             aria-modal="true"
             className="confirm-dialog import-dialog"
+            onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
               if (e.key === "Escape" && !importing) setImportModalOpen(false);
             }}

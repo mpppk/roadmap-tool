@@ -763,11 +763,12 @@ function FeatureDetailsDialog({
   };
 
   return (
-    <div className="confirm-overlay">
+    <div className="confirm-overlay" onClick={saving ? undefined : onClose}>
       <div
         role="dialog"
         aria-modal="true"
         className="confirm-dialog feature-details-dialog"
+        onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           if (e.key === "Escape" && !saving) onClose();
         }}
@@ -980,11 +981,12 @@ function EpicDetailsDialog({
   };
 
   return (
-    <div className="confirm-overlay">
+    <div className="confirm-overlay" onClick={saving ? undefined : onClose}>
       <div
         role="dialog"
         aria-modal="true"
         className="confirm-dialog feature-details-dialog"
+        onClick={(e) => e.stopPropagation()}
       >
         <div className="feature-details-header">
           <p className="confirm-msg">Epic詳細</p>
@@ -1275,11 +1277,12 @@ function PasteConflictDialog({
   onCancel: () => void;
 }) {
   return (
-    <div className="confirm-overlay">
+    <div className="confirm-overlay" onClick={onCancel}>
       <div
         role="dialog"
         aria-modal="true"
         className="confirm-dialog paste-conflict-dialog"
+        onClick={(e) => e.stopPropagation()}
       >
         <p className="confirm-msg">
           ペースト先でキャパシティの上限を超えるセルがあります。
@@ -3583,11 +3586,17 @@ export function CapacityView({
       </div>
 
       {importModalOpen && (
-        <div className="confirm-overlay">
+        <div
+          className="confirm-overlay"
+          onClick={() => {
+            if (!importing) setImportModalOpen(false);
+          }}
+        >
           <div
             role="dialog"
             aria-modal="true"
             className="confirm-dialog import-dialog"
+            onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
               if (e.key === "Escape" && !importing) setImportModalOpen(false);
             }}
@@ -3671,11 +3680,12 @@ export function CapacityView({
       )}
 
       {removeConfirm && (
-        <div className="confirm-overlay">
+        <div className="confirm-overlay" onClick={() => setRemoveConfirm(null)}>
           <div
             role="dialog"
             aria-modal="true"
             className="confirm-dialog"
+            onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
               if (e.key === "Escape") setRemoveConfirm(null);
             }}

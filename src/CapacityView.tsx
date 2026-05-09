@@ -537,6 +537,7 @@ function EpicNameCell({
   onRename,
   onDelete,
   onEditDetails,
+  detailsLabel = "Epic",
 }: {
   name: string;
   hasDescription: boolean;
@@ -544,6 +545,7 @@ function EpicNameCell({
   onRename: (name: string) => Promise<string | undefined>;
   onDelete: () => void;
   onEditDetails: () => void;
+  detailsLabel?: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(name);
@@ -645,8 +647,8 @@ function EpicNameCell({
           e.stopPropagation();
           onEditDetails();
         }}
-        title={hasDescription ? "説明あり" : "Epic詳細を編集"}
-        aria-label="Epic詳細を編集"
+        title={hasDescription ? "説明あり" : `${detailsLabel}詳細を編集`}
+        aria-label={`${detailsLabel}詳細を編集`}
       >
         <Info size={13} />
       </button>
@@ -3136,6 +3138,7 @@ export function CapacityView({
                           onEditDetails={() =>
                             setEditingInitiativeDetails(initiative)
                           }
+                          detailsLabel="Initiative"
                         />
                         {initiativeHasOverflow && (
                           <span

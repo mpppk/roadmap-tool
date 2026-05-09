@@ -1908,6 +1908,8 @@ export function MembersView({
       </div>
 
       {importModalOpen && (
+        // biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop closes on click; keyboard handled by dialog via Escape
+        // biome-ignore lint/a11y/useKeyWithClickEvents: modal backdrop closes on click; keyboard handled by dialog via Escape
         <div
           className="confirm-overlay"
           onClick={() => {
@@ -1920,6 +1922,7 @@ export function MembersView({
             className="confirm-dialog import-dialog"
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
+              e.stopPropagation();
               if (e.key === "Escape" && !importing) setImportModalOpen(false);
             }}
           >

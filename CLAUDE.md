@@ -38,7 +38,7 @@ bun run build        # build.ts による本番ビルド
 データベース管理（Drizzle Kit を使用）:
 
 ```sh
-bun run db:seed      # 開発用サンプルデータを投入（サーバー起動後に PORT=<port> で実行）
+bun run db:seed      # 開発用サンプルデータを投入（サーバー起動不要・冪等）
 bun run db:generate  # スキーマ変更からマイグレーションを生成
 bun run db:migrate   # 未適用のマイグレーションを実行
 bun run db:push      # スキーマを直接プッシュ（開発環境のみ）

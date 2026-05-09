@@ -1418,7 +1418,7 @@ export function MembersView({
               className="cv-nav-link"
               onClick={() => navigate("/features")}
             >
-              Features
+              Epics
             </button>
             <button
               type="button"
@@ -1448,7 +1448,7 @@ export function MembersView({
             className="cv-nav-link"
             onClick={() => navigate("/features")}
           >
-            Features
+            Epics
           </button>
           <button
             type="button"
@@ -1732,7 +1732,7 @@ export function MembersView({
                                     `/features?featureId=${featureId}&memberId=${member.id}`,
                                   )
                                 }
-                                title="Features画面でこのメンバー行を表示"
+                                title="Epics画面でこのメンバー行を表示"
                               >
                                 {featureInfo.featureName}
                               </button>

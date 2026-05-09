@@ -645,8 +645,8 @@ function FeatureNameCell({
           e.stopPropagation();
           onEditDetails();
         }}
-        title={hasDescription ? "説明あり" : "Feature詳細を編集"}
-        aria-label="Feature詳細を編集"
+        title={hasDescription ? "説明あり" : "Epic詳細を編集"}
+        aria-label="Epic詳細を編集"
       >
         <Info size={13} />
       </button>
@@ -674,7 +674,7 @@ function FeatureNameCell({
           e.stopPropagation();
           onDelete();
         }}
-        title="Featureを削除"
+        title="Epicを削除"
       >
         ×
       </button>
@@ -785,7 +785,7 @@ function FeatureDetailsDialog({
         }}
       >
         <div className="feature-details-header">
-          <p className="confirm-msg">Feature詳細</p>
+          <p className="confirm-msg">Epic詳細</p>
         </div>
 
         <label className="feature-details-label">
@@ -802,7 +802,7 @@ function FeatureDetailsDialog({
         </label>
 
         <label className="feature-details-label">
-          <span>Epic</span>
+          <span>Initiative</span>
           <select
             className="feature-details-input"
             value={epicId}
@@ -2451,7 +2451,7 @@ export function CapacityView({
     try {
       const epic = await orpc.initiatives.create({
         name: nextAvailableGeneratedName(
-          "Epic",
+          "Initiative",
           epicRows.map((row) => row.name),
         ),
       });
@@ -2481,7 +2481,7 @@ export function CapacityView({
     setBusy(true);
     setActionWarning(null);
     try {
-      const f = await history.record("Featureを追加", async () => {
+      const f = await history.record("Epicを追加", async () => {
         return orpc.epics.create({
           initiativeId: epicId,
           name: nextAvailableGeneratedName(
@@ -2533,7 +2533,7 @@ export function CapacityView({
 
   const renameFeature = useCallback(
     async (id: number, name: string) => {
-      const f = await history.record("Feature名を変更", async () => {
+      const f = await history.record("Epic名を変更", async () => {
         return orpc.epics.rename({ id, name });
       });
       if (!f) return name;
@@ -2567,7 +2567,7 @@ export function CapacityView({
       },
     ) => {
       const { epicId: initiativeId, ...rest } = input;
-      const f = await history.record("Feature詳細を変更", async () => {
+      const f = await history.record("Epic詳細を変更", async () => {
         return orpc.epics.rename({ id, initiativeId, ...rest });
       });
       if (!f) return;
@@ -2642,7 +2642,7 @@ export function CapacityView({
     async (id: number) => {
       setBusy(true);
       try {
-        await history.record("Featureを削除", async () => {
+        await history.record("Epicを削除", async () => {
           await orpc.epics.delete({ id });
           setFeatureRows((rows) => rows.filter((r) => r.id !== id));
         });
@@ -2661,7 +2661,7 @@ export function CapacityView({
       setEpicRows((rows) => rows.filter((row) => row.id !== id));
     } catch (error) {
       setActionWarning(
-        error instanceof Error ? error.message : "Epicを削除できませんでした。",
+        error instanceof Error ? error.message : "Initiativeを削除できませんでした。",
       );
     } finally {
       setBusy(false);
@@ -2797,7 +2797,7 @@ export function CapacityView({
     async (featureId: number, memberId: number) => {
       setBusy(true);
       try {
-        await history.record("MemberをFeatureに割り当て", async () => {
+        await history.record("MemberをEpicに割り当て", async () => {
           await orpc.allocations.assignMember({ epicId: featureId, memberId });
           await refreshFeatureRow(featureId);
         });
@@ -2812,7 +2812,7 @@ export function CapacityView({
     async (featureId: number, memberId: number) => {
       setBusy(true);
       try {
-        await history.record("MemberをFeatureから削除", async () => {
+        await history.record("MemberをEpicから削除", async () => {
           await orpc.allocations.removeMemberFromEpic({
             epicId: featureId,
             memberId,
@@ -2859,7 +2859,7 @@ export function CapacityView({
               className="cv-nav-link active"
               onClick={() => navigate("/features")}
             >
-              Features
+              Epics
             </button>
             <button
               type="button"
@@ -2889,7 +2889,7 @@ export function CapacityView({
             className="cv-nav-link active"
             onClick={() => navigate("/features")}
           >
-            Features
+            Epics
           </button>
           <button
             type="button"
@@ -3043,7 +3043,7 @@ export function CapacityView({
             <thead>
               <tr>
                 <th className="th-label">
-                  Feature
+                  Epic
                   {renderLabelResizeBorder()}
                 </th>
                 {columns.map((column) => (
@@ -3102,8 +3102,8 @@ export function CapacityView({
                             setDragItem({ type: "epic", epicId: epic.id })
                           }
                           onDragEnd={() => setDragItem(null)}
-                          title="Epicを移動"
-                          aria-label="Epicを移動"
+                          title="Initiativeを移動"
+                          aria-label="Initiativeを移動"
                         >
                           <GripVertical size={14} />
                         </button>
@@ -3215,8 +3215,8 @@ export function CapacityView({
                               })
                             }
                             onDragEnd={() => setDragItem(null)}
-                            title="Featureを移動"
-                            aria-label="Featureを移動"
+                            title="Epicを移動"
+                            aria-label="Epicを移動"
                           >
                             <GripVertical size={14} />
                           </button>
@@ -3355,7 +3355,7 @@ export function CapacityView({
                                     featureName: feature.name,
                                   })
                                 }
-                                title="このFeatureから削除"
+                                title="このEpicから削除"
                               >
                                 ×
                               </button>
@@ -3597,7 +3597,7 @@ export function CapacityView({
                         disabled={busy}
                         onClick={() => addFeature(epic.id)}
                       >
-                        + Feature
+                        + Epic
                       </button>
                       {renderLabelResizeBorder()}
                     </td>
@@ -3618,7 +3618,7 @@ export function CapacityView({
             onClick={addEpic}
             disabled={busy}
           >
-            + Epic
+            + Initiative
           </button>
           <button
             type="button"

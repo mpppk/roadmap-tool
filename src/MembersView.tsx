@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import "./capacity.css";
 import type { HistoryController } from "./history-client";
 import {
@@ -760,6 +767,55 @@ export function MembersView({
   const [maxCapacityOverflow, setMaxCapacityOverflow] =
     useState<PendingMaxCapacityOverflow | null>(null);
 
+  const [labelWidth, setLabelWidth] = useState(220);
+  const colResizeRef = useRef<{ startX: number; startWidth: number } | null>(
+    null,
+  );
+  const startLabelColumnResize = useCallback(
+    (e: ReactMouseEvent<HTMLElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      colResizeRef.current = {
+        startX: e.clientX,
+        startWidth: labelWidth,
+      };
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    },
+    [labelWidth],
+  );
+  const renderLabelResizeBorder = () => (
+    <button
+      type="button"
+      aria-label="Resize member name column"
+      className="col-resize-border"
+      tabIndex={-1}
+      onMouseDown={startLabelColumnResize}
+    />
+  );
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!colResizeRef.current) return;
+      const delta = e.clientX - colResizeRef.current.startX;
+      setLabelWidth(Math.max(80, colResizeRef.current.startWidth + delta));
+    };
+    const onMouseUp = () => {
+      if (!colResizeRef.current) return;
+      colResizeRef.current = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, []);
+
   const displayedQuarters = useMemo(() => {
     if (!rangeStart || !rangeEnd) return quarters;
     return quarters.filter((q) => isQuarterInRange(q, rangeStart, rangeEnd));
@@ -1376,7 +1432,10 @@ export function MembersView({
   }
 
   return (
-    <div className="cv-root">
+    <div
+      className="cv-root"
+      style={{ "--col-label": `${labelWidth}px` } as React.CSSProperties}
+    >
       <header className="cv-header">
         <h1>Roadmap</h1>
         <span className="sep">›</span>
@@ -1579,6 +1638,7 @@ export function MembersView({
                           onDelete={deleteMember}
                         />
                       </div>
+                      {renderLabelResizeBorder()}
                     </td>
                     <td
                       className="td-quarter"
@@ -1668,6 +1728,7 @@ export function MembersView({
                                 </span>
                               )}
                             </span>
+                            {renderLabelResizeBorder()}
                           </td>
                           <td style={{ width: 80, minWidth: 80 }} />
                           {columns.map((column) => {

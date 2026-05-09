@@ -135,3 +135,38 @@ test("/features shows feature rows with expand toggle", async ({ page }) => {
   await toggleBtn.click();
   await expect(toggleBtn).toHaveText("−");
 });
+
+test("feature label column resizes from a feature row border", async ({
+  page,
+}) => {
+  await page.goto(`${BASE}/features`, { waitUntil: "domcontentloaded" });
+  await expect(page.locator("th.th-label")).toHaveText("Feature");
+
+  const featureRows = page.locator("tbody tr.tr-feature");
+  if ((await featureRows.count()) === 0) {
+    await page.locator(".tr-assign-member .btn-assign", {
+      hasText: "+ Feature",
+    }).click();
+    await expect(featureRows).toHaveCount(1);
+  }
+
+  const header = page.locator("th.th-label");
+  const initialWidth = await header.evaluate(
+    (el) => el.getBoundingClientRect().width,
+  );
+  const resizeBorder = featureRows
+    .first()
+    .locator(".td-label .col-resize-border");
+  const box = await resizeBorder.boundingBox();
+  expect(box).not.toBeNull();
+  if (!box) return;
+
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 60, box.y + box.height / 2);
+  await page.mouse.up();
+
+  await expect
+    .poll(() => header.evaluate((el) => el.getBoundingClientRect().width))
+    .toBeGreaterThan(initialWidth + 40);
+});

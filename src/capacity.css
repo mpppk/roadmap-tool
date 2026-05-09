@@ -195,18 +195,23 @@
   background: var(--surface);
   border-right: 1px solid var(--border);
 }
-.col-resize-handle {
+.col-resize-border {
   position: absolute;
   top: 0;
-  right: 0;
-  width: 5px;
+  right: -1px;
+  width: 8px;
   height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
   cursor: col-resize;
   z-index: 12;
+  touch-action: none;
 }
-.col-resize-handle:hover {
+.col-resize-border:hover,
+.col-resize-border:active {
   background: var(--cv-accent);
-  opacity: 0.4;
+  opacity: 0.35;
 }
 .th-quarter {
   text-align: center;

@@ -1,11 +1,9 @@
 import { parseArgs } from "node:util";
-import { createORPCClient } from "@orpc/client";
-import { RPCLink } from "@orpc/client/fetch";
-import type { RouterClient } from "@orpc/server";
+import { createRouterClient } from "@orpc/server";
 import { version } from "../package.json";
+import { db } from "./db/index";
 import { getNameErrorMessage } from "./name-errors";
-import type { AppRouter } from "./router";
-import { getLocalBaseUrl } from "./runtime-config";
+import { router } from "./router";
 
 class CliExit extends Error {
   constructor(readonly code: number) {
@@ -187,9 +185,8 @@ function helpForSubcommand(resource: string, command: string): never {
   throw new CliExit(0);
 }
 
-function createClient(baseUrl = getLocalBaseUrl()) {
-  const link = new RPCLink({ url: `${baseUrl}/orpc` });
-  return createORPCClient<RouterClient<AppRouter>>(link);
+function createClient() {
+  return createRouterClient(router, { context: { db } });
 }
 
 function help(): never {

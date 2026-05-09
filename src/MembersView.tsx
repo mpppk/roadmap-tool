@@ -888,10 +888,10 @@ export function MembersView({
         for (const md of qd.months) {
           monthMap.set(md.month.id, {
             totalCapacity: md.totalCapacity,
-            featureAllocations: md.featureAllocations.map((fa) => ({
-              featureId: fa.feature.id,
-              featureName: fa.feature.name,
-              epicName: fa.feature.epic?.name ?? null,
+            featureAllocations: md.epicAllocations.map((fa) => ({
+              featureId: fa.epic.id,
+              featureName: fa.epic.name,
+              epicName: fa.epic.initiative?.name ?? null,
               capacity: fa.capacity,
             })),
           });
@@ -961,7 +961,7 @@ export function MembersView({
   const applyAllocationUpdate = useCallback(
     (
       updatedFeatures: Array<{
-        featureId: number;
+        epicId: number;
         months: Array<{
           monthId: number;
           totalCapacity: number;
@@ -983,18 +983,18 @@ export function MembersView({
               );
               const newCapacity = memberAlloc?.capacity ?? 0;
               const existingAlloc = existing.featureAllocations.find(
-                (fa) => fa.featureId === updatedFeature.featureId,
+                (fa) => fa.featureId === updatedFeature.epicId,
               );
               if (existingAlloc?.capacity === newCapacity) continue;
               changed = true;
               let newFeatureAllocations: MemberMonthData["featureAllocations"];
               if (newCapacity === 0) {
                 newFeatureAllocations = existing.featureAllocations.filter(
-                  (fa) => fa.featureId !== updatedFeature.featureId,
+                  (fa) => fa.featureId !== updatedFeature.epicId,
                 );
               } else if (existingAlloc) {
                 newFeatureAllocations = existing.featureAllocations.map((fa) =>
-                  fa.featureId === updatedFeature.featureId
+                  fa.featureId === updatedFeature.epicId
                     ? { ...fa, capacity: newCapacity }
                     : fa,
                 );
@@ -1151,7 +1151,7 @@ export function MembersView({
         }
 
         const preview = await orpc.allocations.previewMemberAllocation({
-          featureId,
+          epicId: featureId,
           memberId: member.id,
           capacity,
           periodType: column.type,
@@ -1175,7 +1175,7 @@ export function MembersView({
 
         await history.record("Member capacityを変更", async () => {
           const result = await orpc.allocations.updateMemberAllocation({
-            featureId,
+            epicId: featureId,
             memberId: member.id,
             capacity,
             periodType: column.type,
@@ -1199,7 +1199,7 @@ export function MembersView({
       try {
         await history.record("Capacity競合を解決", async () => {
           const result = await orpc.allocations.updateMemberAllocation({
-            featureId: capacityConflict.featureId,
+            epicId: capacityConflict.featureId,
             periodType: capacityConflict.periodType,
             monthId: capacityConflict.monthId,
             quarterId: capacityConflict.quarterId,
@@ -1224,7 +1224,7 @@ export function MembersView({
       try {
         await history.record("Max capacity超過を解決", async () => {
           const result = await orpc.allocations.updateMemberAllocation({
-            featureId: maxCapacityOverflow.featureId,
+            epicId: maxCapacityOverflow.featureId,
             periodType: maxCapacityOverflow.periodType,
             monthId: maxCapacityOverflow.monthId,
             quarterId: maxCapacityOverflow.quarterId,

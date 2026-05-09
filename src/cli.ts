@@ -318,7 +318,7 @@ export async function runCli(
     if (command === "list") {
       if (args.includes("--help") || args.includes("-h"))
         helpForSubcommand(resource, command);
-      const items = await orpc.features.list({});
+      const items = await orpc.epics.list({});
       if (items.length === 0) {
         console.log("(no features)");
       } else {
@@ -326,7 +326,7 @@ export async function runCli(
           const linkCount = f.links.length;
           const description = f.description ?? "";
           console.log(
-            `${f.id}\t${f.epicId}\t${f.name}\t${description}\t${linkCount} links`,
+            `${f.id}\t${f.initiativeId}\t${f.name}\t${description}\t${linkCount} links`,
           );
         }
       }
@@ -336,7 +336,12 @@ export async function runCli(
       const { rest, metadata } = parseFeatureMetadataFlags(args);
       const name = rest[0];
       if (!name) usage();
-      const f = await orpc.features.create({ name, ...metadata });
+      const { epicId: initiativeId, ...restMetadata } = metadata;
+      const f = await orpc.epics.create({
+        name,
+        initiativeId,
+        ...restMetadata,
+      });
       console.log(`Created: ${f!.id}\t${f!.name}`);
     } else if (command === "rename") {
       if (args.includes("--help") || args.includes("-h"))
@@ -345,7 +350,13 @@ export async function runCli(
       const id = Number(rest[0]);
       const name = rest[1];
       if (!id || !name) usage();
-      const f = await orpc.features.rename({ id, name, ...metadata });
+      const { epicId: initiativeId, ...restMetadata } = metadata;
+      const f = await orpc.epics.rename({
+        id,
+        name,
+        initiativeId,
+        ...restMetadata,
+      });
       console.log(`Renamed: ${f!.id}\t${f!.name}`);
     } else if (command === "move") {
       if (args.includes("--help") || args.includes("-h"))
@@ -361,27 +372,27 @@ export async function runCli(
         allowPositionals: true,
       });
       const id = Number(movePositionals[0]);
-      const epicId = Number(moveValues["epic-id"]);
+      const initiativeId = Number(moveValues["epic-id"]);
       const beforeId = moveValues.before
         ? Number(moveValues.before)
         : undefined;
       const afterId = moveValues.after ? Number(moveValues.after) : undefined;
-      if (!id || !epicId) usage();
+      if (!id || !initiativeId) usage();
       if (beforeId !== undefined && afterId !== undefined) usage();
-      const f = await orpc.features.move({ id, epicId, beforeId, afterId });
+      const f = await orpc.epics.move({ id, initiativeId, beforeId, afterId });
       console.log(`Moved: ${f!.id}\t${f!.name}`);
     } else if (command === "delete") {
       if (args.includes("--help") || args.includes("-h"))
         helpForSubcommand(resource, command);
       const id = Number(args[0]);
       if (!id) usage();
-      await orpc.features.delete({ id });
+      await orpc.epics.delete({ id });
       console.log(`Deleted: ${id}`);
     } else if (command === "import") {
       if (args.includes("--help") || args.includes("-h"))
         helpForSubcommand(resource, command);
       const csv = await readImportSource(args);
-      const result = await orpc.import.featureMetadataCSVImport({ csv });
+      const result = await orpc.import.epicMetadataCSVImport({ csv });
       console.log(`Imported: ${result.success}`);
     } else {
       usage();
@@ -390,7 +401,7 @@ export async function runCli(
     if (command === "list") {
       if (args.includes("--help") || args.includes("-h"))
         helpForSubcommand(resource, command);
-      const items = await orpc.epics.list({});
+      const items = await orpc.initiatives.list({});
       if (items.length === 0) {
         console.log("(no epics)");
       } else {
@@ -409,7 +420,7 @@ export async function runCli(
       const { epicId: _epicId, ...epicMetadata } = metadata;
       const name = rest[0];
       if (!name) usage();
-      const epic = await orpc.epics.create({ name, ...epicMetadata });
+      const epic = await orpc.initiatives.create({ name, ...epicMetadata });
       console.log(`Created: ${epic!.id}\t${epic!.name}`);
     } else if (command === "rename") {
       if (args.includes("--help") || args.includes("-h"))
@@ -419,14 +430,14 @@ export async function runCli(
       const id = Number(rest[0]);
       const name = rest[1];
       if (!id || !name) usage();
-      const epic = await orpc.epics.rename({ id, name, ...epicMetadata });
+      const epic = await orpc.initiatives.rename({ id, name, ...epicMetadata });
       console.log(`Renamed: ${epic!.id}\t${epic!.name}`);
     } else if (command === "delete") {
       if (args.includes("--help") || args.includes("-h"))
         helpForSubcommand(resource, command);
       const id = Number(args[0]);
       if (!id) usage();
-      await orpc.epics.delete({ id });
+      await orpc.initiatives.delete({ id });
       console.log(`Deleted: ${id}`);
     } else if (command === "move") {
       if (args.includes("--help") || args.includes("-h"))
@@ -447,13 +458,13 @@ export async function runCli(
       const afterId = moveValues.after ? Number(moveValues.after) : undefined;
       if (!id) usage();
       if (beforeId !== undefined && afterId !== undefined) usage();
-      await orpc.epics.move({ id, beforeId, afterId });
+      await orpc.initiatives.move({ id, beforeId, afterId });
       console.log(`Moved: ${id}`);
     } else if (command === "import") {
       if (args.includes("--help") || args.includes("-h"))
         helpForSubcommand(resource, command);
       const csv = await readImportSource(args);
-      const result = await orpc.import.epicMetadataCSVImport({ csv });
+      const result = await orpc.import.initiativeMetadataCSVImport({ csv });
       console.log(`Imported: ${result.success}`);
     } else {
       usage();

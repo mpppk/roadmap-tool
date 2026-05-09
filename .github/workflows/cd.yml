@@ -54,12 +54,6 @@ jobs:
             os_name: Darwin
             arch_name: arm64
             archive: roadmap-tool_Darwin_arm64.tar.gz
-          - platform: darwin-x64
-            runner: macos-13
-            bun_target: bun-darwin-x64
-            os_name: Darwin
-            arch_name: x86_64
-            archive: roadmap-tool_Darwin_x86_64.tar.gz
           - platform: windows-x64
             runner: windows-latest
             bun_target: bun-windows-x64

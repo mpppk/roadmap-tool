@@ -2661,7 +2661,9 @@ export function CapacityView({
       setEpicRows((rows) => rows.filter((row) => row.id !== id));
     } catch (error) {
       setActionWarning(
-        error instanceof Error ? error.message : "Initiativeを削除できませんでした。",
+        error instanceof Error
+          ? error.message
+          : "Initiativeを削除できませんでした。",
       );
     } finally {
       setBusy(false);

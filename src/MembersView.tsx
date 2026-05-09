@@ -1,10 +1,10 @@
 import {
+  type MouseEvent as ReactMouseEvent,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type MouseEvent as ReactMouseEvent,
 } from "react";
 import "./capacity.css";
 import type { HistoryController } from "./history-client";

@@ -9,12 +9,12 @@ import {
   Trash2,
 } from "lucide-react";
 import {
+  type MouseEvent as ReactMouseEvent,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type MouseEvent as ReactMouseEvent,
 } from "react";
 import "./capacity.css";
 import { parseCapacityTSV } from "./capacity-clipboard";

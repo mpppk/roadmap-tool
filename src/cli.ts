@@ -2,10 +2,10 @@ import { parseArgs } from "node:util";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
+import { version } from "../package.json";
 import { getNameErrorMessage } from "./name-errors";
 import type { AppRouter } from "./router";
 import { getLocalBaseUrl } from "./runtime-config";
-import { version } from "../package.json";
 
 class CliExit extends Error {
   constructor(readonly code: number) {
@@ -38,6 +38,8 @@ function createHelpText(commandName: string): string {
   ${commandName} members delete <id>
   ${commandName} members import <path|-> [--mode append|sync]
   ${commandName} members capacity --year <year> --month <month>
+
+  ${commandName} update [--check]
 `;
 }
 
@@ -287,6 +289,23 @@ export async function runCli(
   }
   if (resource === "help" || resource === "--help" || resource === "-h") {
     help();
+  }
+  if (resource === "update") {
+    if (
+      command === "--help" ||
+      command === "-h" ||
+      args.includes("--help") ||
+      args.includes("-h")
+    ) {
+      console.log(
+        `Usage: ${commandName} update [options]\n\n  --check    Check for updates without installing\n  --help, -h Show this help`,
+      );
+      throw new CliExit(0);
+    }
+    const checkOnly = command === "--check" || args.includes("--check");
+    const { runUpdate } = await import("./update");
+    await runUpdate(checkOnly);
+    throw new CliExit(0);
   }
   if (command === "--help" || command === "-h") {
     helpForResource(resource ?? "");

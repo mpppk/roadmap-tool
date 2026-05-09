@@ -13,7 +13,7 @@
     "styles"
   ],
   "scripts": {
-    "dev": "portless run bun --hot src/index.ts",
+    "dev": "ROADMAP_DB=db.sqlite portless run bun --hot src/index.ts",
     "start": "NODE_ENV=production bun src/index.ts",
     "build": "bun run build.ts",
     "build:binary": "bun run build-binary.ts",
@@ -23,6 +23,7 @@
     "format:check": "biome format ./src",
     "check": "biome check ./src",
     "test": "bun test",
+    "db:seed": "bun src/db/seed.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun src/db/run-migrate.ts",
     "db:push": "drizzle-kit push",

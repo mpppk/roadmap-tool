@@ -43,7 +43,7 @@ const MIGRATIONS: Migration[] = [
   },
   {
     name: "0006_rename_epic_to_initiative",
-    up: renameEpicToInitiative,
+    up: renameEpicToInitiativeAndFeatureToEpic,
     transaction: false,
   },
 ];
@@ -249,7 +249,7 @@ function addEpics(sqlite: Database): void {
   }
 }
 
-function renameEpicToInitiative(sqlite: Database): void {
+function renameEpicToInitiativeAndFeatureToEpic(sqlite: Database): void {
   const pragma = sqlite
     .prepare<{ foreign_keys: number }, []>("PRAGMA foreign_keys")
     .get();

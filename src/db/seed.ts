@@ -1,26 +1,31 @@
 #!/usr/bin/env bun
 /**
- * DB seed script — populates a fresh db.sqlite with sample data.
+ * DB seed script — populates db.sqlite with sample data via the running server.
+ *
+ * The dev server must be running before executing this script.
+ * The PORT environment variable must match the running server (defaults to 3000).
  *
  * Usage:
- *   bun run db:seed          # uses ROADMAP_DB (defaults to db.sqlite in cwd)
- *   ROADMAP_DB=/path/to.sqlite bun run db:seed
+ *   PORT=<port> bun run db:seed
  *
- * The script is idempotent: re-running it skips already-existing records.
+ * Epics, Features, and Members are imported via the CLI import commands.
+ * Quarters (no CLI import available) are created via the oRPC client.
  */
 
-import { readFileSync } from "node:fs";
+import { $ } from "bun";
 import { join } from "node:path";
-import { db } from "./index";
-import { router } from "../router";
+import { createORPCClient } from "@orpc/client";
+import { RPCLink } from "@orpc/client/fetch";
+import type { RouterClient } from "@orpc/server";
+import type { AppRouter } from "../router";
+import { getLocalBaseUrl } from "../runtime-config";
 
 const SEED_DIR = join(import.meta.dir, "../../seed");
+const baseUrl = getLocalBaseUrl();
+const orpc = createORPCClient<RouterClient<AppRouter>>(
+  new RPCLink({ url: `${baseUrl}/orpc` }),
+);
 
-function readSeedFile(filename: string): string {
-  return readFileSync(join(SEED_DIR, filename), "utf-8");
-}
-
-/** Returns the current year and quarter number (1-4). */
 function currentQuarter(): { year: number; quarter: number } {
   const now = new Date();
   return {
@@ -29,7 +34,6 @@ function currentQuarter(): { year: number; quarter: number } {
   };
 }
 
-/** Returns an array of {year, quarter} for the next `count` quarters starting from the given one. */
 function nextQuarters(
   start: { year: number; quarter: number },
   count: number,
@@ -47,52 +51,30 @@ function nextQuarters(
   return result;
 }
 
-async function main() {
-  const ctx = { db };
+// 1. Epics — CLI import
+console.log("Importing epics...");
+await $`bun src/cli.ts epics import ${join(SEED_DIR, "epics.csv")}`;
 
-  // 1. Epics
-  console.log("Importing epics...");
-  const epicResult = await router.import.epicMetadataCSVImport.callable({
-    context: ctx,
-  })({ csv: readSeedFile("epics.csv") });
-  console.log(`  → ${epicResult.success} created / updated`);
+// 2. Features — CLI import
+console.log("Importing features...");
+await $`bun src/cli.ts features import ${join(SEED_DIR, "features.csv")}`;
 
-  // 2. Features
-  console.log("Importing features...");
-  const featureResult = await router.import.featureMetadataCSVImport.callable({
-    context: ctx,
-  })({ csv: readSeedFile("features.csv") });
-  console.log(`  → ${featureResult.success} created / updated`);
+// 3. Members — CLI import
+console.log("Importing members...");
+await $`bun src/cli.ts members import ${join(SEED_DIR, "members.tsv")} --mode append`;
 
-  // 3. Members
-  console.log("Importing members...");
-  const memberResult = await router.import.memberTSVImport.callable({
-    context: ctx,
-  })({ tsv: readSeedFile("members.tsv"), mode: "append" });
-  console.log(
-    `  → ${memberResult.success} created / updated, ${memberResult.skipped} skipped`,
-  );
-
-  // 4. Quarters: current + next 3 quarters (4 total)
-  console.log("Creating quarters...");
-  const quartersToCreate = nextQuarters(currentQuarter(), 4);
-  const createQuarter = router.quarters.create.callable({ context: ctx });
-  let quartersCreated = 0;
-  for (const q of quartersToCreate) {
-    try {
-      await createQuarter(q);
-      console.log(`  → Created ${q.year} Q${q.quarter}`);
-      quartersCreated++;
-    } catch {
-      console.log(`  → ${q.year} Q${q.quarter} already exists, skipping`);
-    }
+// 4. Quarters — no CLI import available; use oRPC client directly
+console.log("Creating quarters...");
+let quartersCreated = 0;
+for (const q of nextQuarters(currentQuarter(), 4)) {
+  try {
+    await orpc.quarters.create(q);
+    console.log(`  Created ${q.year} Q${q.quarter}`);
+    quartersCreated++;
+  } catch {
+    console.log(`  ${q.year} Q${q.quarter} already exists, skipping`);
   }
-  console.log(`  → ${quartersCreated} created`);
-
-  console.log("\nSeed complete!");
 }
+console.log(`  → ${quartersCreated} created`);
 
-main().catch((err) => {
-  console.error("Seed failed:", err);
-  process.exit(1);
-});
+console.log("\nSeed complete!");

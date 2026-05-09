@@ -1,0 +1,103 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - heading "Roadmap" [level=1] [ref=e5]
+    - generic [ref=e6]: ›
+    - navigation [ref=e7]:
+      - button "Features" [ref=e8] [cursor=pointer]
+      - button "Members" [ref=e9] [cursor=pointer]
+    - generic [ref=e11]:
+      - button "Undo" [ref=e12] [cursor=pointer]
+      - button "Redo" [disabled] [ref=e13]
+    - group "表示単位" [ref=e14]:
+      - generic [ref=e15]: 表示単位
+      - button "Quarter" [ref=e16] [cursor=pointer]
+      - button "Month" [ref=e17] [cursor=pointer]
+    - group "集計" [ref=e18]:
+      - generic [ref=e19]: 集計
+      - button "合計" [ref=e20] [cursor=pointer]
+      - button "月平均" [ref=e21] [cursor=pointer]
+    - group "表示期間" [ref=e22]:
+      - generic [ref=e23]: 表示期間
+      - combobox [ref=e24]:
+        - option "2024"
+        - option "2025"
+        - option "2026" [selected]
+        - option "2027"
+        - option "2028"
+        - option "2029"
+        - option "2030"
+        - option "2031"
+        - option "2032"
+        - option "2033"
+      - combobox [ref=e25]:
+        - option "Q1"
+        - option "Q2" [selected]
+        - option "Q3"
+        - option "Q4"
+      - generic [ref=e26]: 〜
+      - combobox [ref=e27]:
+        - option "2024"
+        - option "2025"
+        - option "2026" [selected]
+        - option "2027"
+        - option "2028"
+        - option "2029"
+        - option "2030"
+        - option "2031"
+        - option "2032"
+        - option "2033"
+      - combobox [ref=e28]:
+        - option "Q1"
+        - option "Q2" [selected]
+        - option "Q3"
+        - option "Q4"
+  - generic [ref=e10]:
+    - table [ref=e30]:
+      - rowgroup [ref=e31]:
+        - row "Feature Resize label column" [ref=e32]:
+          - columnheader "Feature Resize label column" [ref=e33]:
+            - text: Feature
+            - button "Resize label column" [ref=e34]
+      - rowgroup [ref=e35]:
+        - row "Epicを移動 − 未分類 Feature詳細を編集 ×" [ref=e36]:
+          - cell "Epicを移動 − 未分類 Feature詳細を編集 ×" [ref=e37]:
+            - generic [ref=e38]:
+              - button "Epicを移動" [ref=e39]:
+                - img [ref=e40]
+              - button "−" [ref=e47] [cursor=pointer]
+              - generic [ref=e48]:
+                - button "未分類" [ref=e49]
+                - button "Feature詳細を編集" [ref=e50] [cursor=pointer]:
+                  - img [ref=e51]
+                - button "×" [ref=e53] [cursor=pointer]
+        - row "Featureを移動 + This is a very long feature name that should be truncated Feature詳細を編集 ×" [ref=e115]:
+          - cell "Featureを移動 + This is a very long feature name that should be truncated Feature詳細を編集 ×" [ref=e116]:
+            - generic [ref=e65]:
+              - button "Featureを移動" [ref=e66]:
+                - img [ref=e67]
+              - button "+" [ref=e74] [cursor=pointer]
+              - generic [ref=e75]:
+                - button "This is a very long feature name that should be truncated" [ref=e117]
+                - button "Feature詳細を編集" [ref=e118] [cursor=pointer]:
+                  - img [ref=e119]
+                - button "×" [ref=e121] [cursor=pointer]
+        - row "Featureを移動 + Feature 2 Feature詳細を編集 ×" [ref=e105]:
+          - cell "Featureを移動 + Feature 2 Feature詳細を編集 ×" [ref=e106]:
+            - generic [ref=e83]:
+              - button "Featureを移動" [ref=e84]:
+                - img [ref=e85]
+              - button "+" [ref=e92] [cursor=pointer]
+              - generic [ref=e93]:
+                - button "Feature 2" [ref=e107]
+                - button "Feature詳細を編集" [ref=e108] [cursor=pointer]:
+                  - img [ref=e109]
+                - button "×" [ref=e111] [cursor=pointer]
+        - row "+ Feature" [ref=e54]:
+          - cell "+ Feature" [ref=e55]:
+            - button "+ Feature" [ref=e56] [cursor=pointer]
+    - generic [ref=e57]:
+      - button "+ Epic" [ref=e58] [cursor=pointer]
+      - button "+ Member" [ref=e59] [cursor=pointer]
+      - button "CSVをコピー" [ref=e60] [cursor=pointer]
+      - button "TSVをインポート" [ref=e61] [cursor=pointer]
+      - generic [ref=e62]: ドラッグで範囲選択 · Ctrl+C コピー · Ctrl+V ペースト

@@ -1748,56 +1748,39 @@ const allocationsPreviewMemberAllocation = o
   )
   .handler(async ({ input, context }) => {
     const monthRows = await getTargetMonthRows(context.db, input);
-    const currentCapacities = await Promise.all(
-      monthRows.map(async (month) => {
-        const [row] = await context.db
-          .select()
-          .from(memberMonthAllocations)
-          .where(
-            and(
-              eq(memberMonthAllocations.featureId, input.featureId),
-              eq(memberMonthAllocations.monthId, month.id),
-              eq(memberMonthAllocations.memberId, input.memberId),
-            ),
-          );
-        return row?.capacity ?? 0;
-      }),
-    );
-    const requestedCapacities =
-      input.periodType === "month"
-        ? [input.capacity]
-        : splitTotalAcrossMonths(input.capacity, currentCapacities);
+    const maxCap = await getMemberMaxCapacity(context.db, input.memberId);
     const monthPreviews = await Promise.all(
-      monthRows.map(async (month, index) => {
+      monthRows.map(async (month) => {
         const usedElsewhere = await getMemberUsageInMonth(
           context.db,
           input.memberId,
           month.id,
           input.featureId,
         );
-        const requestedCapacity = requestedCapacities[index] ?? 0;
-        const maxCap = await getMemberMaxCapacity(context.db, input.memberId);
         return {
           usedElsewhere,
           assignableCapacity: Math.max(0, maxCap - usedElsewhere),
-          hasConflict:
-            requestedCapacity <= maxCap &&
-            usedElsewhere + requestedCapacity > maxCap + 0.000001,
         };
       }),
     );
 
+    const totalUsedElsewhere = monthPreviews.reduce(
+      (sum, preview) => sum + preview.usedElsewhere,
+      0,
+    );
+    const totalMaxCap = maxCap * monthRows.length;
+
     return {
-      usedElsewhere: normalizeCapacity(
-        monthPreviews.reduce((sum, preview) => sum + preview.usedElsewhere, 0),
-      ),
+      usedElsewhere: normalizeCapacity(totalUsedElsewhere),
       assignableCapacity: normalizeCapacity(
         monthPreviews.reduce(
           (sum, preview) => sum + preview.assignableCapacity,
           0,
         ),
       ),
-      hasConflict: monthPreviews.some((preview) => preview.hasConflict),
+      hasConflict:
+        input.capacity <= totalMaxCap &&
+        totalUsedElsewhere + input.capacity > totalMaxCap + 0.000001,
     };
   });
 

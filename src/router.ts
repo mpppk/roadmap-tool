@@ -29,7 +29,7 @@ const capacityConflictResolutionSchema = z.enum([
   "rebalanceAllProportionally",
 ]);
 
-const snapshotInitiativeschema = z.object({
+const snapshotInitiativeSchema = z.object({
   id: z.number().int(),
   name: z.string(),
   description: z.string().nullable(),
@@ -82,7 +82,7 @@ const snapshotMemberMonthAllocationSchema = z.object({
   capacity: z.number(),
 });
 const roadmapSnapshotSchema = z.object({
-  initiatives: z.array(snapshotInitiativeschema),
+  initiatives: z.array(snapshotInitiativeSchema),
   epics: z.array(snapshotEpicSchema),
   epicLinks: z.array(snapshotEpicLinkSchema),
   members: z.array(snapshotMemberSchema),
@@ -104,7 +104,7 @@ const epicLinkInputSchema = z.object({
   url: z.string(),
 });
 
-type NormalizedEpicLinkInput = {
+type NormalizedLinkInput = {
   title: string;
   url: string;
   position: number;
@@ -145,10 +145,10 @@ function normalizeEpicDescriptionInput(
 
 function normalizeEpicLinksInput(
   links: Array<{ title: string; url: string }> | undefined,
-): NormalizedEpicLinkInput[] | undefined {
+): NormalizedLinkInput[] | undefined {
   if (links === undefined) return undefined;
 
-  const normalizedLinks: NormalizedEpicLinkInput[] = [];
+  const normalizedLinks: NormalizedLinkInput[] = [];
   const seenUrls = new Set<string>();
 
   for (const link of links) {
@@ -331,7 +331,7 @@ async function buildEpicDto(db: typeof DbType, epic: EpicRowRecord) {
 async function saveInitiativeLinks(
   db: typeof DbType,
   initiativeId: number,
-  links: NormalizedEpicLinkInput[],
+  links: NormalizedLinkInput[],
 ) {
   await db
     .delete(initiativeLinks)
@@ -350,7 +350,7 @@ async function saveInitiativeLinks(
 async function saveEpicLinks(
   db: typeof DbType,
   epicId: number,
-  links: NormalizedEpicLinkInput[],
+  links: NormalizedLinkInput[],
 ) {
   await db.delete(epicLinks).where(eq(epicLinks.epicId, epicId));
   if (links.length === 0) return;
@@ -2332,7 +2332,7 @@ type EpicMetadataImportRow = {
   epicId: number | null;
   name: string;
   description: string | null;
-  links: NormalizedEpicLinkInput[];
+  links: NormalizedLinkInput[];
 };
 
 function parseOptionalMemberId(
@@ -3265,7 +3265,7 @@ const initiativeMetadataCSVImport = o
       row: number;
       name: string;
       description: string | null;
-      links: NormalizedEpicLinkInput[];
+      links: NormalizedLinkInput[];
     }> = [];
     const seenNames = new Set<string>();
     for (let i = 1; i < lines.length; i++) {

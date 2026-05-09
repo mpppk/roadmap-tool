@@ -9,12 +9,12 @@ import {
   Trash2,
 } from "lucide-react";
 import {
+  type MouseEvent as ReactMouseEvent,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type MouseEvent as ReactMouseEvent,
 } from "react";
 import "./capacity.css";
 import { parseCapacityTSV } from "./capacity-clipboard";
@@ -767,7 +767,9 @@ function FeatureDetailsDialog({
     // biome-ignore lint/a11y/useKeyWithClickEvents: modal backdrop closes on click; keyboard handled by dialog via Escape
     <div
       className="confirm-overlay"
-      onClick={() => { if (!saving) onClose(); }}
+      onClick={() => {
+        if (!saving) onClose();
+      }}
     >
       <div
         role="dialog"
@@ -991,7 +993,9 @@ function EpicDetailsDialog({
     // biome-ignore lint/a11y/useKeyWithClickEvents: modal backdrop closes on click; keyboard handled by dialog via Escape
     <div
       className="confirm-overlay"
-      onClick={() => { if (!saving) onClose(); }}
+      onClick={() => {
+        if (!saving) onClose();
+      }}
     >
       <div
         role="dialog"
@@ -3700,10 +3704,7 @@ export function CapacityView({
       {removeConfirm && (
         // biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop closes on click; keyboard handled by dialog via Escape
         // biome-ignore lint/a11y/useKeyWithClickEvents: modal backdrop closes on click; keyboard handled by dialog via Escape
-        <div
-          className="confirm-overlay"
-          onClick={() => setRemoveConfirm(null)}
-        >
+        <div className="confirm-overlay" onClick={() => setRemoveConfirm(null)}>
           <div
             role="dialog"
             aria-modal="true"

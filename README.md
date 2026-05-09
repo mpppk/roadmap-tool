@@ -27,13 +27,6 @@ curl -fsSL https://github.com/mpppk/roadmap-tool/releases/latest/download/roadma
 sudo install -m 0755 roadmap-tool /usr/local/bin/roadmap-tool
 ```
 
-**macOS (Intel)**
-
-```sh
-curl -fsSL https://github.com/mpppk/roadmap-tool/releases/latest/download/roadmap-tool_Darwin_x86_64.tar.gz | tar xz
-sudo install -m 0755 roadmap-tool /usr/local/bin/roadmap-tool
-```
-
 **Linux (x86_64)**
 
 ```sh

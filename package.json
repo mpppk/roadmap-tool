@@ -23,6 +23,7 @@
     "format:check": "biome format ./src",
     "check": "biome check ./src",
     "test": "bun test",
+    "db:seed": "ROADMAP_DB=db.sqlite bun src/db/seed.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun src/db/run-migrate.ts",
     "db:push": "drizzle-kit push",

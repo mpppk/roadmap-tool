@@ -32,6 +32,12 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 db.sqlite
 db.sqlite-wal
 db.sqlite-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# server logs
+server.log
 
 # IntelliJ based IDEs
 .idea

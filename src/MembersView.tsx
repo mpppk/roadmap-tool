@@ -712,6 +712,18 @@ function CapacityConflictPopover({
 // ── Main component ──────────────────────────────────────────────────────────
 
 const COL_W = 148;
+const CAPACITY_AGG_MODE_STORAGE_KEY = "roadmap.membersView.capacityAggMode";
+
+function readStoredCapacityAggMode(
+  key: string,
+  defaultValue: CapacityAggMode,
+): CapacityAggMode {
+  try {
+    const v = localStorage.getItem(key);
+    if (v === "total" || v === "average") return v;
+  } catch {}
+  return defaultValue;
+}
 
 export function MembersView({
   history,
@@ -727,8 +739,9 @@ export function MembersView({
     } catch {}
     return "quarter";
   });
-  const [capacityAggMode, setCapacityAggMode] =
-    useState<CapacityAggMode>("total");
+  const [capacityAggMode, setCapacityAggMode] = useState<CapacityAggMode>(() =>
+    readStoredCapacityAggMode(CAPACITY_AGG_MODE_STORAGE_KEY, "total"),
+  );
   const [quarters, setQuarters] = useState<Quarter[]>([]);
   const [rangeStart, setRangeStart] = useState<QuarterYQ | null>(() => {
     try {
@@ -841,6 +854,12 @@ export function MembersView({
       localStorage.setItem("roadmap.membersView.viewMode", viewMode);
     } catch {}
   }, [viewMode]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CAPACITY_AGG_MODE_STORAGE_KEY, capacityAggMode);
+    } catch {}
+  }, [capacityAggMode]);
 
   useEffect(() => {
     try {

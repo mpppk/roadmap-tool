@@ -1350,6 +1350,35 @@ function PasteConflictDialog({
 
 const FEATURE_MAX_VAL = 3;
 const COL_W = 148;
+const DEFAULT_LABEL_WIDTH = 220;
+const MIN_LABEL_WIDTH = 80;
+const FEATURE_NAME_COLUMN_WIDTH_STORAGE_KEY =
+  "roadmap.capacityView.featureNameColumnWidth";
+const CAPACITY_AGG_MODE_STORAGE_KEY = "roadmap.capacityView.capacityAggMode";
+
+function readStoredCapacityAggMode(
+  key: string,
+  defaultValue: CapacityAggMode,
+): CapacityAggMode {
+  try {
+    const v = localStorage.getItem(key);
+    if (v === "total" || v === "average") return v;
+  } catch {}
+  return defaultValue;
+}
+
+function readStoredLabelWidth(): number {
+  try {
+    const raw = localStorage.getItem(FEATURE_NAME_COLUMN_WIDTH_STORAGE_KEY);
+    if (raw === null) return DEFAULT_LABEL_WIDTH;
+    const value = JSON.parse(raw) as unknown;
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return DEFAULT_LABEL_WIDTH;
+    }
+    return Math.max(MIN_LABEL_WIDTH, value);
+  } catch {}
+  return DEFAULT_LABEL_WIDTH;
+}
 
 export function CapacityView({
   history,
@@ -1365,8 +1394,9 @@ export function CapacityView({
     } catch {}
     return "quarter";
   });
-  const [capacityAggMode, setCapacityAggMode] =
-    useState<CapacityAggMode>("average");
+  const [capacityAggMode, setCapacityAggMode] = useState<CapacityAggMode>(() =>
+    readStoredCapacityAggMode(CAPACITY_AGG_MODE_STORAGE_KEY, "average"),
+  );
   const [quarters, setQuarters] = useState<Quarter[]>([]);
   const [rangeStart, setRangeStart] = useState<QuarterYQ | null>(() => {
     try {
@@ -1456,7 +1486,7 @@ export function CapacityView({
   const didDragRef = useRef(false);
 
   // ── Label column resize ──────────────────────────────────────────────────
-  const [labelWidth, setLabelWidth] = useState(220);
+  const [labelWidth, setLabelWidth] = useState(readStoredLabelWidth);
   const colResizeRef = useRef<{ startX: number; startWidth: number } | null>(
     null,
   );
@@ -1487,7 +1517,9 @@ export function CapacityView({
     const onMouseMove = (e: MouseEvent) => {
       if (!colResizeRef.current) return;
       const delta = e.clientX - colResizeRef.current.startX;
-      setLabelWidth(Math.max(80, colResizeRef.current.startWidth + delta));
+      setLabelWidth(
+        Math.max(MIN_LABEL_WIDTH, colResizeRef.current.startWidth + delta),
+      );
     };
     const onMouseUp = () => {
       if (!colResizeRef.current) return;
@@ -1630,6 +1662,21 @@ export function CapacityView({
       localStorage.setItem("roadmap.capacityView.viewMode", viewMode);
     } catch {}
   }, [viewMode]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CAPACITY_AGG_MODE_STORAGE_KEY, capacityAggMode);
+    } catch {}
+  }, [capacityAggMode]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        FEATURE_NAME_COLUMN_WIDTH_STORAGE_KEY,
+        JSON.stringify(labelWidth),
+      );
+    } catch {}
+  }, [labelWidth]);
 
   useEffect(() => {
     try {

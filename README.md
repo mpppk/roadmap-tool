@@ -248,6 +248,8 @@ bun run db:studio    # Drizzle Studio を開く（GUI でデータ確認）
 | `XDG_DATA_HOME` が絶対パスで設定されている | `$XDG_DATA_HOME/roadmap-tool/db.sqlite` |
 | それ以外 | `$HOME/.local/share/roadmap-tool/db.sqlite` |
 
+`bun dev`（開発サーバー）では、`ROADMAP_DB=db.sqlite` がデフォルトで設定されるため、カレントディレクトリの `db.sqlite` を参照します。これにより、git worktree を使用している場合でも worktree ごとに独立した DB ファイルが使われます。
+
 DB ファイルのパスを変更したい場合は `ROADMAP_DB` 環境変数で上書きできます。
 
 ```sh

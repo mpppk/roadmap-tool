@@ -1724,7 +1724,18 @@ export function MembersView({
                         >
                           <td className="td-label td-member-label">
                             <span className="member-name">
-                              {featureInfo.featureName}
+                              <button
+                                type="button"
+                                className="feature-link-btn"
+                                onClick={() =>
+                                  navigate(
+                                    `/features?featureId=${featureId}&memberId=${member.id}`,
+                                  )
+                                }
+                                title="Features画面でこのメンバー行を表示"
+                              >
+                                {featureInfo.featureName}
+                              </button>
                               {featureInfo.epicName && (
                                 <span className="member-feature-epic">
                                   {featureInfo.epicName}

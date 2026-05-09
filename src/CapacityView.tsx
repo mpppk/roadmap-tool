@@ -1398,6 +1398,16 @@ export function CapacityView({
     useState<PendingCapacityConflict | null>(null);
   const [maxCapacityOverflow, setMaxCapacityOverflow] =
     useState<PendingMaxCapacityOverflow | null>(null);
+  const [highlightTarget, setHighlightTarget] = useState<{
+    featureId: number;
+    memberId: number;
+  } | null>(null);
+  const highlightRowRef = useRef<HTMLTableRowElement | null>(null);
+  // URLパラメータで指定されたハイライト対象をloadAll完了時に適用するための一時保存
+  const pendingHighlightRef = useRef<{
+    featureId: number;
+    memberId: number;
+  } | null>(null);
 
   // ── Selection / clipboard state ─────────────────────────────────────────
   const [selStartRow, setSelStartRow] = useState<number | null>(null);
@@ -1709,8 +1719,34 @@ export function CapacityView({
         }))
         .sort((a, b) => a.position - b.position || a.id - b.id),
     );
-    setFeatureRows(rows);
+    // pendingHighlightRefがあれば対象フィーチャーを展開し、既存のexpanded状態も保持
+    const pending = pendingHighlightRef.current;
+    setFeatureRows((prevRows) => {
+      const expandedIds = new Set(
+        prevRows.filter((r) => r.expanded).map((r) => r.id),
+      );
+      if (pending) expandedIds.add(pending.featureId);
+      return rows.map((r) => ({ ...r, expanded: expandedIds.has(r.id) }));
+    });
+    if (pending) {
+      setHighlightTarget(pending);
+      pendingHighlightRef.current = null;
+    }
     setLoading(false);
+  }, []);
+
+  // マウント時にURLパラメータを読み取り、pendingHighlightRefに保存してURLをクリア
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const fid = parseInt(params.get("featureId") ?? "", 10);
+    const mid = parseInt(params.get("memberId") ?? "", 10);
+    if (!Number.isNaN(fid) && !Number.isNaN(mid) && fid > 0 && mid > 0) {
+      pendingHighlightRef.current = { featureId: fid, memberId: mid };
+      const url = new URL(window.location.href);
+      url.searchParams.delete("featureId");
+      url.searchParams.delete("memberId");
+      window.history.replaceState(null, "", url.toString());
+    }
   }, []);
 
   useEffect(() => {
@@ -1718,6 +1754,17 @@ export function CapacityView({
     void externalDataVersion;
     loadAll();
   }, [loadAll, history.version, externalDataVersion]);
+
+  // ハイライト行が描画されたらスクロールして、一定時間後にハイライトを消す
+  useEffect(() => {
+    if (!highlightTarget || !highlightRowRef.current) return;
+    highlightRowRef.current.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+    const timer = setTimeout(() => setHighlightTarget(null), 3000);
+    return () => clearTimeout(timer);
+  }, [highlightTarget]);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -3260,10 +3307,14 @@ export function CapacityView({
                         );
                       });
 
+                      const isHighlighted =
+                        highlightTarget?.featureId === feature.id &&
+                        highlightTarget?.memberId === member.id;
                       rows.push(
                         <tr
                           key={`${feature.id}-${member.id}`}
-                          className={`tr-member${isOverflow ? " is-overflow" : ""}`}
+                          ref={isHighlighted ? highlightRowRef : null}
+                          className={`tr-member${isOverflow ? " is-overflow" : ""}${isHighlighted ? " is-highlighted" : ""}`}
                         >
                           <td className="td-label td-member-label">
                             <div className="member-label-row">

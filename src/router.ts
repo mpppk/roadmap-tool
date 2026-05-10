@@ -1968,7 +1968,7 @@ const exportEpicCSV = o.input(z.object({})).handler(async ({ context }) => {
 
   const header = [
     "Initiative",
-    "機能",
+    "Epic",
     "epic_id",
     ...allQuarters.map((q) => `${q.year}-Q${q.quarter}`),
   ].join(",");
@@ -2008,7 +2008,7 @@ const exportMemberCSV = o.input(z.object({})).handler(async ({ context }) => {
     "担当者",
     "member_id",
     "Initiative",
-    "機能",
+    "Epic",
     "epic_id",
     ...qHeaders,
   ].join(",");
@@ -2068,7 +2068,7 @@ const exportAllocationCSV = o
 
     const header = [
       "Initiative",
-      "機能",
+      "Epic",
       "epic_id",
       "担当者",
       "member_id",
@@ -2132,7 +2132,7 @@ const exportAllocationTSV = o
 
     const header = [
       "Initiative",
-      "機能",
+      "Epic",
       "epic_id",
       "担当者",
       "member_id",
@@ -2503,18 +2503,24 @@ const csvImport = o
     }
 
     const headers = parseCSVLine(lines[0]!).map((h) => h.trim());
-    const colFeature = headers.indexOf("機能");
+    const colEpic =
+      headers.indexOf("Epic") >= 0
+        ? headers.indexOf("Epic")
+        : headers.indexOf("機能");
     const colMember = headers.indexOf("担当者");
     const colCapacity = headers.indexOf("キャパシティ");
     const colMonth = headers.indexOf("月");
     const colInitiative = headers.indexOf("Initiative");
-    const colEpicId = headers.indexOf("epic_id");
+    const colEpicId =
+      headers.indexOf("epic_id") >= 0
+        ? headers.indexOf("epic_id")
+        : headers.indexOf("feature_id");
     const colMemberId = headers.indexOf("member_id");
 
-    if ([colFeature, colMember, colCapacity, colMonth].includes(-1)) {
+    if ([colEpic, colMember, colCapacity, colMonth].includes(-1)) {
       throw new ORPCError("BAD_REQUEST", {
         message:
-          "CSVヘッダーに「機能」「担当者」「キャパシティ」「月」のカラムが必要です。",
+          "CSVヘッダーに「Epic」「担当者」「キャパシティ」「月」のカラムが必要です。",
       });
     }
 
@@ -2549,7 +2555,7 @@ const csvImport = o
       const rowNum = i + 1;
       const cols = parseCSVLine(lines[i]!);
 
-      const epicName = (cols[colFeature] ?? "").trim();
+      const epicName = (cols[colEpic] ?? "").trim();
       const memberName = (cols[colMember] ?? "").trim();
       const capacityStr = (cols[colCapacity] ?? "").trim();
       const monthStr = (cols[colMonth] ?? "").trim();
@@ -2560,7 +2566,7 @@ const csvImport = o
         colInitiative >= 0 ? (cols[colInitiative] ?? "").trim() : undefined;
 
       if (!epicName) {
-        errors.push({ row: rowNum, message: "機能名が空です" });
+        errors.push({ row: rowNum, message: "Epic名が空です" });
         skipped++;
         continue;
       }
@@ -2727,18 +2733,24 @@ const tsvImport = o
     }
 
     const headers = parseTSVLine(lines[0]!).map((h) => h.trim());
-    const colFeature = headers.indexOf("機能");
+    const colEpic =
+      headers.indexOf("Epic") >= 0
+        ? headers.indexOf("Epic")
+        : headers.indexOf("機能");
     const colMember = headers.indexOf("担当者");
     const colCapacity = headers.indexOf("キャパシティ");
     const colMonth = headers.indexOf("月");
     const colInitiative = headers.indexOf("Initiative");
-    const colEpicId = headers.indexOf("epic_id");
+    const colEpicId =
+      headers.indexOf("epic_id") >= 0
+        ? headers.indexOf("epic_id")
+        : headers.indexOf("feature_id");
     const colMemberId = headers.indexOf("member_id");
 
-    if ([colFeature, colMember, colCapacity, colMonth].includes(-1)) {
+    if ([colEpic, colMember, colCapacity, colMonth].includes(-1)) {
       throw new ORPCError("BAD_REQUEST", {
         message:
-          "TSVヘッダーに「機能」「担当者」「キャパシティ」「月」のカラムが必要です。",
+          "TSVヘッダーに「Epic」「担当者」「キャパシティ」「月」のカラムが必要です。",
       });
     }
 
@@ -2773,7 +2785,7 @@ const tsvImport = o
       const rowNum = i + 1;
       const cols = parseTSVLine(lines[i]!);
 
-      const epicName = (cols[colFeature] ?? "").trim();
+      const epicName = (cols[colEpic] ?? "").trim();
       const memberName = (cols[colMember] ?? "").trim();
       const capacityStr = (cols[colCapacity] ?? "").trim();
       const monthStr = (cols[colMonth] ?? "").trim();
@@ -2784,7 +2796,7 @@ const tsvImport = o
         colInitiative >= 0 ? (cols[colInitiative] ?? "").trim() : undefined;
 
       if (!epicName) {
-        errors.push({ row: rowNum, message: "機能名が空です" });
+        errors.push({ row: rowNum, message: "Epic名が空です" });
         skipped++;
         continue;
       }

@@ -1233,7 +1233,7 @@ function CapacityConflictPopover({
           className="btn-sm capacity-conflict-action-btn"
           onClick={() => onResolve("rebalanceOthersProportionally")}
         >
-          <span>超過しないように他機能のキャパシティを削減</span>
+          <span>超過しないように他Epicのキャパシティを削減</span>
           {rebalancePreview.length > 0 && (
             <span className="capacity-conflict-preview-list">
               {rebalancePreview.map((change) => (
@@ -3635,7 +3635,7 @@ export function CapacityView({
             className="btn-sm"
             onClick={copyAllocationTSV}
             disabled={busy}
-            title="機能・担当者・キャパシティ・月次形式のTSVをコピー"
+            title="Epic・担当者・キャパシティ・月次形式のTSVをコピー"
           >
             TSVをコピー
           </button>
@@ -3648,7 +3648,7 @@ export function CapacityView({
               setImportModalOpen(true);
             }}
             disabled={busy}
-            title="TSVをインポート（機能\t担当者\tキャパシティ\t月）"
+            title="TSVをインポート（Epic\t担当者\tキャパシティ\t月）"
           >
             TSVをインポート
           </button>
@@ -3684,7 +3684,7 @@ export function CapacityView({
           >
             <p className="confirm-msg">TSVをインポート</p>
             <p className="import-hint">
-              ヘッダー行（機能・担当者・キャパシティ・月）を含むTSVを貼り付けてください。
+              ヘッダー行（Epic・担当者・キャパシティ・月）を含むTSVを貼り付けてください。
               スプレッドシートからのコピーをそのまま貼り付けられます。
               既存のキャパシティに加算されます。
             </p>
@@ -3694,7 +3694,7 @@ export function CapacityView({
                 value={importTsv}
                 onChange={(e) => setImportTsv(e.target.value)}
                 placeholder={
-                  "機能\t担当者\tキャパシティ\t月\nFeature A\tAlice\t0.5\t2026-04"
+                  "Epic\t担当者\tキャパシティ\t月\nEpic A\tAlice\t0.5\t2026-04"
                 }
                 rows={8}
                 disabled={importing}

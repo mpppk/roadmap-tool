@@ -520,7 +520,7 @@ describe("feature metadata", () => {
     await createQuarter({ year: 2026, quarter: 2 });
 
     const result = await importTsv({
-      tsv: ["機能\t担当者\tキャパシティ\t月", "Auth\tAlice\t0.5\t2026-04"].join(
+      tsv: ["Epic\t担当者\tキャパシティ\t月", "Auth\tAlice\t0.5\t2026-04"].join(
         "\n",
       ),
     });
@@ -567,7 +567,7 @@ describe("feature metadata", () => {
     // Import using old names but correct IDs — IDs should win
     const result = await importTsv({
       tsv: [
-        "機能\tfeature_id\t担当者\tmember_id\tキャパシティ\t月",
+        "Epic\tepic_id\t担当者\tmember_id\tキャパシティ\t月",
         `Auth\t${feature!.id}\tAlice\t${member!.id}\t0.5\t2026-04`,
       ].join("\n"),
     });
@@ -612,7 +612,7 @@ describe("feature metadata", () => {
 
     const result = await importCsv({
       csv: [
-        "Epic,機能,feature_id,担当者,member_id,キャパシティ,月",
+        "Initiative,Epic,epic_id,担当者,member_id,キャパシティ,月",
         `,Search,${feature!.id},Bob,${member!.id},1,2026-04`,
       ].join("\n"),
     });

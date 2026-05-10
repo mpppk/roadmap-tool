@@ -660,7 +660,7 @@ function CapacityConflictPopover({
           className="btn-sm capacity-conflict-action-btn"
           onClick={() => onResolve("rebalanceOthersProportionally")}
         >
-          <span>超過しないように他機能のキャパシティを削減</span>
+          <span>超過しないように他Epicのキャパシティを削減</span>
           {rebalancePreview.length > 0 && (
             <span className="capacity-conflict-preview-list">
               {rebalancePreview.map((change) => (

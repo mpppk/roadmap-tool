@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_type:
+        description: 'Version increment type'
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version in package.json
+        run: npm version ${{ inputs.version_type }} --no-git-tag-version
+
+      - name: Read new version
+        id: version
+        run: echo "value=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
+      - name: Commit, tag, and push
+        run: |
+          git add package.json
+          git commit -m "chore: release v${{ steps.version.outputs.value }}"
+          git tag "v${{ steps.version.outputs.value }}"
+          git push
+          git push --tags
+
+  cd:
+    needs: release
+    uses: ./.github/workflows/cd.yml

@@ -61,3 +61,5 @@ jobs:
     uses: ./.github/workflows/cd.yml
     permissions:
       contents: write
+    with:
+      tag_name: v${{ needs.release.outputs.version }}

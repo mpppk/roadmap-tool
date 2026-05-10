@@ -2773,34 +2773,58 @@ export function CapacityView({
     }
   }, []);
 
-  const moveEpic = useCallback(async (epicId: number, beforeId: number) => {
-    if (epicId === beforeId) return;
-    const updated = await orpc.initiatives.move({ id: epicId, beforeId });
-    setEpicRows((rows) => {
-      const collapsedById = new Map(rows.map((row) => [row.id, row.collapsed]));
-      return updated.map((epic) => ({
-        id: epic.id,
-        name: epic.name,
-        description: epic.description,
-        position: epic.position,
-        isDefault: epic.isDefault,
-        links: epic.links,
-        collapsed: collapsedById.get(epic.id) ?? false,
-      }));
-    });
-  }, []);
+  const moveEpic = useCallback(
+    async (epicId: number, targetId: number) => {
+      if (epicId === targetId) return;
+      const epicIndex = epicRows.findIndex((r) => r.id === epicId);
+      const targetIndex = epicRows.findIndex((r) => r.id === targetId);
+      const draggingDown = epicIndex < targetIndex;
+      const updated = await orpc.initiatives.move(
+        draggingDown
+          ? { id: epicId, afterId: targetId }
+          : { id: epicId, beforeId: targetId },
+      );
+      setEpicRows((rows) => {
+        const collapsedById = new Map(
+          rows.map((row) => [row.id, row.collapsed]),
+        );
+        return updated.map((epic) => ({
+          id: epic.id,
+          name: epic.name,
+          description: epic.description,
+          position: epic.position,
+          isDefault: epic.isDefault,
+          links: epic.links,
+          collapsed: collapsedById.get(epic.id) ?? false,
+        }));
+      });
+    },
+    [epicRows],
+  );
 
   const moveFeature = useCallback(
-    async (featureId: number, initiativeId: number, beforeId?: number) => {
+    async (featureId: number, initiativeId: number, targetId?: number) => {
+      let beforeId: number | undefined;
+      let afterId: number | undefined;
+      if (targetId !== undefined) {
+        const fromIndex = featureRows.findIndex((r) => r.id === featureId);
+        const toIndex = featureRows.findIndex((r) => r.id === targetId);
+        if (fromIndex < toIndex) {
+          afterId = targetId;
+        } else {
+          beforeId = targetId;
+        }
+      }
       const moved = await orpc.epics.move({
         id: featureId,
         initiativeId,
         beforeId,
+        afterId,
       });
       if (!moved) return;
       await loadAll();
     },
-    [loadAll],
+    [loadAll, featureRows],
   );
 
   const addMember = async () => {

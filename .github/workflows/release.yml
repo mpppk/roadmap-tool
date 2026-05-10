@@ -18,6 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
     outputs:
       version: ${{ steps.version.outputs.value }}
 
@@ -36,13 +37,24 @@ jobs:
         id: version
         run: echo "value=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
 
-      - name: Commit, tag, and push
+      - name: Commit, tag, and push release branch
         run: |
+          git checkout -b release/v${{ steps.version.outputs.value }}
           git add package.json
           git commit -m "chore: release v${{ steps.version.outputs.value }}"
           git tag "v${{ steps.version.outputs.value }}"
-          git push
-          git push --tags
+          git push origin release/v${{ steps.version.outputs.value }}
+          git push origin "v${{ steps.version.outputs.value }}"
+
+      - name: Create pull request
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr create \
+            --title "chore: release v${{ steps.version.outputs.value }}" \
+            --body "Automated version bump for release v${{ steps.version.outputs.value }}." \
+            --base main \
+            --head release/v${{ steps.version.outputs.value }}
 
   cd:
     needs: release

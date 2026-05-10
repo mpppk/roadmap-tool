@@ -18,7 +18,8 @@ describe("orpcProcedureNameFromPathname", () => {
 
 describe("shouldNotifyDataChange", () => {
   test("returns true for mutating procedures", () => {
-    expect(shouldNotifyDataChange("/orpc/features/create")).toBe(true);
+    expect(shouldNotifyDataChange("/orpc/epics/create")).toBe(true);
+    expect(shouldNotifyDataChange("/orpc/initiatives/create")).toBe(true);
     expect(shouldNotifyDataChange("/orpc/members/setMaxCapacity")).toBe(true);
     expect(shouldNotifyDataChange("/orpc/history/restore")).toBe(true);
     expect(shouldNotifyDataChange("/orpc/import/memberTSVImport")).toBe(true);

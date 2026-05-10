@@ -46,6 +46,11 @@ const MIGRATIONS: Migration[] = [
     up: renameEpicToInitiative,
     transaction: false,
   },
+  {
+    name: "0007_fix_fk_references",
+    up: fixFkReferences,
+    transaction: false,
+  },
 ];
 
 function normalizedNameRows(
@@ -390,6 +395,186 @@ function runMigration(sqlite: Database, migration: Migration): void {
   } catch (error) {
     sqlite.exec("ROLLBACK");
     throw error;
+  }
+}
+
+/**
+ * Migration 0007: Fix incorrect FK references left by the 0006 migration.
+ *
+ * The 0006_rename_epic_to_initiative migration was sometimes applied using an
+ * older version of the migration code that used ALTER TABLE RENAME TO instead
+ * of the CREATE+INSERT+DROP approach. This left FK references pointing to the
+ * wrong tables:
+ *   - epics.initiative_id → REFERENCES epics(id) [self-ref!] instead of initiatives(id)
+ *   - initiative_links.initiative_id → REFERENCES epics(id) instead of initiatives(id)
+ *   - epic_links.epic_id → REFERENCES features(id) [non-existent] instead of epics(id)
+ *   - epic_months.epic_id → REFERENCES features(id) [non-existent] instead of epics(id)
+ *   - member_month_allocations.epic_id → REFERENCES features(id) [non-existent] instead of epics(id)
+ *
+ * This migration detects and rebuilds affected tables so FK constraints are correct.
+ */
+function fixFkReferences(sqlite: Database): void {
+  const pragma = sqlite
+    .prepare<{ foreign_keys: number }, []>("PRAGMA foreign_keys")
+    .get();
+  const foreignKeysEnabled = pragma?.foreign_keys === 1;
+
+  sqlite.exec("PRAGMA foreign_keys = OFF");
+  sqlite.exec("BEGIN");
+  try {
+    // Check if epics table has broken self-referential FK (initiative_id → epics)
+    // by inspecting the stored CREATE TABLE SQL in sqlite_master.
+    const epicsInfo = sqlite
+      .prepare<{ sql: string }, [string]>(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+      )
+      .get("epics");
+
+    if (epicsInfo?.sql?.includes("REFERENCES epics(id)")) {
+      // Rebuild epics with correct FK → initiatives(id)
+      sqlite.exec(`
+        DROP INDEX IF EXISTS features_name_trim_unique;
+        DROP INDEX IF EXISTS epics_name_trim_unique;
+        DROP INDEX IF EXISTS features_epic_id_position_unique;
+        DROP INDEX IF EXISTS epics_initiative_id_position_unique;
+        DROP TABLE IF EXISTS epics__fix;
+        CREATE TABLE epics__fix (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+          name          TEXT NOT NULL,
+          description   TEXT,
+          initiative_id INTEGER NOT NULL REFERENCES initiatives(id) ON DELETE RESTRICT,
+          position      INTEGER NOT NULL DEFAULT 0,
+          created_at    INTEGER NOT NULL,
+          CONSTRAINT epics_name_trimmed_check CHECK (name = trim(name)),
+          CONSTRAINT epics_name_not_empty_check CHECK (length(name) > 0),
+          CONSTRAINT epics_position_check CHECK (position >= 0)
+        );
+        INSERT INTO epics__fix SELECT * FROM epics;
+        DROP TABLE epics;
+        ALTER TABLE epics__fix RENAME TO epics;
+        CREATE UNIQUE INDEX epics_name_trim_unique ON epics (trim(name));
+        CREATE UNIQUE INDEX epics_initiative_id_position_unique ON epics (initiative_id, position);
+      `);
+    }
+
+    // Check if initiative_links has broken FK (initiative_id → epics instead of initiatives)
+    const initLinksInfo = sqlite
+      .prepare<{ sql: string }, [string]>(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+      )
+      .get("initiative_links");
+
+    if (initLinksInfo?.sql?.includes("REFERENCES epics(id)")) {
+      sqlite.exec(`
+        DROP TABLE IF EXISTS initiative_links__fix;
+        CREATE TABLE initiative_links__fix (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+          initiative_id INTEGER NOT NULL REFERENCES initiatives(id) ON DELETE CASCADE,
+          title         TEXT NOT NULL,
+          url           TEXT NOT NULL,
+          position      INTEGER NOT NULL,
+          CONSTRAINT initiative_links_title_not_empty_check CHECK (length(title) > 0),
+          CONSTRAINT initiative_links_url_not_empty_check CHECK (length(url) > 0),
+          CONSTRAINT initiative_links_position_check CHECK (position >= 0),
+          UNIQUE(initiative_id, position),
+          UNIQUE(initiative_id, url)
+        );
+        INSERT INTO initiative_links__fix SELECT * FROM initiative_links;
+        DROP TABLE initiative_links;
+        ALTER TABLE initiative_links__fix RENAME TO initiative_links;
+      `);
+    }
+
+    // Check if epic_links has broken FK (epic_id → features instead of epics)
+    const epicLinksInfo = sqlite
+      .prepare<{ sql: string }, [string]>(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+      )
+      .get("epic_links");
+
+    if (epicLinksInfo?.sql?.includes("REFERENCES `features`")) {
+      sqlite.exec(`
+        DROP INDEX IF EXISTS feature_links_feature_id_position_unique;
+        DROP INDEX IF EXISTS feature_links_feature_id_url_unique;
+        DROP INDEX IF EXISTS epic_links_epic_id_position_unique;
+        DROP INDEX IF EXISTS epic_links_epic_id_url_unique;
+        DROP TABLE IF EXISTS epic_links__fix;
+        CREATE TABLE epic_links__fix (
+          id       INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+          epic_id  INTEGER NOT NULL REFERENCES epics(id) ON DELETE CASCADE,
+          title    TEXT NOT NULL,
+          url      TEXT NOT NULL,
+          position INTEGER NOT NULL,
+          CONSTRAINT epic_links_title_not_empty_check CHECK (length(title) > 0),
+          CONSTRAINT epic_links_url_not_empty_check CHECK (length(url) > 0),
+          CONSTRAINT epic_links_position_check CHECK (position >= 0),
+          UNIQUE(epic_id, position),
+          UNIQUE(epic_id, url)
+        );
+        INSERT INTO epic_links__fix SELECT * FROM epic_links;
+        DROP TABLE epic_links;
+        ALTER TABLE epic_links__fix RENAME TO epic_links;
+      `);
+    }
+
+    // Check if epic_months has broken FK (epic_id → features instead of epics)
+    const epicMonthsInfo = sqlite
+      .prepare<{ sql: string }, [string]>(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+      )
+      .get("epic_months");
+
+    if (epicMonthsInfo?.sql?.includes("REFERENCES `features`")) {
+      sqlite.exec(`
+        DROP INDEX IF EXISTS feature_months_feature_id_month_id_unique;
+        DROP INDEX IF EXISTS epic_months_epic_id_month_id_unique;
+        DROP TABLE IF EXISTS epic_months__fix;
+        CREATE TABLE epic_months__fix (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+          epic_id        INTEGER NOT NULL REFERENCES epics(id) ON DELETE CASCADE,
+          month_id       INTEGER NOT NULL REFERENCES months(id) ON DELETE CASCADE,
+          total_capacity REAL NOT NULL DEFAULT 0
+        );
+        INSERT INTO epic_months__fix SELECT * FROM epic_months;
+        DROP TABLE epic_months;
+        ALTER TABLE epic_months__fix RENAME TO epic_months;
+        CREATE UNIQUE INDEX epic_months_epic_id_month_id_unique ON epic_months (epic_id, month_id);
+      `);
+    }
+
+    // Check if member_month_allocations has broken FK (epic_id → features instead of epics)
+    const mmaInfo = sqlite
+      .prepare<{ sql: string }, [string]>(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+      )
+      .get("member_month_allocations");
+
+    if (mmaInfo?.sql?.includes("REFERENCES `features`")) {
+      sqlite.exec(`
+        DROP INDEX IF EXISTS member_month_allocations_feature_id_month_id_member_id_unique;
+        DROP INDEX IF EXISTS member_month_allocations_epic_id_month_id_member_id_unique;
+        DROP TABLE IF EXISTS member_month_allocations__fix;
+        CREATE TABLE member_month_allocations__fix (
+          id        INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+          epic_id   INTEGER NOT NULL REFERENCES epics(id) ON DELETE CASCADE,
+          month_id  INTEGER NOT NULL REFERENCES months(id) ON DELETE CASCADE,
+          member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+          capacity  REAL NOT NULL DEFAULT 0
+        );
+        INSERT INTO member_month_allocations__fix SELECT * FROM member_month_allocations;
+        DROP TABLE member_month_allocations;
+        ALTER TABLE member_month_allocations__fix RENAME TO member_month_allocations;
+        CREATE UNIQUE INDEX member_month_allocations_epic_id_month_id_member_id_unique
+          ON member_month_allocations (epic_id, month_id, member_id);
+      `);
+    }
+
+    sqlite.exec("COMMIT");
+  } catch (error) {
+    sqlite.exec("ROLLBACK");
+    throw error;
+  } finally {
+    sqlite.exec(`PRAGMA foreign_keys = ${foreignKeysEnabled ? "ON" : "OFF"}`);
   }
 }
 

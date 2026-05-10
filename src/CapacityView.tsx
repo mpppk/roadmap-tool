@@ -787,10 +787,7 @@ function FeatureDetailsDialog({
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop closes on click; keyboard handled by dialog via Escape
     // biome-ignore lint/a11y/useKeyWithClickEvents: modal backdrop closes on click; keyboard handled by dialog via Escape
-    <div
-      className="confirm-overlay"
-      onClick={handleDismiss}
-    >
+    <div className="confirm-overlay" onClick={handleDismiss}>
       <div
         role="dialog"
         aria-modal="true"
@@ -1041,10 +1038,7 @@ function EpicDetailsDialog({
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop closes on click; keyboard handled by dialog via Escape
     // biome-ignore lint/a11y/useKeyWithClickEvents: modal backdrop closes on click; keyboard handled by dialog via Escape
-    <div
-      className="confirm-overlay"
-      onClick={handleDismiss}
-    >
+    <div className="confirm-overlay" onClick={handleDismiss}>
       <div
         role="dialog"
         aria-modal="true"

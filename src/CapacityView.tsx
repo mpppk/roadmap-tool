@@ -2025,6 +2025,16 @@ export function CapacityView({
     );
   };
 
+  const expandAll = () => {
+    setEpicRows((rows) => rows.map((row) => ({ ...row, collapsed: false })));
+    setFeatureRows((rows) => rows.map((r) => ({ ...r, expanded: true })));
+  };
+
+  const collapseAll = () => {
+    setEpicRows((rows) => rows.map((row) => ({ ...row, collapsed: true })));
+    setFeatureRows((rows) => rows.map((r) => ({ ...r, expanded: false })));
+  };
+
   // ── Drag selection handlers ──────────────────────────────────────────────
 
   const handleCellMouseDown = useCallback(
@@ -3146,6 +3156,23 @@ export function CapacityView({
             <option value={3}>Q3</option>
             <option value={4}>Q4</option>
           </select>
+        </fieldset>
+        <fieldset className="period-toggle">
+          <legend className="period-toggle-label">展開</legend>
+          <button
+            type="button"
+            className="period-toggle-btn"
+            onClick={expandAll}
+          >
+            すべて展開
+          </button>
+          <button
+            type="button"
+            className="period-toggle-btn"
+            onClick={collapseAll}
+          >
+            すべて折りたたむ
+          </button>
         </fieldset>
         {busy && (
           <span

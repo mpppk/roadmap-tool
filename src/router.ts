@@ -2503,18 +2503,12 @@ const csvImport = o
     }
 
     const headers = parseCSVLine(lines[0]!).map((h) => h.trim());
-    const colEpic =
-      headers.indexOf("Epic") >= 0
-        ? headers.indexOf("Epic")
-        : headers.indexOf("機能");
+    const colEpic = headers.indexOf("Epic");
     const colMember = headers.indexOf("担当者");
     const colCapacity = headers.indexOf("キャパシティ");
     const colMonth = headers.indexOf("月");
     const colInitiative = headers.indexOf("Initiative");
-    const colEpicId =
-      headers.indexOf("epic_id") >= 0
-        ? headers.indexOf("epic_id")
-        : headers.indexOf("feature_id");
+    const colEpicId = headers.indexOf("epic_id");
     const colMemberId = headers.indexOf("member_id");
 
     if ([colEpic, colMember, colCapacity, colMonth].includes(-1)) {
@@ -2733,18 +2727,12 @@ const tsvImport = o
     }
 
     const headers = parseTSVLine(lines[0]!).map((h) => h.trim());
-    const colEpic =
-      headers.indexOf("Epic") >= 0
-        ? headers.indexOf("Epic")
-        : headers.indexOf("機能");
+    const colEpic = headers.indexOf("Epic");
     const colMember = headers.indexOf("担当者");
     const colCapacity = headers.indexOf("キャパシティ");
     const colMonth = headers.indexOf("月");
     const colInitiative = headers.indexOf("Initiative");
-    const colEpicId =
-      headers.indexOf("epic_id") >= 0
-        ? headers.indexOf("epic_id")
-        : headers.indexOf("feature_id");
+    const colEpicId = headers.indexOf("epic_id");
     const colMemberId = headers.indexOf("member_id");
 
     if ([colEpic, colMember, colCapacity, colMonth].includes(-1)) {

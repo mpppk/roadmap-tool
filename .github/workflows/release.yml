@@ -18,14 +18,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      version: ${{ steps.version.outputs.value }}
 
     steps:
       - uses: actions/checkout@v6
-        with:
-          # To automatically trigger the CD workflow on the pushed tag,
-          # store a PAT (with repo scope) as the RELEASE_TOKEN secret.
-          # Without it, the CD workflow must be triggered manually.
-          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Configure git
         run: |
@@ -46,3 +43,7 @@ jobs:
           git tag "v${{ steps.version.outputs.value }}"
           git push
           git push --tags
+
+  cd:
+    needs: release
+    uses: ./.github/workflows/cd.yml

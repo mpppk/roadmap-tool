@@ -775,6 +775,7 @@ export function MembersView({
     errors: { row: number; message: string }[];
   } | null>(null);
   const [importing, setImporting] = useState(false);
+  const [importUnsavedWarning, setImportUnsavedWarning] = useState(false);
   const [capacityConflict, setCapacityConflict] =
     useState<PendingCapacityConflict | null>(null);
   const [maxCapacityOverflow, setMaxCapacityOverflow] =
@@ -1943,7 +1944,12 @@ export function MembersView({
         <div
           className="confirm-overlay"
           onClick={() => {
-            if (!importing) setImportModalOpen(false);
+            if (importing) return;
+            if (importTsv.trim() && !importResult) {
+              setImportUnsavedWarning(true);
+            } else {
+              setImportModalOpen(false);
+            }
           }}
         >
           <div
@@ -1953,7 +1959,13 @@ export function MembersView({
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
               e.stopPropagation();
-              if (e.key === "Escape" && !importing) setImportModalOpen(false);
+              if (e.key === "Escape" && !importing) {
+                if (importTsv.trim() && !importResult) {
+                  setImportUnsavedWarning(true);
+                } else {
+                  setImportModalOpen(false);
+                }
+              }
             }}
           >
             <p className="confirm-msg">TSVをインポート</p>
@@ -1987,7 +1999,10 @@ export function MembersView({
                 <textarea
                   className="import-textarea"
                   value={importTsv}
-                  onChange={(e) => setImportTsv(e.target.value)}
+                  onChange={(e) => {
+                    setImportTsv(e.target.value);
+                    setImportUnsavedWarning(false);
+                  }}
                   placeholder={
                     "id\tname\tmax_capacity\n1\tAlice\t0.8\n2\tBob\t1"
                   }
@@ -2012,6 +2027,11 @@ export function MembersView({
                   </ul>
                 )}
               </div>
+            )}
+            {importUnsavedWarning && (
+              <span className="name-warning feature-details-error" role="alert">
+                未保存の変更があります。インポートするか、キャンセルボタンを押して閉じてください。
+              </span>
             )}
             <div className="confirm-actions">
               <button

@@ -711,6 +711,22 @@ function FeatureDetailsDialog({
   );
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
+
+  const markDirty = () => {
+    setIsDirty(true);
+    setShowUnsavedWarning(false);
+  };
+
+  const handleDismiss = () => {
+    if (saving) return;
+    if (isDirty) {
+      setShowUnsavedWarning(true);
+      return;
+    }
+    onClose();
+  };
 
   const updateLink = (index: number, key: "title" | "url", value: string) => {
     setLinks((current) =>
@@ -719,6 +735,7 @@ function FeatureDetailsDialog({
       ),
     );
     setError(null);
+    markDirty();
   };
 
   const moveLink = (index: number, offset: -1 | 1) => {
@@ -731,10 +748,12 @@ function FeatureDetailsDialog({
       next.splice(target, 0, item);
       return next;
     });
+    markDirty();
   };
 
   const removeLink = (index: number) => {
     setLinks((current) => current.filter((_, i) => i !== index));
+    markDirty();
   };
 
   const save = async () => {
@@ -768,12 +787,7 @@ function FeatureDetailsDialog({
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop closes on click; keyboard handled by dialog via Escape
     // biome-ignore lint/a11y/useKeyWithClickEvents: modal backdrop closes on click; keyboard handled by dialog via Escape
-    <div
-      className="confirm-overlay"
-      onClick={() => {
-        if (!saving) onClose();
-      }}
-    >
+    <div className="confirm-overlay" onClick={handleDismiss}>
       <div
         role="dialog"
         aria-modal="true"
@@ -781,7 +795,7 @@ function FeatureDetailsDialog({
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           e.stopPropagation();
-          if (e.key === "Escape" && !saving) onClose();
+          if (e.key === "Escape") handleDismiss();
         }}
       >
         <div className="feature-details-header">
@@ -797,6 +811,7 @@ function FeatureDetailsDialog({
             onChange={(e) => {
               setName(e.target.value);
               setError(null);
+              markDirty();
             }}
           />
         </label>
@@ -807,7 +822,10 @@ function FeatureDetailsDialog({
             className="feature-details-input"
             value={epicId}
             disabled={saving}
-            onChange={(e) => setEpicId(Number(e.target.value))}
+            onChange={(e) => {
+              setEpicId(Number(e.target.value));
+              markDirty();
+            }}
           >
             {epics.map((epic) => (
               <option key={epic.id} value={epic.id}>
@@ -824,7 +842,10 @@ function FeatureDetailsDialog({
             value={description}
             disabled={saving}
             maxLength={2000}
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={(e) => {
+              setDescription(e.target.value);
+              markDirty();
+            }}
           />
         </label>
 
@@ -896,12 +917,13 @@ function FeatureDetailsDialog({
         <button
           type="button"
           className="feature-details-add-link-btn"
-          onClick={() =>
+          onClick={() => {
             setLinks((current) => [
               ...current,
               { title: "", url: "", clientKey: crypto.randomUUID() },
-            ])
-          }
+            ]);
+            markDirty();
+          }}
           disabled={saving || links.length >= 20}
           title="リンクを追加"
           aria-label="リンクを追加"
@@ -913,6 +935,12 @@ function FeatureDetailsDialog({
         {error && (
           <span className="name-warning feature-details-error" role="alert">
             {error}
+          </span>
+        )}
+
+        {showUnsavedWarning && (
+          <span className="name-warning feature-details-error" role="alert">
+            未保存の変更があります。保存してから閉じてください。
           </span>
         )}
 
@@ -964,6 +992,22 @@ function EpicDetailsDialog({
   );
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
+
+  const markDirty = () => {
+    setIsDirty(true);
+    setShowUnsavedWarning(false);
+  };
+
+  const handleDismiss = () => {
+    if (saving) return;
+    if (isDirty) {
+      setShowUnsavedWarning(true);
+      return;
+    }
+    onClose();
+  };
 
   const save = async () => {
     const trimmedName = trimSqliteSpaces(name);
@@ -994,30 +1038,29 @@ function EpicDetailsDialog({
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop closes on click; keyboard handled by dialog via Escape
     // biome-ignore lint/a11y/useKeyWithClickEvents: modal backdrop closes on click; keyboard handled by dialog via Escape
-    <div
-      className="confirm-overlay"
-      onClick={() => {
-        if (!saving) onClose();
-      }}
-    >
+    <div className="confirm-overlay" onClick={handleDismiss}>
       <div
         role="dialog"
         aria-modal="true"
         className="confirm-dialog feature-details-dialog"
         onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Escape") handleDismiss();
+        }}
       >
         <div className="feature-details-header">
           <p className="confirm-msg">Epic詳細</p>
           <button
             type="button"
             className="feature-details-icon-btn"
-            onClick={() =>
+            onClick={() => {
               setLinks((current) => [
                 ...current,
                 { title: "", url: "", clientKey: crypto.randomUUID() },
-              ])
-            }
+              ]);
+              markDirty();
+            }}
             disabled={saving || links.length >= 20}
             title="リンクを追加"
             aria-label="リンクを追加"
@@ -1034,6 +1077,7 @@ function EpicDetailsDialog({
             onChange={(e) => {
               setName(e.target.value);
               setError(null);
+              markDirty();
             }}
           />
         </label>
@@ -1044,7 +1088,10 @@ function EpicDetailsDialog({
             value={description}
             disabled={saving}
             maxLength={2000}
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={(e) => {
+              setDescription(e.target.value);
+              markDirty();
+            }}
           />
         </label>
         <div className="feature-details-links">
@@ -1056,13 +1103,14 @@ function EpicDetailsDialog({
                 disabled={saving}
                 maxLength={100}
                 placeholder="リンク名"
-                onChange={(e) =>
+                onChange={(e) => {
                   setLinks((current) =>
                     current.map((item, i) =>
                       i === index ? { ...item, title: e.target.value } : item,
                     ),
-                  )
-                }
+                  );
+                  markDirty();
+                }}
               />
               <input
                 className="feature-details-input"
@@ -1070,20 +1118,22 @@ function EpicDetailsDialog({
                 disabled={saving}
                 maxLength={2048}
                 placeholder="https://example.com"
-                onChange={(e) =>
+                onChange={(e) => {
                   setLinks((current) =>
                     current.map((item, i) =>
                       i === index ? { ...item, url: e.target.value } : item,
                     ),
-                  )
-                }
+                  );
+                  markDirty();
+                }}
               />
               <button
                 type="button"
                 className="feature-details-icon-btn danger"
-                onClick={() =>
-                  setLinks((current) => current.filter((_, i) => i !== index))
-                }
+                onClick={() => {
+                  setLinks((current) => current.filter((_, i) => i !== index));
+                  markDirty();
+                }}
                 disabled={saving}
                 title="削除"
                 aria-label="削除"
@@ -1096,6 +1146,11 @@ function EpicDetailsDialog({
         {error && (
           <span className="name-warning feature-details-error" role="alert">
             {error}
+          </span>
+        )}
+        {showUnsavedWarning && (
+          <span className="name-warning feature-details-error" role="alert">
+            未保存の変更があります。保存してから閉じてください。
           </span>
         )}
         <div className="confirm-btns">
@@ -1431,6 +1486,7 @@ export function CapacityView({
     errors: { row: number; message: string }[];
   } | null>(null);
   const [importing, setImporting] = useState(false);
+  const [importUnsavedWarning, setImportUnsavedWarning] = useState(false);
   const [assigningFeatureId, setAssigningFeatureId] = useState<number | null>(
     null,
   );
@@ -3716,7 +3772,12 @@ export function CapacityView({
         <div
           className="confirm-overlay"
           onClick={() => {
-            if (!importing) setImportModalOpen(false);
+            if (importing) return;
+            if (importTsv.trim() && !importResult) {
+              setImportUnsavedWarning(true);
+            } else {
+              setImportModalOpen(false);
+            }
           }}
         >
           <div
@@ -3726,7 +3787,13 @@ export function CapacityView({
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
               e.stopPropagation();
-              if (e.key === "Escape" && !importing) setImportModalOpen(false);
+              if (e.key === "Escape" && !importing) {
+                if (importTsv.trim() && !importResult) {
+                  setImportUnsavedWarning(true);
+                } else {
+                  setImportModalOpen(false);
+                }
+              }
             }}
           >
             <p className="confirm-msg">TSVをインポート</p>
@@ -3739,7 +3806,10 @@ export function CapacityView({
               <textarea
                 className="import-textarea"
                 value={importTsv}
-                onChange={(e) => setImportTsv(e.target.value)}
+                onChange={(e) => {
+                  setImportTsv(e.target.value);
+                  setImportUnsavedWarning(false);
+                }}
                 placeholder={
                   "Epic\t担当者\tキャパシティ\t月\nEpic A\tAlice\t0.5\t2026-04"
                 }
@@ -3763,6 +3833,11 @@ export function CapacityView({
                   </ul>
                 )}
               </div>
+            )}
+            {importUnsavedWarning && (
+              <span className="name-warning feature-details-error" role="alert">
+                未保存の変更があります。インポートするか、キャンセルボタンを押して閉じてください。
+              </span>
             )}
             <div className="confirm-btns">
               <button

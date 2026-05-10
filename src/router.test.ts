@@ -4,10 +4,10 @@ import { and, asc, eq } from "drizzle-orm";
 import { type BunSQLiteDatabase, drizzle } from "drizzle-orm/bun-sqlite";
 import {
   epicLinks,
+  epicMonths,
   epics,
-  featureLinks,
-  featureMonths,
-  features,
+  initiativeLinks,
+  initiatives,
   memberMonthAllocations,
   members,
   months,
@@ -16,14 +16,14 @@ import {
 import { router } from "./router";
 
 const testSchema = {
+  initiatives,
+  initiativeLinks,
   epics,
   epicLinks,
-  features,
-  featureLinks,
   members,
   quarters,
   months,
-  featureMonths,
+  epicMonths,
   memberMonthAllocations,
 };
 
@@ -33,36 +33,36 @@ function createTestDb() {
   const sqlite = new Database(":memory:");
   sqlite.exec("PRAGMA foreign_keys = ON;");
   sqlite.exec(`
-    CREATE TABLE epics (
+    CREATE TABLE initiatives (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       description TEXT,
       position INTEGER NOT NULL DEFAULT 0,
       is_default INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
+      CONSTRAINT initiatives_name_trimmed_check CHECK (name = trim(name)),
+      CONSTRAINT initiatives_name_not_empty_check CHECK (length(name) > 0),
+      CONSTRAINT initiatives_position_check CHECK (position >= 0)
+    );
+    CREATE UNIQUE INDEX initiatives_name_trim_unique ON initiatives (trim(name));
+    CREATE UNIQUE INDEX initiatives_default_unique ON initiatives (is_default) WHERE is_default = 1;
+    CREATE TABLE initiative_links (id INTEGER PRIMARY KEY AUTOINCREMENT, initiative_id INTEGER NOT NULL REFERENCES initiatives(id) ON DELETE CASCADE, title TEXT NOT NULL, url TEXT NOT NULL, position INTEGER NOT NULL, CONSTRAINT initiative_links_title_not_empty_check CHECK (length(title) > 0), CONSTRAINT initiative_links_url_not_empty_check CHECK (length(url) > 0), CONSTRAINT initiative_links_position_check CHECK (position >= 0), UNIQUE(initiative_id, position), UNIQUE(initiative_id, url));
+    INSERT INTO initiatives (name, position, is_default, created_at) VALUES ('未分類', 0, 1, 0);
+
+    CREATE TABLE epics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      description TEXT,
+      initiative_id INTEGER NOT NULL REFERENCES initiatives(id) ON DELETE RESTRICT,
+      position INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
       CONSTRAINT epics_name_trimmed_check CHECK (name = trim(name)),
       CONSTRAINT epics_name_not_empty_check CHECK (length(name) > 0),
       CONSTRAINT epics_position_check CHECK (position >= 0)
     );
     CREATE UNIQUE INDEX epics_name_trim_unique ON epics (trim(name));
-    CREATE UNIQUE INDEX epics_default_unique ON epics (is_default) WHERE is_default = 1;
+    CREATE UNIQUE INDEX epics_initiative_id_position_unique ON epics (initiative_id, position);
     CREATE TABLE epic_links (id INTEGER PRIMARY KEY AUTOINCREMENT, epic_id INTEGER NOT NULL REFERENCES epics(id) ON DELETE CASCADE, title TEXT NOT NULL, url TEXT NOT NULL, position INTEGER NOT NULL, CONSTRAINT epic_links_title_not_empty_check CHECK (length(title) > 0), CONSTRAINT epic_links_url_not_empty_check CHECK (length(url) > 0), CONSTRAINT epic_links_position_check CHECK (position >= 0), UNIQUE(epic_id, position), UNIQUE(epic_id, url));
-    INSERT INTO epics (name, position, is_default, created_at) VALUES ('未分類', 0, 1, 0);
-
-    CREATE TABLE features (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      description TEXT,
-      epic_id INTEGER NOT NULL REFERENCES epics(id) ON DELETE RESTRICT,
-      position INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL,
-      CONSTRAINT features_name_trimmed_check CHECK (name = trim(name)),
-      CONSTRAINT features_name_not_empty_check CHECK (length(name) > 0),
-      CONSTRAINT features_position_check CHECK (position >= 0)
-    );
-    CREATE UNIQUE INDEX features_name_trim_unique ON features (trim(name));
-    CREATE UNIQUE INDEX features_epic_id_position_unique ON features (epic_id, position);
-    CREATE TABLE feature_links (id INTEGER PRIMARY KEY AUTOINCREMENT, feature_id INTEGER NOT NULL REFERENCES features(id) ON DELETE CASCADE, title TEXT NOT NULL, url TEXT NOT NULL, position INTEGER NOT NULL, CONSTRAINT feature_links_title_not_empty_check CHECK (length(title) > 0), CONSTRAINT feature_links_url_not_empty_check CHECK (length(url) > 0), CONSTRAINT feature_links_position_check CHECK (position >= 0), UNIQUE(feature_id, position), UNIQUE(feature_id, url));
 
     CREATE TABLE members (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -77,8 +77,8 @@ function createTestDb() {
 
     CREATE TABLE quarters (id INTEGER PRIMARY KEY AUTOINCREMENT, year INTEGER NOT NULL, quarter INTEGER NOT NULL, UNIQUE(year, quarter));
     CREATE TABLE months (id INTEGER PRIMARY KEY AUTOINCREMENT, year INTEGER NOT NULL, month INTEGER NOT NULL, quarter_id INTEGER NOT NULL REFERENCES quarters(id) ON DELETE CASCADE, UNIQUE(year, month), UNIQUE(quarter_id, month));
-    CREATE TABLE feature_months (id INTEGER PRIMARY KEY AUTOINCREMENT, feature_id INTEGER NOT NULL REFERENCES features(id) ON DELETE CASCADE, month_id INTEGER NOT NULL REFERENCES months(id) ON DELETE CASCADE, total_capacity REAL NOT NULL DEFAULT 0, UNIQUE(feature_id, month_id));
-    CREATE TABLE member_month_allocations (id INTEGER PRIMARY KEY AUTOINCREMENT, feature_id INTEGER NOT NULL REFERENCES features(id) ON DELETE CASCADE, month_id INTEGER NOT NULL REFERENCES months(id) ON DELETE CASCADE, member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE, capacity REAL NOT NULL DEFAULT 0, UNIQUE(feature_id, month_id, member_id));
+    CREATE TABLE epic_months (id INTEGER PRIMARY KEY AUTOINCREMENT, epic_id INTEGER NOT NULL REFERENCES epics(id) ON DELETE CASCADE, month_id INTEGER NOT NULL REFERENCES months(id) ON DELETE CASCADE, total_capacity REAL NOT NULL DEFAULT 0, UNIQUE(epic_id, month_id));
+    CREATE TABLE member_month_allocations (id INTEGER PRIMARY KEY AUTOINCREMENT, epic_id INTEGER NOT NULL REFERENCES epics(id) ON DELETE CASCADE, month_id INTEGER NOT NULL REFERENCES months(id) ON DELETE CASCADE, member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE, capacity REAL NOT NULL DEFAULT 0, UNIQUE(epic_id, month_id, member_id));
   `);
   return {
     sqlite,
@@ -144,18 +144,18 @@ async function createQuarterWithMonths(
 }
 
 async function seedBase(db: TestDb) {
-  const epicId = 1;
+  const initiativeId = 1;
   const [featureA] = await db
-    .insert(features)
-    .values({ name: "A", epicId, position: 0 })
+    .insert(epics)
+    .values({ name: "A", initiativeId, position: 0 })
     .returning();
   const [featureB] = await db
-    .insert(features)
-    .values({ name: "B", epicId, position: 1 })
+    .insert(epics)
+    .values({ name: "B", initiativeId, position: 1 })
     .returning();
   const [featureC] = await db
-    .insert(features)
-    .values({ name: "C", epicId, position: 2 })
+    .insert(epics)
+    .values({ name: "C", initiativeId, position: 2 })
     .returning();
   const [member] = await db
     .insert(members)
@@ -188,11 +188,11 @@ async function addAllocation(
   },
 ) {
   await db
-    .insert(featureMonths)
-    .values({ featureId, monthId, totalCapacity: capacity });
+    .insert(epicMonths)
+    .values({ epicId: featureId, monthId, totalCapacity: capacity });
   await db
     .insert(memberMonthAllocations)
-    .values({ featureId, monthId, memberId, capacity });
+    .values({ epicId: featureId, monthId, memberId, capacity });
 }
 
 async function getAllocation(
@@ -206,7 +206,7 @@ async function getAllocation(
     .from(memberMonthAllocations)
     .where(
       and(
-        eq(memberMonthAllocations.featureId, featureId),
+        eq(memberMonthAllocations.epicId, featureId),
         eq(memberMonthAllocations.monthId, monthId),
         eq(memberMonthAllocations.memberId, memberId),
       ),
@@ -217,12 +217,9 @@ async function getAllocation(
 async function getFeatureMonth(db: TestDb, featureId: number, monthId: number) {
   const [row] = await db
     .select()
-    .from(featureMonths)
+    .from(epicMonths)
     .where(
-      and(
-        eq(featureMonths.featureId, featureId),
-        eq(featureMonths.monthId, monthId),
-      ),
+      and(eq(epicMonths.epicId, featureId), eq(epicMonths.monthId, monthId)),
     );
   return row;
 }
@@ -239,10 +236,10 @@ describe("router name validation", () => {
   });
 
   test("trims feature names before create and rename", async () => {
-    const createFeature = router.features.create.callable({
+    const createFeature = router.epics.create.callable({
       context: { db: state.db },
     });
-    const renameFeature = router.features.rename.callable({
+    const renameFeature = router.epics.rename.callable({
       context: { db: state.db },
     });
 
@@ -254,7 +251,7 @@ describe("router name validation", () => {
   });
 
   test("returns typed API errors for duplicate and blank feature names", async () => {
-    const createFeature = router.features.create.callable({
+    const createFeature = router.epics.create.callable({
       context: { db: state.db },
     });
     await createFeature({ name: "Auth" });
@@ -272,7 +269,7 @@ describe("router name validation", () => {
   });
 
   test("keeps member duplicate checks separate from feature names", async () => {
-    const createFeature = router.features.create.callable({
+    const createFeature = router.epics.create.callable({
       context: { db: state.db },
     });
     const createMember = router.members.create.callable({
@@ -303,15 +300,19 @@ describe("epics", () => {
   });
 
   test("creates, updates, moves, and protects epics", async () => {
-    const listEpics = router.epics.list.callable({ context: { db: state.db } });
-    const createEpic = router.epics.create.callable({
+    const listEpics = router.initiatives.list.callable({
       context: { db: state.db },
     });
-    const renameEpic = router.epics.rename.callable({
+    const createEpic = router.initiatives.create.callable({
       context: { db: state.db },
     });
-    const moveEpic = router.epics.move.callable({ context: { db: state.db } });
-    const deleteEpic = router.epics.delete.callable({
+    const renameEpic = router.initiatives.rename.callable({
+      context: { db: state.db },
+    });
+    const moveEpic = router.initiatives.move.callable({
+      context: { db: state.db },
+    });
+    const deleteEpic = router.initiatives.delete.callable({
       context: { db: state.db },
     });
 
@@ -348,36 +349,39 @@ describe("epics", () => {
   });
 
   test("moves features between epics and rejects deleting non-empty epics", async () => {
-    const createEpic = router.epics.create.callable({
+    const createEpic = router.initiatives.create.callable({
       context: { db: state.db },
     });
-    const deleteEpic = router.epics.delete.callable({
+    const deleteEpic = router.initiatives.delete.callable({
       context: { db: state.db },
     });
-    const createFeature = router.features.create.callable({
+    const createFeature = router.epics.create.callable({
       context: { db: state.db },
     });
-    const moveFeature = router.features.move.callable({
+    const moveFeature = router.epics.move.callable({
       context: { db: state.db },
     });
 
-    const epic = await createEpic({ name: "Growth" });
+    const initiative = await createEpic({ name: "Growth" });
     const featureA = await createFeature({ name: "A" });
-    const featureB = await createFeature({ name: "B", epicId: epic!.id });
+    const featureB = await createFeature({
+      name: "B",
+      initiativeId: initiative!.id,
+    });
 
     await moveFeature({
       id: featureA!.id,
-      epicId: epic!.id,
+      initiativeId: initiative!.id,
       beforeId: featureB!.id,
     });
     const rows = await state.db
       .select()
-      .from(features)
-      .where(eq(features.epicId, epic!.id))
-      .orderBy(asc(features.position), asc(features.id));
+      .from(epics)
+      .where(eq(epics.initiativeId, initiative!.id))
+      .orderBy(asc(epics.position), asc(epics.id));
     expect(rows.map((row) => row.name)).toEqual(["A", "B"]);
     expect(rows.map((row) => row.position)).toEqual([0, 1]);
-    await expectBadRequest(deleteEpic({ id: epic!.id }));
+    await expectBadRequest(deleteEpic({ id: initiative!.id }));
   });
 });
 
@@ -393,13 +397,13 @@ describe("feature metadata", () => {
   });
 
   test("creates, lists, and updates feature metadata with ordered links", async () => {
-    const createFeature = router.features.create.callable({
+    const createFeature = router.epics.create.callable({
       context: { db: state.db },
     });
-    const renameFeature = router.features.rename.callable({
+    const renameFeature = router.epics.rename.callable({
       context: { db: state.db },
     });
-    const listFeatures = router.features.list.callable({
+    const listFeatures = router.epics.list.callable({
       context: { db: state.db },
     });
 
@@ -431,7 +435,7 @@ describe("feature metadata", () => {
   });
 
   test("validates feature metadata links and length limits", async () => {
-    const createFeature = router.features.create.callable({
+    const createFeature = router.epics.create.callable({
       context: { db: state.db },
     });
 
@@ -468,13 +472,13 @@ describe("feature metadata", () => {
   });
 
   test("exports and imports feature metadata csv", async () => {
-    const createFeature = router.features.create.callable({
+    const createFeature = router.epics.create.callable({
       context: { db: state.db },
     });
-    const exportCsv = router.export.featureMetadataCSV.callable({
+    const exportCsv = router.export.epicMetadataCSV.callable({
       context: { db: state.db },
     });
-    const importCsv = router.import.featureMetadataCSVImport.callable({
+    const importCsv = router.import.epicMetadataCSVImport.callable({
       context: { db: state.db },
     });
 
@@ -506,7 +510,7 @@ describe("feature metadata", () => {
     const importTsv = router.import.tsvImport.callable({
       context: { db: state.db },
     });
-    const listFeatures = router.features.list.callable({
+    const listFeatures = router.epics.list.callable({
       context: { db: state.db },
     });
     const listMembers = router.members.list.callable({
@@ -516,7 +520,7 @@ describe("feature metadata", () => {
     await createQuarter({ year: 2026, quarter: 2 });
 
     const result = await importTsv({
-      tsv: ["機能\t担当者\tキャパシティ\t月", "Auth\tAlice\t0.5\t2026-04"].join(
+      tsv: ["Epic\t担当者\tキャパシティ\t月", "Auth\tAlice\t0.5\t2026-04"].join(
         "\n",
       ),
     });
@@ -536,13 +540,13 @@ describe("feature metadata", () => {
     const createQuarter = router.quarters.create.callable({
       context: { db: state.db },
     });
-    const createFeature = router.features.create.callable({
+    const createFeature = router.epics.create.callable({
       context: { db: state.db },
     });
     const createMember = router.members.create.callable({
       context: { db: state.db },
     });
-    const renameFeature = router.features.rename.callable({
+    const renameFeature = router.epics.rename.callable({
       context: { db: state.db },
     });
     const renameMember = router.members.rename.callable({
@@ -563,7 +567,7 @@ describe("feature metadata", () => {
     // Import using old names but correct IDs — IDs should win
     const result = await importTsv({
       tsv: [
-        "機能\tfeature_id\t担当者\tmember_id\tキャパシティ\t月",
+        "Epic\tepic_id\t担当者\tmember_id\tキャパシティ\t月",
         `Auth\t${feature!.id}\tAlice\t${member!.id}\t0.5\t2026-04`,
       ].join("\n"),
     });
@@ -583,13 +587,13 @@ describe("feature metadata", () => {
     const createQuarter = router.quarters.create.callable({
       context: { db: state.db },
     });
-    const createFeature = router.features.create.callable({
+    const createFeature = router.epics.create.callable({
       context: { db: state.db },
     });
     const createMember = router.members.create.callable({
       context: { db: state.db },
     });
-    const renameFeature = router.features.rename.callable({
+    const renameFeature = router.epics.rename.callable({
       context: { db: state.db },
     });
     const renameMember = router.members.rename.callable({
@@ -608,7 +612,7 @@ describe("feature metadata", () => {
 
     const result = await importCsv({
       csv: [
-        "Epic,機能,feature_id,担当者,member_id,キャパシティ,月",
+        "Initiative,Epic,epic_id,担当者,member_id,キャパシティ,月",
         `,Search,${feature!.id},Bob,${member!.id},1,2026-04`,
       ].join("\n"),
     });
@@ -628,7 +632,7 @@ describe("feature metadata", () => {
     const createQuarter = router.quarters.create.callable({
       context: { db: state.db },
     });
-    const createFeature = router.features.create.callable({
+    const createFeature = router.epics.create.callable({
       context: { db: state.db },
     });
     const createMember = router.members.create.callable({
@@ -644,12 +648,12 @@ describe("feature metadata", () => {
     await createQuarter({ year: 2026, quarter: 2 });
     const feature = await createFeature({ name: "Auth" });
     const member = await createMember({ name: "Alice" });
-    await assignMember({ featureId: feature!.id, memberId: member!.id });
+    await assignMember({ epicId: feature!.id, memberId: member!.id });
 
     await router.allocations.updateMemberAllocation.callable({
       context: { db: state.db },
     })({
-      featureId: feature!.id,
+      epicId: feature!.id,
       memberId: member!.id,
       periodType: "month",
       monthId: (await state.db.select().from(months).all())[0]!.id,
@@ -659,29 +663,29 @@ describe("feature metadata", () => {
     const csv = await exportCsv({});
     const lines = csv.split("\n");
     const header = lines[0]!;
-    expect(header).toContain("feature_id");
+    expect(header).toContain("epic_id");
     expect(header).toContain("member_id");
 
     const dataLine = lines[1]!;
     const cols = dataLine.split(",");
     const headerCols = header.split(",");
-    const featureIdCol = headerCols.indexOf("feature_id");
+    const epicIdCol = headerCols.indexOf("epic_id");
     const memberIdCol = headerCols.indexOf("member_id");
-    expect(Number(cols[featureIdCol])).toBe(feature!.id);
+    expect(Number(cols[epicIdCol])).toBe(feature!.id);
     expect(Number(cols[memberIdCol])).toBe(member!.id);
   });
 
   test("featureMetadataCSVImport uses feature_id for rename tracking", async () => {
-    const createFeature = router.features.create.callable({
+    const createFeature = router.epics.create.callable({
       context: { db: state.db },
     });
-    const renameFeature = router.features.rename.callable({
+    const renameFeature = router.epics.rename.callable({
       context: { db: state.db },
     });
-    const importCsv = router.import.featureMetadataCSVImport.callable({
+    const importCsv = router.import.epicMetadataCSVImport.callable({
       context: { db: state.db },
     });
-    const listFeatures = router.features.list.callable({
+    const listFeatures = router.epics.list.callable({
       context: { db: state.db },
     });
 
@@ -691,7 +695,7 @@ describe("feature metadata", () => {
     // Import using old name but correct feature_id — ID should win
     await importCsv({
       csv: [
-        "epic,feature_id,name,description,links",
+        "epic,epic_id,name,description,links",
         `,${feature!.id},Auth,New description,[]`,
       ].join("\n"),
     });
@@ -790,7 +794,7 @@ describe("feature metadata", () => {
       capacity: 0.4,
     });
     await state.db.insert(memberMonthAllocations).values({
-      featureId: featureA.id,
+      epicId: featureA.id,
       monthId: month.id,
       memberId: bob!.id,
       capacity: 0.2,
@@ -907,10 +911,10 @@ describe("history snapshots", () => {
     const restore = router.history.restore.callable({
       context: { db: state.db },
     });
-    const createFeature = router.features.create.callable({
+    const createFeature = router.epics.create.callable({
       context: { db: state.db },
     });
-    const deleteFeature = router.features.delete.callable({
+    const deleteFeature = router.epics.delete.callable({
       context: { db: state.db },
     });
     const createMember = router.members.create.callable({
@@ -943,7 +947,7 @@ describe("history snapshots", () => {
     await setMaxCapacity({ id: member!.id, maxCapacity: 0.6 });
     const quarter = await createQuarter({ year: 2026, quarter: 1 });
     await updateAllocation({
-      featureId: feature!.id,
+      epicId: feature!.id,
       memberId: member!.id,
       periodType: "month",
       monthId: quarter!.months[0]!.id,
@@ -960,13 +964,13 @@ describe("history snapshots", () => {
 
     const restored = await snapshot({});
     expect(restored).toEqual(before);
-    expect(restored.features[0]?.id).toBe(feature!.id);
-    expect(restored.featureLinks[0]?.featureId).toBe(feature!.id);
+    expect(restored.epics[0]?.id).toBe(feature!.id);
+    expect(restored.epicLinks[0]?.epicId).toBe(feature!.id);
     expect(restored.members[0]?.id).toBe(member!.id);
     expect(restored.members[0]?.maxCapacity).toBe(0.6);
     expect(restored.quarters[0]?.id).toBe(quarter!.id);
     expect(restored.months).toHaveLength(3);
-    expect(restored.featureMonths[0]?.totalCapacity).toBeCloseTo(0.4);
+    expect(restored.epicMonths[0]?.totalCapacity).toBeCloseTo(0.4);
     expect(restored.memberMonthAllocations[0]?.capacity).toBeCloseTo(0.4);
   });
 
@@ -977,7 +981,7 @@ describe("history snapshots", () => {
     const restore = router.history.restore.callable({
       context: { db: state.db },
     });
-    const createFeature = router.features.create.callable({
+    const createFeature = router.epics.create.callable({
       context: { db: state.db },
     });
     const createMember = router.members.create.callable({
@@ -1024,7 +1028,7 @@ describe("allocation capacity conflicts", () => {
       context: { db },
     });
     const result = await preview({
-      featureId: featureA.id,
+      epicId: featureA.id,
       periodType: "month",
       monthId: month.id,
       memberId: member.id,
@@ -1052,7 +1056,7 @@ describe("allocation capacity conflicts", () => {
       context: { db },
     });
     await update({
-      featureId: featureA.id,
+      epicId: featureA.id,
       periodType: "month",
       monthId: month.id,
       memberId: member.id,
@@ -1081,7 +1085,7 @@ describe("allocation capacity conflicts", () => {
       context: { db },
     });
     await update({
-      featureId: featureA.id,
+      epicId: featureA.id,
       periodType: "month",
       monthId: month.id,
       memberId: member.id,
@@ -1115,7 +1119,7 @@ describe("allocation capacity conflicts", () => {
       context: { db },
     });
     const result = await update({
-      featureId: featureA.id,
+      epicId: featureA.id,
       periodType: "month",
       monthId: month.id,
       memberId: member.id,
@@ -1134,7 +1138,7 @@ describe("allocation capacity conflicts", () => {
         (allocB?.capacity ?? 0) +
         (allocC?.capacity ?? 0),
     ).toBeCloseTo(1);
-    expect(result.updatedFeatures.map((f) => f.featureId).sort()).toEqual([
+    expect(result.updatedFeatures.map((f) => f.epicId).sort()).toEqual([
       featureA.id,
       featureB.id,
       featureC.id,
@@ -1163,7 +1167,7 @@ describe("allocation capacity conflicts", () => {
       context: { db },
     });
     await update({
-      featureId: featureA.id,
+      epicId: featureA.id,
       periodType: "month",
       monthId: month.id,
       memberId: member.id,
@@ -1199,7 +1203,7 @@ describe("allocation capacity conflicts", () => {
       context: { db },
     });
     const result = await update({
-      featureId: featureA.id,
+      epicId: featureA.id,
       periodType: "month",
       monthId: month.id,
       memberId: member.id,
@@ -1212,7 +1216,7 @@ describe("allocation capacity conflicts", () => {
     expect(allocA?.capacity).toBeCloseTo(0.5);
     expect(allocB?.capacity).toBeCloseTo(0.5);
     expect((allocA?.capacity ?? 0) + (allocB?.capacity ?? 0)).toBeCloseTo(1);
-    expect(result.updatedFeatures.map((f) => f.featureId).sort()).toEqual([
+    expect(result.updatedFeatures.map((f) => f.epicId).sort()).toEqual([
       featureA.id,
       featureB.id,
     ]);
@@ -1240,7 +1244,7 @@ describe("allocation capacity conflicts", () => {
       context: { db },
     });
     await update({
-      featureId: featureA.id,
+      epicId: featureA.id,
       periodType: "month",
       monthId: month.id,
       memberId: member.id,
@@ -1293,7 +1297,7 @@ describe("allocation cap preserving operations", () => {
       context: { db },
     });
     const result = await updateTotal({
-      featureId: featureA.id,
+      epicId: featureA.id,
       periodType: "month",
       monthId: month.id,
       totalCapacity: 2,
@@ -1331,7 +1335,7 @@ describe("allocation cap preserving operations", () => {
       context: { db },
     });
     await moveQuarter({
-      featureId: featureA.id,
+      epicId: featureA.id,
       fromQuarterId: fromQuarter.quarter.id,
       toQuarterId: toQuarter.quarter.id,
     });

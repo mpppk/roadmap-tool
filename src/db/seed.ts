@@ -8,7 +8,7 @@
  * Usage:
  *   PORT=<port> bun run db:seed
  *
- * Epics, Features, and Members are imported via the CLI import commands.
+ * Initiatives, Epics, and Members are imported via the CLI import commands.
  * Quarters (no CLI import available) are created via the oRPC client.
  */
 
@@ -51,13 +51,13 @@ function nextQuarters(
   return result;
 }
 
-// 1. Epics — CLI import
+// 1. Initiatives — CLI import
+console.log("Importing initiatives...");
+await $`bun src/cli.ts initiatives import ${join(SEED_DIR, "initiatives.csv")}`;
+
+// 2. Epics — CLI import
 console.log("Importing epics...");
 await $`bun src/cli.ts epics import ${join(SEED_DIR, "epics.csv")}`;
-
-// 2. Features — CLI import
-console.log("Importing features...");
-await $`bun src/cli.ts features import ${join(SEED_DIR, "features.csv")}`;
 
 // 3. Members — CLI import
 console.log("Importing members...");

@@ -16,19 +16,19 @@ let activeCommandName = "";
 
 function createHelpText(commandName: string): string {
   return `Usage:
-  ${commandName} features list
-  ${commandName} features add <name> [--epic-id <id>] [--description <text>] [--link <title=url> ...]
-  ${commandName} features rename <id> <name> [--epic-id <id>] [--description <text>] [--link <title=url> ...] [--clear-description] [--clear-links]
-  ${commandName} features move <id> --epic-id <id> [--before <feature-id>] [--after <feature-id>]
-  ${commandName} features delete <id>
-  ${commandName} features import <path|->
-
   ${commandName} epics list
-  ${commandName} epics add <name> [--description <text>] [--link <title=url> ...]
-  ${commandName} epics rename <id> <name> [--description <text>] [--link <title=url> ...] [--clear-description] [--clear-links]
+  ${commandName} epics add <name> [--initiative-id <id>] [--description <text>] [--link <title=url> ...]
+  ${commandName} epics rename <id> <name> [--initiative-id <id>] [--description <text>] [--link <title=url> ...] [--clear-description] [--clear-links]
+  ${commandName} epics move <id> --initiative-id <id> [--before <epic-id>] [--after <epic-id>]
   ${commandName} epics delete <id>
-  ${commandName} epics move <id> [--before <epic-id>] [--after <epic-id>]
   ${commandName} epics import <path|->
+
+  ${commandName} initiatives list
+  ${commandName} initiatives add <name> [--description <text>] [--link <title=url> ...]
+  ${commandName} initiatives rename <id> <name> [--description <text>] [--link <title=url> ...] [--clear-description] [--clear-links]
+  ${commandName} initiatives delete <id>
+  ${commandName} initiatives move <id> [--before <initiative-id>] [--after <initiative-id>]
+  ${commandName} initiatives import <path|->
 
   ${commandName} members list
   ${commandName} members add <name>
@@ -43,30 +43,30 @@ function createHelpText(commandName: string): string {
 
 function createResourceHelpText(resource: string, commandName: string): string {
   switch (resource) {
-    case "features":
-      return `Usage: ${commandName} features <subcommand> [options]
+    case "epics":
+      return `Usage: ${commandName} epics <subcommand> [options]
 
 Subcommands:
   list
-  add <name> [--epic-id <id>] [--description <text>] [--link <title=url> ...]
-  rename <id> <name> [--epic-id <id>] [--description <text>] [--link <title=url> ...] [--clear-description] [--clear-links]
-  move <id> --epic-id <id> [--before <feature-id>] [--after <feature-id>]
+  add <name> [--initiative-id <id>] [--description <text>] [--link <title=url> ...]
+  rename <id> <name> [--initiative-id <id>] [--description <text>] [--link <title=url> ...] [--clear-description] [--clear-links]
+  move <id> --initiative-id <id> [--before <epic-id>] [--after <epic-id>]
   delete <id>
   import <path|->
 
-Run '${commandName} features <subcommand> --help' for subcommand details.`;
-    case "epics":
-      return `Usage: ${commandName} epics <subcommand> [options]
+Run '${commandName} epics <subcommand> --help' for subcommand details.`;
+    case "initiatives":
+      return `Usage: ${commandName} initiatives <subcommand> [options]
 
 Subcommands:
   list
   add <name> [--description <text>] [--link <title=url> ...]
   rename <id> <name> [--description <text>] [--link <title=url> ...] [--clear-description] [--clear-links]
   delete <id>
-  move <id> [--before <epic-id>] [--after <epic-id>]
+  move <id> [--before <initiative-id>] [--after <initiative-id>]
   import <path|->
 
-Run '${commandName} epics <subcommand> --help' for subcommand details.`;
+Run '${commandName} initiatives <subcommand> --help' for subcommand details.`;
     case "members":
       return `Usage: ${commandName} members <subcommand> [options]
 
@@ -90,64 +90,64 @@ function createSubcommandHelpText(
   commandName: string,
 ): string {
   switch (`${resource}.${command}`) {
-    case "features.list":
-      return `Usage: ${commandName} features list`;
-    case "features.add":
-      return `Usage: ${commandName} features add <name> [options]
-
-  --epic-id <id>        Assign to this epic
-  --description <text>  Feature description
-  --link <title=url>    Add a link (repeatable)
-  --help, -h            Show this help`;
-    case "features.rename":
-      return `Usage: ${commandName} features rename <id> <name> [options]
-
-  --epic-id <id>        Assign to this epic
-  --description <text>  Feature description
-  --link <title=url>    Set links (repeatable)
-  --clear-description   Clear existing description
-  --clear-links         Clear existing links
-  --help, -h            Show this help`;
-    case "features.move":
-      return `Usage: ${commandName} features move <id> --epic-id <id> [options]
-
-  --epic-id <id>          Target epic (required)
-  --before <feature-id>   Place before this feature
-  --after <feature-id>    Place after this feature
-  --help, -h              Show this help`;
-    case "features.delete":
-      return `Usage: ${commandName} features delete <id>`;
-    case "features.import":
-      return `Usage: ${commandName} features import <path|->
-
-  <path|->    Path to CSV file, or '-' to read from stdin
-  --help, -h  Show this help`;
     case "epics.list":
       return `Usage: ${commandName} epics list`;
     case "epics.add":
       return `Usage: ${commandName} epics add <name> [options]
 
+  --initiative-id <id>  Assign to this initiative
   --description <text>  Epic description
   --link <title=url>    Add a link (repeatable)
   --help, -h            Show this help`;
     case "epics.rename":
       return `Usage: ${commandName} epics rename <id> <name> [options]
 
+  --initiative-id <id>  Assign to this initiative
   --description <text>  Epic description
   --link <title=url>    Set links (repeatable)
   --clear-description   Clear existing description
   --clear-links         Clear existing links
   --help, -h            Show this help`;
+    case "epics.move":
+      return `Usage: ${commandName} epics move <id> --initiative-id <id> [options]
+
+  --initiative-id <id>  Target initiative (required)
+  --before <epic-id>    Place before this epic
+  --after <epic-id>     Place after this epic
+  --help, -h            Show this help`;
     case "epics.delete":
       return `Usage: ${commandName} epics delete <id>`;
-    case "epics.move":
-      return `Usage: ${commandName} epics move <id> [options]
-
-  --before <epic-id>  Place before this epic
-  --after <epic-id>   Place after this epic
-  --help, -h          Show this help`;
     case "epics.import":
       return `Usage: ${commandName} epics import <path|->
+
+  <path|->    Path to CSV file, or '-' to read from stdin
+  --help, -h  Show this help`;
+    case "initiatives.list":
+      return `Usage: ${commandName} initiatives list`;
+    case "initiatives.add":
+      return `Usage: ${commandName} initiatives add <name> [options]
+
+  --description <text>  Initiative description
+  --link <title=url>    Add a link (repeatable)
+  --help, -h            Show this help`;
+    case "initiatives.rename":
+      return `Usage: ${commandName} initiatives rename <id> <name> [options]
+
+  --description <text>  Initiative description
+  --link <title=url>    Set links (repeatable)
+  --clear-description   Clear existing description
+  --clear-links         Clear existing links
+  --help, -h            Show this help`;
+    case "initiatives.delete":
+      return `Usage: ${commandName} initiatives delete <id>`;
+    case "initiatives.move":
+      return `Usage: ${commandName} initiatives move <id> [options]
+
+  --before <initiative-id>  Place before this initiative
+  --after <initiative-id>   Place after this initiative
+  --help, -h                Show this help`;
+    case "initiatives.import":
+      return `Usage: ${commandName} initiatives import <path|->
 
   <path|->    Path to CSV file, or '-' to read from stdin
   --help, -h  Show this help`;
@@ -207,10 +207,10 @@ async function readImportSource(args: string[]): Promise<string> {
     : await Bun.file(source).text();
 }
 
-function parseFeatureMetadataFlags(args: string[]): {
+function parseEpicMetadataFlags(args: string[]): {
   rest: string[];
   metadata: {
-    epicId?: number;
+    initiativeId?: number;
     description?: string | null;
     links?: Array<{ title: string; url: string }>;
   };
@@ -220,7 +220,7 @@ function parseFeatureMetadataFlags(args: string[]): {
     options: {
       description: { type: "string" },
       link: { type: "string", multiple: true },
-      "epic-id": { type: "string" },
+      "initiative-id": { type: "string" },
       "clear-description": { type: "boolean" },
       "clear-links": { type: "boolean" },
     },
@@ -233,7 +233,9 @@ function parseFeatureMetadataFlags(args: string[]): {
   const description = values.description;
   const rawLinks = values.link ?? [];
   const linksSpecified = rawLinks.length > 0;
-  const epicId = values["epic-id"] ? Number(values["epic-id"]) : undefined;
+  const initiativeId = values["initiative-id"]
+    ? Number(values["initiative-id"])
+    : undefined;
 
   if (clearDescription && description !== undefined) usage();
   if (clearLinks && linksSpecified) usage();
@@ -248,7 +250,7 @@ function parseFeatureMetadataFlags(args: string[]): {
     rest,
     metadata: {
       ...(description !== undefined ? { description } : {}),
-      ...(epicId !== undefined ? { epicId } : {}),
+      ...(initiativeId !== undefined ? { initiativeId } : {}),
       ...(clearDescription ? { description: null } : {}),
       ...(linksSpecified ? { links } : {}),
       ...(clearLinks ? { links: [] } : {}),
@@ -311,38 +313,49 @@ export async function runCli(
 
   const orpc = createClient();
 
-  if (resource === "features") {
+  if (resource === "epics") {
     if (command === "list") {
       if (args.includes("--help") || args.includes("-h"))
         helpForSubcommand(resource, command);
-      const items = await orpc.features.list({});
+      const items = await orpc.epics.list({});
       if (items.length === 0) {
-        console.log("(no features)");
+        console.log("(no epics)");
       } else {
         for (const f of items) {
           const linkCount = f.links.length;
           const description = f.description ?? "";
           console.log(
-            `${f.id}\t${f.epicId}\t${f.name}\t${description}\t${linkCount} links`,
+            `${f.id}\t${f.initiativeId}\t${f.name}\t${description}\t${linkCount} links`,
           );
         }
       }
     } else if (command === "add") {
       if (args.includes("--help") || args.includes("-h"))
         helpForSubcommand(resource, command);
-      const { rest, metadata } = parseFeatureMetadataFlags(args);
+      const { rest, metadata } = parseEpicMetadataFlags(args);
       const name = rest[0];
       if (!name) usage();
-      const f = await orpc.features.create({ name, ...metadata });
+      const { initiativeId, ...restMetadata } = metadata;
+      const f = await orpc.epics.create({
+        name,
+        initiativeId,
+        ...restMetadata,
+      });
       console.log(`Created: ${f!.id}\t${f!.name}`);
     } else if (command === "rename") {
       if (args.includes("--help") || args.includes("-h"))
         helpForSubcommand(resource, command);
-      const { rest, metadata } = parseFeatureMetadataFlags(args);
+      const { rest, metadata } = parseEpicMetadataFlags(args);
       const id = Number(rest[0]);
       const name = rest[1];
       if (!id || !name) usage();
-      const f = await orpc.features.rename({ id, name, ...metadata });
+      const { initiativeId, ...restMetadata } = metadata;
+      const f = await orpc.epics.rename({
+        id,
+        name,
+        initiativeId,
+        ...restMetadata,
+      });
       console.log(`Renamed: ${f!.id}\t${f!.name}`);
     } else if (command === "move") {
       if (args.includes("--help") || args.includes("-h"))
@@ -350,7 +363,7 @@ export async function runCli(
       const { values: moveValues, positionals: movePositionals } = parseArgs({
         args,
         options: {
-          "epic-id": { type: "string" },
+          "initiative-id": { type: "string" },
           before: { type: "string" },
           after: { type: "string" },
         },
@@ -358,38 +371,38 @@ export async function runCli(
         allowPositionals: true,
       });
       const id = Number(movePositionals[0]);
-      const epicId = Number(moveValues["epic-id"]);
+      const initiativeId = Number(moveValues["initiative-id"]);
       const beforeId = moveValues.before
         ? Number(moveValues.before)
         : undefined;
       const afterId = moveValues.after ? Number(moveValues.after) : undefined;
-      if (!id || !epicId) usage();
+      if (!id || !initiativeId) usage();
       if (beforeId !== undefined && afterId !== undefined) usage();
-      const f = await orpc.features.move({ id, epicId, beforeId, afterId });
+      const f = await orpc.epics.move({ id, initiativeId, beforeId, afterId });
       console.log(`Moved: ${f!.id}\t${f!.name}`);
     } else if (command === "delete") {
       if (args.includes("--help") || args.includes("-h"))
         helpForSubcommand(resource, command);
       const id = Number(args[0]);
       if (!id) usage();
-      await orpc.features.delete({ id });
+      await orpc.epics.delete({ id });
       console.log(`Deleted: ${id}`);
     } else if (command === "import") {
       if (args.includes("--help") || args.includes("-h"))
         helpForSubcommand(resource, command);
       const csv = await readImportSource(args);
-      const result = await orpc.import.featureMetadataCSVImport({ csv });
+      const result = await orpc.import.epicMetadataCSVImport({ csv });
       console.log(`Imported: ${result.success}`);
     } else {
       usage();
     }
-  } else if (resource === "epics") {
+  } else if (resource === "initiatives") {
     if (command === "list") {
       if (args.includes("--help") || args.includes("-h"))
         helpForSubcommand(resource, command);
-      const items = await orpc.epics.list({});
+      const items = await orpc.initiatives.list({});
       if (items.length === 0) {
-        console.log("(no epics)");
+        console.log("(no initiatives)");
       } else {
         for (const epic of items) {
           const linkCount = epic.links.length;
@@ -402,28 +415,28 @@ export async function runCli(
     } else if (command === "add") {
       if (args.includes("--help") || args.includes("-h"))
         helpForSubcommand(resource, command);
-      const { rest, metadata } = parseFeatureMetadataFlags(args);
-      const { epicId: _epicId, ...epicMetadata } = metadata;
+      const { rest, metadata } = parseEpicMetadataFlags(args);
+      const { initiativeId: _initiativeId, ...epicMetadata } = metadata;
       const name = rest[0];
       if (!name) usage();
-      const epic = await orpc.epics.create({ name, ...epicMetadata });
+      const epic = await orpc.initiatives.create({ name, ...epicMetadata });
       console.log(`Created: ${epic!.id}\t${epic!.name}`);
     } else if (command === "rename") {
       if (args.includes("--help") || args.includes("-h"))
         helpForSubcommand(resource, command);
-      const { rest, metadata } = parseFeatureMetadataFlags(args);
-      const { epicId: _epicId, ...epicMetadata } = metadata;
+      const { rest, metadata } = parseEpicMetadataFlags(args);
+      const { initiativeId: _initiativeId, ...epicMetadata } = metadata;
       const id = Number(rest[0]);
       const name = rest[1];
       if (!id || !name) usage();
-      const epic = await orpc.epics.rename({ id, name, ...epicMetadata });
+      const epic = await orpc.initiatives.rename({ id, name, ...epicMetadata });
       console.log(`Renamed: ${epic!.id}\t${epic!.name}`);
     } else if (command === "delete") {
       if (args.includes("--help") || args.includes("-h"))
         helpForSubcommand(resource, command);
       const id = Number(args[0]);
       if (!id) usage();
-      await orpc.epics.delete({ id });
+      await orpc.initiatives.delete({ id });
       console.log(`Deleted: ${id}`);
     } else if (command === "move") {
       if (args.includes("--help") || args.includes("-h"))
@@ -444,13 +457,13 @@ export async function runCli(
       const afterId = moveValues.after ? Number(moveValues.after) : undefined;
       if (!id) usage();
       if (beforeId !== undefined && afterId !== undefined) usage();
-      await orpc.epics.move({ id, beforeId, afterId });
+      await orpc.initiatives.move({ id, beforeId, afterId });
       console.log(`Moved: ${id}`);
     } else if (command === "import") {
       if (args.includes("--help") || args.includes("-h"))
         helpForSubcommand(resource, command);
       const csv = await readImportSource(args);
-      const result = await orpc.import.epicMetadataCSVImport({ csv });
+      const result = await orpc.import.initiativeMetadataCSVImport({ csv });
       console.log(`Imported: ${result.success}`);
     } else {
       usage();

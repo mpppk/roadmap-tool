@@ -87,7 +87,7 @@ type CapacityConflictResolution =
   | "rebalanceAllProportionally";
 
 type FeatureMonthUpdate = {
-  featureId: number;
+  epicId: number;
   months: Array<{
     monthId: number;
     totalCapacity: number;
@@ -645,8 +645,8 @@ function FeatureNameCell({
           e.stopPropagation();
           onEditDetails();
         }}
-        title={hasDescription ? "説明あり" : "Feature詳細を編集"}
-        aria-label="Feature詳細を編集"
+        title={hasDescription ? "説明あり" : "Epic詳細を編集"}
+        aria-label="Epic詳細を編集"
       >
         <Info size={13} />
       </button>
@@ -674,7 +674,7 @@ function FeatureNameCell({
           e.stopPropagation();
           onDelete();
         }}
-        title="Featureを削除"
+        title="Epicを削除"
       >
         ×
       </button>
@@ -785,7 +785,7 @@ function FeatureDetailsDialog({
         }}
       >
         <div className="feature-details-header">
-          <p className="confirm-msg">Feature詳細</p>
+          <p className="confirm-msg">Epic詳細</p>
         </div>
 
         <label className="feature-details-label">
@@ -802,7 +802,7 @@ function FeatureDetailsDialog({
         </label>
 
         <label className="feature-details-label">
-          <span>Epic</span>
+          <span>Initiative</span>
           <select
             className="feature-details-input"
             value={epicId}
@@ -1233,7 +1233,7 @@ function CapacityConflictPopover({
           className="btn-sm capacity-conflict-action-btn"
           onClick={() => onResolve("rebalanceOthersProportionally")}
         >
-          <span>超過しないように他機能のキャパシティを削減</span>
+          <span>超過しないように他Epicのキャパシティを削減</span>
           {rebalancePreview.length > 0 && (
             <span className="capacity-conflict-preview-list">
               {rebalancePreview.map((change) => (
@@ -1704,8 +1704,8 @@ export function CapacityView({
     setLoading(true);
     const [qs, eps, fs, ms] = await Promise.all([
       orpc.quarters.list({}),
+      orpc.initiatives.list({}),
       orpc.epics.list({}),
-      orpc.features.list({}),
       orpc.members.list({}),
     ]);
 
@@ -1717,7 +1717,7 @@ export function CapacityView({
       .sort((a, b) => a.year - b.year || a.quarter - b.quarter);
 
     const featureViews = await Promise.all(
-      fs.map((f) => orpc.allocations.getFeatureView({ featureId: f.id })),
+      fs.map((f) => orpc.allocations.getEpicView({ epicId: f.id })),
     );
 
     const rows: FeatureRow[] = featureViews.map((fv) => {
@@ -1735,12 +1735,12 @@ export function CapacityView({
         }
       }
       return {
-        id: fv.feature.id,
-        name: fv.feature.name,
-        description: fv.feature.description,
-        epicId: fv.feature.epicId,
-        position: fv.feature.position,
-        links: fv.feature.links.map((link) => ({
+        id: fv.epic.id,
+        name: fv.epic.name,
+        description: fv.epic.description,
+        epicId: fv.epic.initiativeId,
+        position: fv.epic.position,
+        links: fv.epic.links.map((link) => ({
           id: link.id,
           title: link.title,
           url: link.url,
@@ -2016,7 +2016,7 @@ export function CapacityView({
     (updates: FeatureMonthUpdate[]) => {
       setFeatureRows((rows) =>
         rows.map((r) => {
-          const rowUpdates = updates.filter((u) => u.featureId === r.id);
+          const rowUpdates = updates.filter((u) => u.epicId === r.id);
           if (rowUpdates.length === 0) return r;
           let newMap = new Map(r.months);
           for (const update of rowUpdates) {
@@ -2035,13 +2035,15 @@ export function CapacityView({
       try {
         await history.record("Capacityを変更", async () => {
           const result = await orpc.allocations.updateTotal({
-            featureId,
+            epicId: featureId,
             totalCapacity,
             periodType: column.type,
             monthId: column.monthId,
             quarterId: column.quarterId,
           });
-          applyFeatureMonthUpdates([{ featureId, months: result.months }]);
+          applyFeatureMonthUpdates([
+            { epicId: featureId, months: result.months },
+          ]);
         });
       } finally {
         setBusy(false);
@@ -2090,7 +2092,7 @@ export function CapacityView({
         }
 
         const preview = await orpc.allocations.previewMemberAllocation({
-          featureId,
+          epicId: featureId,
           memberId,
           capacity,
           periodType: column.type,
@@ -2116,7 +2118,7 @@ export function CapacityView({
 
         await history.record("Member capacityを変更", async () => {
           const result = await orpc.allocations.updateMemberAllocation({
-            featureId,
+            epicId: featureId,
             memberId,
             capacity,
             periodType: column.type,
@@ -2140,7 +2142,7 @@ export function CapacityView({
       try {
         await history.record("Capacity競合を解決", async () => {
           const result = await orpc.allocations.updateMemberAllocation({
-            featureId: capacityConflict.featureId,
+            epicId: capacityConflict.featureId,
             periodType: capacityConflict.periodType,
             monthId: capacityConflict.monthId,
             quarterId: capacityConflict.quarterId,
@@ -2165,7 +2167,7 @@ export function CapacityView({
       try {
         await history.record("Max capacity超過を解決", async () => {
           const result = await orpc.allocations.updateMemberAllocation({
-            featureId: maxCapacityOverflow.featureId,
+            epicId: maxCapacityOverflow.featureId,
             periodType: maxCapacityOverflow.periodType,
             monthId: maxCapacityOverflow.monthId,
             quarterId: maxCapacityOverflow.quarterId,
@@ -2341,18 +2343,18 @@ export function CapacityView({
             const div = colDivisor(op.column);
             if (op.kind === "feature") {
               const result = await orpc.allocations.updateTotal({
-                featureId: op.featureId,
+                epicId: op.featureId,
                 totalCapacity: op.value * div,
                 periodType: op.column.type,
                 monthId: op.column.monthId,
                 quarterId: op.column.quarterId,
               });
               applyFeatureMonthUpdates([
-                { featureId: op.featureId, months: result.months },
+                { epicId: op.featureId, months: result.months },
               ]);
             } else {
               const result = await orpc.allocations.updateMemberAllocation({
-                featureId: op.featureId,
+                epicId: op.featureId,
                 memberId: op.memberId,
                 capacity: op.value * div,
                 periodType: op.column.type,
@@ -2494,9 +2496,9 @@ export function CapacityView({
     setBusy(true);
     setActionWarning(null);
     try {
-      const epic = await orpc.epics.create({
+      const epic = await orpc.initiatives.create({
         name: nextAvailableGeneratedName(
-          "Epic",
+          "Initiative",
           epicRows.map((row) => row.name),
         ),
       });
@@ -2526,11 +2528,11 @@ export function CapacityView({
     setBusy(true);
     setActionWarning(null);
     try {
-      const f = await history.record("Featureを追加", async () => {
-        return orpc.features.create({
-          epicId,
+      const f = await history.record("Epicを追加", async () => {
+        return orpc.epics.create({
+          initiativeId: epicId,
           name: nextAvailableGeneratedName(
-            "Feature",
+            "Epic",
             featureRows.map((row) => row.name),
           ),
         });
@@ -2542,7 +2544,7 @@ export function CapacityView({
           id: f.id,
           name: f.name,
           description: f.description,
-          epicId: f.epicId,
+          epicId: f.initiativeId,
           position: f.position,
           links: f.links,
           expanded: false,
@@ -2559,7 +2561,7 @@ export function CapacityView({
   };
 
   const renameEpic = useCallback(async (id: number, name: string) => {
-    const epic = await orpc.epics.rename({ id, name });
+    const epic = await orpc.initiatives.rename({ id, name });
     if (!epic) return name;
     setEpicRows((rows) =>
       rows.map((row) =>
@@ -2578,8 +2580,8 @@ export function CapacityView({
 
   const renameFeature = useCallback(
     async (id: number, name: string) => {
-      const f = await history.record("Feature名を変更", async () => {
-        return orpc.features.rename({ id, name });
+      const f = await history.record("Epic名を変更", async () => {
+        return orpc.epics.rename({ id, name });
       });
       if (!f) return name;
       setFeatureRows((rows) =>
@@ -2589,7 +2591,7 @@ export function CapacityView({
                 ...r,
                 name: f.name,
                 description: f.description,
-                epicId: f.epicId,
+                epicId: f.initiativeId,
                 position: f.position,
                 links: f.links,
               }
@@ -2611,8 +2613,9 @@ export function CapacityView({
         links: Array<{ title: string; url: string }>;
       },
     ) => {
-      const f = await history.record("Feature詳細を変更", async () => {
-        return orpc.features.rename({ id, ...input });
+      const { epicId: initiativeId, ...rest } = input;
+      const f = await history.record("Epic詳細を変更", async () => {
+        return orpc.epics.rename({ id, initiativeId, ...rest });
       });
       if (!f) return;
       setFeatureRows((rows) =>
@@ -2622,7 +2625,7 @@ export function CapacityView({
                 ...r,
                 name: f.name,
                 description: f.description,
-                epicId: f.epicId,
+                epicId: f.initiativeId,
                 position: f.position,
                 links: f.links,
               }
@@ -2634,7 +2637,7 @@ export function CapacityView({
           ? {
               ...current,
               name: f.name,
-              epicId: f.epicId,
+              epicId: f.initiativeId,
               position: f.position,
               description: f.description,
               links: f.links,
@@ -2654,7 +2657,7 @@ export function CapacityView({
         links: Array<{ title: string; url: string }>;
       },
     ) => {
-      const epic = await orpc.epics.rename({ id, ...input });
+      const epic = await orpc.initiatives.rename({ id, ...input });
       if (!epic) return;
       setEpicRows((rows) =>
         rows.map((row) =>
@@ -2686,8 +2689,8 @@ export function CapacityView({
     async (id: number) => {
       setBusy(true);
       try {
-        await history.record("Featureを削除", async () => {
-          await orpc.features.delete({ id });
+        await history.record("Epicを削除", async () => {
+          await orpc.epics.delete({ id });
           setFeatureRows((rows) => rows.filter((r) => r.id !== id));
         });
       } finally {
@@ -2701,11 +2704,13 @@ export function CapacityView({
     setBusy(true);
     setActionWarning(null);
     try {
-      await orpc.epics.delete({ id });
+      await orpc.initiatives.delete({ id });
       setEpicRows((rows) => rows.filter((row) => row.id !== id));
     } catch (error) {
       setActionWarning(
-        error instanceof Error ? error.message : "Epicを削除できませんでした。",
+        error instanceof Error
+          ? error.message
+          : "Initiativeを削除できませんでした。",
       );
     } finally {
       setBusy(false);
@@ -2714,7 +2719,7 @@ export function CapacityView({
 
   const moveEpic = useCallback(async (epicId: number, beforeId: number) => {
     if (epicId === beforeId) return;
-    const updated = await orpc.epics.move({ id: epicId, beforeId });
+    const updated = await orpc.initiatives.move({ id: epicId, beforeId });
     setEpicRows((rows) => {
       const collapsedById = new Map(rows.map((row) => [row.id, row.collapsed]));
       return updated.map((epic) => ({
@@ -2730,10 +2735,10 @@ export function CapacityView({
   }, []);
 
   const moveFeature = useCallback(
-    async (featureId: number, epicId: number, beforeId?: number) => {
-      const moved = await orpc.features.move({
+    async (featureId: number, initiativeId: number, beforeId?: number) => {
+      const moved = await orpc.epics.move({
         id: featureId,
-        epicId,
+        initiativeId,
         beforeId,
       });
       if (!moved) return;
@@ -2806,7 +2811,7 @@ export function CapacityView({
   };
 
   const refreshFeatureRow = useCallback(async (featureId: number) => {
-    const fv = await orpc.allocations.getFeatureView({ featureId });
+    const fv = await orpc.allocations.getEpicView({ epicId: featureId });
     const monthMap = new Map<number, MonthData>();
     for (const qd of fv.quarters) {
       for (const md of qd.months) {
@@ -2825,11 +2830,11 @@ export function CapacityView({
         r.id === featureId
           ? {
               ...r,
-              name: fv.feature.name,
-              description: fv.feature.description,
-              epicId: fv.feature.epicId,
-              position: fv.feature.position,
-              links: fv.feature.links,
+              name: fv.epic.name,
+              description: fv.epic.description,
+              epicId: fv.epic.initiativeId,
+              position: fv.epic.position,
+              links: fv.epic.links,
               months: monthMap,
             }
           : r,
@@ -2841,8 +2846,8 @@ export function CapacityView({
     async (featureId: number, memberId: number) => {
       setBusy(true);
       try {
-        await history.record("MemberをFeatureに割り当て", async () => {
-          await orpc.allocations.assignMember({ featureId, memberId });
+        await history.record("MemberをEpicに割り当て", async () => {
+          await orpc.allocations.assignMember({ epicId: featureId, memberId });
           await refreshFeatureRow(featureId);
         });
       } finally {
@@ -2856,9 +2861,9 @@ export function CapacityView({
     async (featureId: number, memberId: number) => {
       setBusy(true);
       try {
-        await history.record("MemberをFeatureから削除", async () => {
-          await orpc.allocations.removeMemberFromFeature({
-            featureId,
+        await history.record("MemberをEpicから削除", async () => {
+          await orpc.allocations.removeMemberFromEpic({
+            epicId: featureId,
             memberId,
           });
           await refreshFeatureRow(featureId);
@@ -2903,7 +2908,7 @@ export function CapacityView({
               className="cv-nav-link active"
               onClick={() => navigate("/features")}
             >
-              Features
+              Epics
             </button>
             <button
               type="button"
@@ -2933,7 +2938,7 @@ export function CapacityView({
             className="cv-nav-link active"
             onClick={() => navigate("/features")}
           >
-            Features
+            Epics
           </button>
           <button
             type="button"
@@ -3087,7 +3092,7 @@ export function CapacityView({
             <thead>
               <tr>
                 <th className="th-label">
-                  Feature
+                  Epic
                   {renderLabelResizeBorder()}
                 </th>
                 {columns.map((column) => (
@@ -3146,8 +3151,8 @@ export function CapacityView({
                             setDragItem({ type: "epic", epicId: epic.id })
                           }
                           onDragEnd={() => setDragItem(null)}
-                          title="Epicを移動"
-                          aria-label="Epicを移動"
+                          title="Initiativeを移動"
+                          aria-label="Initiativeを移動"
                         >
                           <GripVertical size={14} />
                         </button>
@@ -3259,8 +3264,8 @@ export function CapacityView({
                               })
                             }
                             onDragEnd={() => setDragItem(null)}
-                            title="Featureを移動"
-                            aria-label="Featureを移動"
+                            title="Epicを移動"
+                            aria-label="Epicを移動"
                           >
                             <GripVertical size={14} />
                           </button>
@@ -3399,7 +3404,7 @@ export function CapacityView({
                                     featureName: feature.name,
                                   })
                                 }
-                                title="このFeatureから削除"
+                                title="このEpicから削除"
                               >
                                 ×
                               </button>
@@ -3641,7 +3646,7 @@ export function CapacityView({
                         disabled={busy}
                         onClick={() => addFeature(epic.id)}
                       >
-                        + Feature
+                        + Epic
                       </button>
                       {renderLabelResizeBorder()}
                     </td>
@@ -3662,7 +3667,7 @@ export function CapacityView({
             onClick={addEpic}
             disabled={busy}
           >
-            + Epic
+            + Initiative
           </button>
           <button
             type="button"
@@ -3677,7 +3682,7 @@ export function CapacityView({
             className="btn-sm"
             onClick={copyAllocationTSV}
             disabled={busy}
-            title="機能・担当者・キャパシティ・月次形式のTSVをコピー"
+            title="Epic・担当者・キャパシティ・月次形式のTSVをコピー"
           >
             TSVをコピー
           </button>
@@ -3690,7 +3695,7 @@ export function CapacityView({
               setImportModalOpen(true);
             }}
             disabled={busy}
-            title="TSVをインポート（機能\t担当者\tキャパシティ\t月）"
+            title="TSVをインポート（Epic\t担当者\tキャパシティ\t月）"
           >
             TSVをインポート
           </button>
@@ -3726,7 +3731,7 @@ export function CapacityView({
           >
             <p className="confirm-msg">TSVをインポート</p>
             <p className="import-hint">
-              ヘッダー行（機能・担当者・キャパシティ・月）を含むTSVを貼り付けてください。
+              ヘッダー行（Epic・担当者・キャパシティ・月）を含むTSVを貼り付けてください。
               スプレッドシートからのコピーをそのまま貼り付けられます。
               既存のキャパシティに加算されます。
             </p>
@@ -3736,7 +3741,7 @@ export function CapacityView({
                 value={importTsv}
                 onChange={(e) => setImportTsv(e.target.value)}
                 placeholder={
-                  "機能\t担当者\tキャパシティ\t月\nFeature A\tAlice\t0.5\t2026-04"
+                  "Epic\t担当者\tキャパシティ\t月\nEpic A\tAlice\t0.5\t2026-04"
                 }
                 rows={8}
                 disabled={importing}

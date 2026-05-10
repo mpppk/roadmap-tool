@@ -9,8 +9,8 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
-export const epics = sqliteTable(
-  "epics",
+export const initiatives = sqliteTable(
+  "initiatives",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
     name: text("name").notNull(),
@@ -24,13 +24,59 @@ export const epics = sqliteTable(
       .$defaultFn(() => new Date()),
   },
   (t) => [
+    check("initiatives_name_trimmed_check", sql`${t.name} = trim(${t.name})`),
+    check("initiatives_name_not_empty_check", sql`length(${t.name}) > 0`),
+    check("initiatives_position_check", sql`${t.position} >= 0`),
+    uniqueIndex("initiatives_name_trim_unique").on(sql`trim(${t.name})`),
+    uniqueIndex("initiatives_default_unique")
+      .on(t.isDefault)
+      .where(sql`${t.isDefault} = 1`),
+  ],
+);
+
+export const initiativeLinks = sqliteTable(
+  "initiative_links",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    initiativeId: integer("initiative_id")
+      .notNull()
+      .references(() => initiatives.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    url: text("url").notNull(),
+    position: integer("position").notNull(),
+  },
+  (t) => [
+    unique().on(t.initiativeId, t.position),
+    unique().on(t.initiativeId, t.url),
+    check(
+      "initiative_links_title_not_empty_check",
+      sql`length(${t.title}) > 0`,
+    ),
+    check("initiative_links_url_not_empty_check", sql`length(${t.url}) > 0`),
+    check("initiative_links_position_check", sql`${t.position} >= 0`),
+  ],
+);
+
+export const epics = sqliteTable(
+  "epics",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull(),
+    description: text("description"),
+    initiativeId: integer("initiative_id")
+      .notNull()
+      .references(() => initiatives.id, { onDelete: "restrict" }),
+    position: integer("position").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => [
     check("epics_name_trimmed_check", sql`${t.name} = trim(${t.name})`),
     check("epics_name_not_empty_check", sql`length(${t.name}) > 0`),
     check("epics_position_check", sql`${t.position} >= 0`),
     uniqueIndex("epics_name_trim_unique").on(sql`trim(${t.name})`),
-    uniqueIndex("epics_default_unique")
-      .on(t.isDefault)
-      .where(sql`${t.isDefault} = 1`),
+    unique().on(t.initiativeId, t.position),
   ],
 );
 
@@ -51,49 +97,6 @@ export const epicLinks = sqliteTable(
     check("epic_links_title_not_empty_check", sql`length(${t.title}) > 0`),
     check("epic_links_url_not_empty_check", sql`length(${t.url}) > 0`),
     check("epic_links_position_check", sql`${t.position} >= 0`),
-  ],
-);
-
-export const features = sqliteTable(
-  "features",
-  {
-    id: integer("id").primaryKey({ autoIncrement: true }),
-    name: text("name").notNull(),
-    description: text("description"),
-    epicId: integer("epic_id")
-      .notNull()
-      .references(() => epics.id, { onDelete: "restrict" }),
-    position: integer("position").notNull().default(0),
-    createdAt: integer("created_at", { mode: "timestamp" })
-      .notNull()
-      .$defaultFn(() => new Date()),
-  },
-  (t) => [
-    check("features_name_trimmed_check", sql`${t.name} = trim(${t.name})`),
-    check("features_name_not_empty_check", sql`length(${t.name}) > 0`),
-    check("features_position_check", sql`${t.position} >= 0`),
-    uniqueIndex("features_name_trim_unique").on(sql`trim(${t.name})`),
-    unique().on(t.epicId, t.position),
-  ],
-);
-
-export const featureLinks = sqliteTable(
-  "feature_links",
-  {
-    id: integer("id").primaryKey({ autoIncrement: true }),
-    featureId: integer("feature_id")
-      .notNull()
-      .references(() => features.id, { onDelete: "cascade" }),
-    title: text("title").notNull(),
-    url: text("url").notNull(),
-    position: integer("position").notNull(),
-  },
-  (t) => [
-    unique().on(t.featureId, t.position),
-    unique().on(t.featureId, t.url),
-    check("feature_links_title_not_empty_check", sql`length(${t.title}) > 0`),
-    check("feature_links_url_not_empty_check", sql`length(${t.url}) > 0`),
-    check("feature_links_position_check", sql`${t.position} >= 0`),
   ],
 );
 
@@ -141,28 +144,28 @@ export const months = sqliteTable(
   (t) => [unique().on(t.year, t.month), unique().on(t.quarterId, t.month)],
 );
 
-export const featureMonths = sqliteTable(
-  "feature_months",
+export const epicMonths = sqliteTable(
+  "epic_months",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
-    featureId: integer("feature_id")
+    epicId: integer("epic_id")
       .notNull()
-      .references(() => features.id, { onDelete: "cascade" }),
+      .references(() => epics.id, { onDelete: "cascade" }),
     monthId: integer("month_id")
       .notNull()
       .references(() => months.id, { onDelete: "cascade" }),
     totalCapacity: real("total_capacity").notNull().default(0),
   },
-  (t) => [unique().on(t.featureId, t.monthId)],
+  (t) => [unique().on(t.epicId, t.monthId)],
 );
 
 export const memberMonthAllocations = sqliteTable(
   "member_month_allocations",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
-    featureId: integer("feature_id")
+    epicId: integer("epic_id")
       .notNull()
-      .references(() => features.id, { onDelete: "cascade" }),
+      .references(() => epics.id, { onDelete: "cascade" }),
     monthId: integer("month_id")
       .notNull()
       .references(() => months.id, { onDelete: "cascade" }),
@@ -171,5 +174,5 @@ export const memberMonthAllocations = sqliteTable(
       .references(() => members.id, { onDelete: "cascade" }),
     capacity: real("capacity").notNull().default(0),
   },
-  (t) => [unique().on(t.featureId, t.monthId, t.memberId)],
+  (t) => [unique().on(t.epicId, t.monthId, t.memberId)],
 );

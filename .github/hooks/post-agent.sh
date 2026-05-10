@@ -6,7 +6,7 @@ FAILED=false
 REASON=""
 
 echo "🔍 Running TypeScript type check..." >&2
-TYPECHECK_OUT=$(bun run typecheck 2>&1)
+TYPECHECK_OUT=$(./node_modules/.bin/tsc --noEmit 2>&1)
 TYPECHECK_STATUS=$?
 if [ $TYPECHECK_STATUS -ne 0 ]; then
   FAILED=true

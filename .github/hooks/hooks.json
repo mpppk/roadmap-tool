@@ -8,6 +8,14 @@
         "cwd": ".",
         "timeoutSec": 120
       }
+    ],
+    "subagentStop": [
+      {
+        "type": "command",
+        "bash": ".github/hooks/post-agent.sh",
+        "cwd": ".",
+        "timeoutSec": 120
+      }
     ]
   }
 }

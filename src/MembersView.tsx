@@ -24,7 +24,7 @@ type CapacityAggMode = "total" | "average";
 type ImportMode = "append" | "sync";
 type Month = { id: number; year: number; month: number; quarterId: number };
 type Quarter = { id: number; year: number; quarter: number; months: Month[] };
-type Member = { id: number; name: string; maxCapacity: number | null }
+type Member = { id: number; name: string; maxCapacity: number | null };
 type Epic = { id: number; name: string; initiativeName: string | null };
 
 type CapacityConflictResolution =

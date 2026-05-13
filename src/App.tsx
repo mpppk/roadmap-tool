@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Toaster } from "sonner";
 import { CapacityView } from "./CapacityView";
 import type { HistoryController, RoadmapSnapshot } from "./history-client";
 import { MembersView } from "./MembersView";
@@ -253,13 +254,22 @@ export function App() {
 
   if (path === "/members")
     return (
-      <MembersView
+      <>
+        <Toaster position="bottom-right" richColors />
+        <MembersView
+          history={history}
+          externalDataVersion={externalDataVersion}
+        />
+      </>
+    );
+  return (
+    <>
+      <Toaster position="bottom-right" richColors />
+      <CapacityView
         history={history}
         externalDataVersion={externalDataVersion}
       />
-    );
-  return (
-    <CapacityView history={history} externalDataVersion={externalDataVersion} />
+    </>
   );
 }
 

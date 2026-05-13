@@ -27,6 +27,7 @@ import {
 } from "./name-errors";
 import { navigate } from "./navigate";
 import { orpc } from "./orpc-client";
+import { toast } from "sonner";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -2971,8 +2972,13 @@ export function CapacityView({
   );
 
   const copyAllocationTSV = useCallback(async () => {
-    const tsv = await orpc.export.allocationTSV({});
-    await navigator.clipboard.writeText(tsv);
+    try {
+      const tsv = await orpc.export.allocationTSV({});
+      await navigator.clipboard.writeText(tsv);
+      toast.success("TSVをコピーしました");
+    } catch {
+      toast.error("コピーに失敗しました");
+    }
   }, []);
 
   const runImportTSV = useCallback(async () => {

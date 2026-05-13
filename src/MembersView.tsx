@@ -1850,39 +1850,41 @@ export function MembersView({
                         >
                           <td className="td-label td-member-label">
                             <span className="member-name">
-                              <button
-                                type="button"
-                                className="feature-link-btn"
-                                onClick={() =>
-                                  navigate(
-                                    `/features?featureId=${featureId}&memberId=${member.id}`,
-                                  )
-                                }
-                                title="Epics画面でこのメンバー行を表示"
-                              >
-                                {featureInfo.featureName}
-                              </button>
+                              <span className="feature-name-row">
+                                <button
+                                  type="button"
+                                  className="feature-link-btn"
+                                  onClick={() =>
+                                    navigate(
+                                      `/features?featureId=${featureId}&memberId=${member.id}`,
+                                    )
+                                  }
+                                  title="Epics画面でこのメンバー行を表示"
+                                >
+                                  {featureInfo.featureName}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="del-member-btn"
+                                  title="このEpicの割り当てを削除"
+                                  disabled={busy}
+                                  onClick={() =>
+                                    setRemoveEpicConfirm({
+                                      memberId: member.id,
+                                      memberName: member.name,
+                                      epicId: featureId,
+                                      epicName: featureInfo.featureName,
+                                    })
+                                  }
+                                >
+                                  ×
+                                </button>
+                              </span>
                               {featureInfo.epicName && (
                                 <span className="member-feature-epic">
                                   {featureInfo.epicName}
                                 </span>
                               )}
-                              <button
-                                type="button"
-                                className="del-member-btn"
-                                title="このEpicの割り当てを削除"
-                                disabled={busy}
-                                onClick={() =>
-                                  setRemoveEpicConfirm({
-                                    memberId: member.id,
-                                    memberName: member.name,
-                                    epicId: featureId,
-                                    epicName: featureInfo.featureName,
-                                  })
-                                }
-                              >
-                                ×
-                              </button>
                             </span>
                             {renderLabelResizeBorder()}
                           </td>

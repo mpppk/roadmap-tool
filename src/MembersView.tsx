@@ -1,3 +1,4 @@
+import { GripVertical } from "lucide-react";
 import {
   type MouseEvent as ReactMouseEvent,
   useCallback,
@@ -6,7 +7,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { GripVertical } from "lucide-react";
 import "./capacity.css";
 import type { HistoryController } from "./history-client";
 import {
@@ -1784,10 +1784,7 @@ export function MembersView({
                       if (draggingMemberId) e.preventDefault();
                     }}
                     onDrop={() => {
-                      if (
-                        draggingMemberId &&
-                        draggingMemberId !== member.id
-                      ) {
+                      if (draggingMemberId && draggingMemberId !== member.id) {
                         void moveMember(draggingMemberId, member.id);
                       }
                     }}

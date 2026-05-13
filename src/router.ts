@@ -1623,7 +1623,7 @@ const allocationsGetMemberView = o
               capacity:
                 monthAllocs.find((a) => a.epicId === epic.id)?.capacity ?? 0,
             }))
-            .filter((a) => a.capacity > 0),
+            .filter((a) => monthAllocs.some((rec) => rec.epicId === a.epic.id)),
         };
       }),
     }));

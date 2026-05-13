@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { GripVertical } from "lucide-react";
 import "./capacity.css";
 import type { HistoryController } from "./history-client";
 import {
@@ -764,6 +765,7 @@ export function MembersView({
   const rangeEndRef = useRef(rangeEnd);
   rangeEndRef.current = rangeEnd;
   const [memberRows, setMemberRows] = useState<MemberRow[]>([]);
+  const [draggingMemberId, setDraggingMemberId] = useState<number | null>(null);
   const [allEpics, setAllEpics] = useState<Epic[]>([]);
   const [assigningMemberId, setAssigningMemberId] = useState<number | null>(
     null,
@@ -1357,6 +1359,36 @@ export function MembersView({
     [history],
   );
 
+  const moveMember = useCallback(
+    async (memberId: number, targetId: number) => {
+      if (memberId === targetId) return;
+      const memberIndex = memberRows.findIndex((r) => r.id === memberId);
+      const targetIndex = memberRows.findIndex((r) => r.id === targetId);
+      const draggingDown = memberIndex < targetIndex;
+      const updated = await orpc.members.move(
+        draggingDown
+          ? { id: memberId, afterId: targetId }
+          : { id: memberId, beforeId: targetId },
+      );
+      setMemberRows((rows) => {
+        const stateById = new Map(rows.map((r) => [r.id, r]));
+        return updated.map((m) => {
+          const existing = stateById.get(m.id);
+          return existing
+            ? { ...existing, name: m.name, maxCapacity: m.maxCapacity }
+            : {
+                id: m.id,
+                name: m.name,
+                maxCapacity: m.maxCapacity ?? null,
+                expanded: false,
+                months: new Map(),
+              };
+        });
+      });
+    },
+    [memberRows],
+  );
+
   const setMaxCapacity = useCallback(
     async (id: number, maxCapacity: number | null) => {
       await history.record("Max capacityを変更", async () => {
@@ -1745,9 +1777,31 @@ export function MembersView({
 
                 const memberMaxCap = member.maxCapacity ?? 1;
                 rows.push(
-                  <tr key={member.id} className="tr-feature">
+                  <tr
+                    key={member.id}
+                    className="tr-feature"
+                    onDragOver={(e) => {
+                      if (draggingMemberId) e.preventDefault();
+                    }}
+                    onDrop={() => {
+                      if (
+                        draggingMemberId &&
+                        draggingMemberId !== member.id
+                      ) {
+                        void moveMember(draggingMemberId, member.id);
+                      }
+                    }}
+                  >
                     <td className="td-label">
                       <div className="td-label-inner">
+                        <span
+                          className="drag-handle"
+                          draggable
+                          onDragStart={() => setDraggingMemberId(member.id)}
+                          onDragEnd={() => setDraggingMemberId(null)}
+                        >
+                          <GripVertical size={14} />
+                        </span>
                         <button
                           type="button"
                           className="toggle-btn"

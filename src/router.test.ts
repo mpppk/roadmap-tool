@@ -1363,7 +1363,12 @@ describe("allocation cap preserving operations", () => {
       .values({ epicId: featureA.id, monthId: month.id, totalCapacity: 1.75 });
     await db
       .insert(memberMonthAllocations)
-      .values({ epicId: featureA.id, monthId: month.id, memberId: member.id, capacity: 2 });
+      .values({
+        epicId: featureA.id,
+        monthId: month.id,
+        memberId: member.id,
+        capacity: 2,
+      });
 
     const updateTotal = router.allocations.updateTotal.callable({
       context: { db },

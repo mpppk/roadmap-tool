@@ -578,6 +578,19 @@
   color: var(--cv-red);
   background: var(--cv-red-bg);
 }
+.del-member-btn:disabled {
+  cursor: not-allowed;
+  color: var(--cv-text-3);
+  opacity: 0;
+}
+.td-member-label:hover .del-member-btn:disabled,
+.td-label:hover .del-member-btn:disabled {
+  opacity: 0.35;
+}
+.del-member-btn:disabled:hover {
+  color: var(--cv-text-3);
+  background: none;
+}
 .td-member-val {
   position: relative;
   text-align: center;

@@ -537,6 +537,8 @@ function FeatureNameCell({
   onRename,
   onDelete,
   onEditDetails,
+  deleteDisabled,
+  deleteDisabledTitle,
 }: {
   name: string;
   hasDescription: boolean;
@@ -544,6 +546,8 @@ function FeatureNameCell({
   onRename: (name: string) => Promise<string | undefined>;
   onDelete: () => void;
   onEditDetails: () => void;
+  deleteDisabled?: boolean;
+  deleteDisabledTitle?: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(name);
@@ -674,7 +678,8 @@ function FeatureNameCell({
           e.stopPropagation();
           onDelete();
         }}
-        title="Epicを削除"
+        disabled={deleteDisabled}
+        title={deleteDisabled ? deleteDisabledTitle : "Epicを削除"}
       >
         ×
       </button>
@@ -3280,6 +3285,8 @@ export function CapacityView({
                           onRename={(name) => renameEpic(epic.id, name)}
                           onDelete={() => deleteEpic(epic.id)}
                           onEditDetails={() => setEditingEpicDetails(epic)}
+                          deleteDisabled={epicFeatures.length > 0}
+                          deleteDisabledTitle="Epicが残っているInitiativeは削除できません"
                         />
                         {epicHasOverflow && (
                           <span

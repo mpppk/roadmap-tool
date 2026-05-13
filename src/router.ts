@@ -663,6 +663,7 @@ async function updateSingleMonthTotal(
       ),
     );
 
+  let adjustedSum = 0;
   for (const alloc of currentAllocs) {
     const ratio = oldTotal > 0 ? alloc.capacity / oldTotal : 0;
     const candidate = ratio * newTotal;
@@ -675,11 +676,21 @@ async function updateSingleMonthTotal(
     const maxCap = await getMemberMaxCapacity(db, alloc.memberId);
     const cap = Math.max(0, maxCap - usedElsewhere);
     const newValue = Math.min(candidate, cap);
+    adjustedSum += newValue;
 
     await db
       .update(memberMonthAllocations)
       .set({ capacity: newValue })
       .where(eq(memberMonthAllocations.id, alloc.id));
+  }
+
+  // When the stored totalCapacity was already below the sum of member allocations
+  // (invariant violation), the ratio-based redistribution can produce a member sum
+  // that still exceeds newTotal. Correct the budget upward in that case so the
+  // invariant totalCapacity >= sum(memberAllocations) is restored.
+  const normalizedSum = normalizeCapacity(adjustedSum);
+  if (normalizedSum > newTotal) {
+    await upsertEpicMonthTotal(db, epicId, monthId, normalizedSum);
   }
 }
 
@@ -1931,6 +1942,26 @@ const allocationsMoveQuarter = o
             capacity: merged,
           });
         }
+      }
+
+      // Ensure destination budget covers the actual member sum after merging.
+      // This handles cases where source data was already inconsistent
+      // (totalCapacity < sum of member allocations) or fromFm was null.
+      const toAllocsAfterMerge = await db
+        .select()
+        .from(memberMonthAllocations)
+        .where(
+          and(
+            eq(memberMonthAllocations.epicId, epicId),
+            eq(memberMonthAllocations.monthId, toMonth.id),
+          ),
+        );
+      const actualDestSum = normalizeCapacity(
+        toAllocsAfterMerge.reduce((s, a) => s + a.capacity, 0),
+      );
+      const toFmForCheck = await getEpicMonthRow(db, epicId, toMonth.id);
+      if (actualDestSum > (toFmForCheck?.totalCapacity ?? 0)) {
+        await upsertEpicMonthTotal(db, epicId, toMonth.id, actualDestSum);
       }
 
       await db

@@ -1345,4 +1345,45 @@ describe("allocation cap preserving operations", () => {
     expect(allocA?.capacity).toBeCloseTo(0.3);
     expect(fmA?.totalCapacity).toBeCloseTo(0.8);
   });
+
+  test("updateTotal corrects totalCapacity when member sum already exceeds it", async () => {
+    // Simulate a pre-existing inconsistent state where totalCapacity < sum(member allocations).
+    // This can arise from historical data bugs or certain moveQuarter edge cases.
+    // Calling updateTotal on such a month must not leave the invariant violated.
+    const testDb = createTestDb();
+    sqlite = testDb.sqlite;
+    const { db } = testDb;
+    const { featureA, member } = await seedBase(db);
+    const quarter = await createQuarterWithMonths(db, 2026, 3);
+    const month = quarter.months[0]!;
+
+    // Insert inconsistent state directly: budget=1.75 but member sum will be 2
+    await db
+      .insert(epicMonths)
+      .values({ epicId: featureA.id, monthId: month.id, totalCapacity: 1.75 });
+    await db
+      .insert(memberMonthAllocations)
+      .values({ epicId: featureA.id, monthId: month.id, memberId: member.id, capacity: 2 });
+
+    const updateTotal = router.allocations.updateTotal.callable({
+      context: { db },
+    });
+    // Calling updateTotal with the same buggy value triggers redistribution.
+    // The fix should detect sum > budget and raise the budget to match.
+    const result = await updateTotal({
+      epicId: featureA.id,
+      periodType: "month",
+      monthId: month.id,
+      totalCapacity: 1.75,
+    });
+
+    // After the fix: budget must be >= actual member sum (invariant restored)
+    const fm = await getFeatureMonth(db, featureA.id, month.id);
+    const alloc = await getAllocation(db, featureA.id, month.id, member.id);
+    expect(alloc!.capacity).toBeGreaterThanOrEqual(0);
+    expect(fm!.totalCapacity).toBeGreaterThanOrEqual(alloc!.capacity);
+    expect(result.months[0]!.totalCapacity).toBeGreaterThanOrEqual(
+      result.months[0]!.totalCapacity - result.months[0]!.unassignedCapacity,
+    );
+  });
 });

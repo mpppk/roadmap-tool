@@ -24,7 +24,8 @@ type CapacityAggMode = "total" | "average";
 type ImportMode = "append" | "sync";
 type Month = { id: number; year: number; month: number; quarterId: number };
 type Quarter = { id: number; year: number; quarter: number; months: Month[] };
-type Member = { id: number; name: string; maxCapacity: number | null };
+type Member = { id: number; name: string; maxCapacity: number | null }
+type Epic = { id: number; name: string; initiativeName: string | null };
 
 type CapacityConflictResolution =
   | "fitWithinLimit"
@@ -763,6 +764,16 @@ export function MembersView({
   const rangeEndRef = useRef(rangeEnd);
   rangeEndRef.current = rangeEnd;
   const [memberRows, setMemberRows] = useState<MemberRow[]>([]);
+  const [allEpics, setAllEpics] = useState<Epic[]>([]);
+  const [assigningMemberId, setAssigningMemberId] = useState<number | null>(
+    null,
+  );
+  const [removeEpicConfirm, setRemoveEpicConfirm] = useState<{
+    memberId: number;
+    memberName: string;
+    epicId: number;
+    epicName: string;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [actionWarning, setActionWarning] = useState<string | null>(null);
@@ -886,10 +897,23 @@ export function MembersView({
 
   const loadAll = useCallback(async () => {
     setLoading(true);
-    const [qs, ms] = await Promise.all([
+    const [qs, ms, es, is_] = await Promise.all([
       orpc.quarters.list({}),
       orpc.members.list({}),
+      orpc.epics.list({}),
+      orpc.initiatives.list({}),
     ]);
+
+    const initiativeMap = new Map(is_.map((i) => [i.id, i.name]));
+    setAllEpics(
+      es.map((e) => ({
+        id: e.id,
+        name: e.name,
+        initiativeName: e.initiativeId
+          ? (initiativeMap.get(e.initiativeId) ?? null)
+          : null,
+      })),
+    );
 
     const sortedQs = [...qs]
       .map((q) => ({
@@ -1345,6 +1369,58 @@ export function MembersView({
     [history],
   );
 
+  const refreshMemberRow = useCallback(async (memberId: number) => {
+    const mv = await orpc.allocations.getMemberView({ memberId });
+    const monthMap = new Map<number, MemberMonthData>();
+    for (const qd of mv.quarters) {
+      for (const md of qd.months) {
+        monthMap.set(md.month.id, {
+          totalCapacity: md.totalCapacity,
+          featureAllocations: md.epicAllocations.map((fa) => ({
+            featureId: fa.epic.id,
+            featureName: fa.epic.name,
+            epicName: fa.epic.initiative?.name ?? null,
+            capacity: fa.capacity,
+          })),
+        });
+      }
+    }
+    setMemberRows((rows) =>
+      rows.map((r) => (r.id === memberId ? { ...r, months: monthMap } : r)),
+    );
+  }, []);
+
+  const assignEpicToMember = useCallback(
+    async (memberId: number, epicId: number) => {
+      setBusy(true);
+      try {
+        await history.record("EpicをMemberに割り当て", async () => {
+          await orpc.allocations.assignMember({ epicId, memberId });
+          await refreshMemberRow(memberId);
+        });
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refreshMemberRow, history],
+  );
+
+  const removeEpicFromMember = useCallback(
+    async (memberId: number, epicId: number) => {
+      setBusy(true);
+      try {
+        await history.record("EpicをMemberから削除", async () => {
+          await orpc.allocations.removeMemberFromEpic({ epicId, memberId });
+          await refreshMemberRow(memberId);
+        });
+      } finally {
+        setBusy(false);
+        setRemoveEpicConfirm(null);
+      }
+    },
+    [refreshMemberRow, history],
+  );
+
   const runImportTSV = useCallback(async () => {
     setImporting(true);
     try {
@@ -1734,6 +1810,11 @@ export function MembersView({
                     }
                   }
 
+                  const assignedEpicIds = new Set(featureMap.keys());
+                  const unassignedEpics = allEpics.filter(
+                    (e) => !assignedEpicIds.has(e.id),
+                  );
+
                   if (featureMap.size === 0) {
                     rows.push(
                       <tr key={`${member.id}-empty`} className="tr-member">
@@ -1786,6 +1867,22 @@ export function MembersView({
                                   {featureInfo.epicName}
                                 </span>
                               )}
+                              <button
+                                type="button"
+                                className="member-delete-btn"
+                                title="このEpicの割り当てを削除"
+                                disabled={busy}
+                                onClick={() =>
+                                  setRemoveEpicConfirm({
+                                    memberId: member.id,
+                                    memberName: member.name,
+                                    epicId: featureId,
+                                    epicName: featureInfo.featureName,
+                                  })
+                                }
+                              >
+                                ×
+                              </button>
                             </span>
                             {renderLabelResizeBorder()}
                           </td>
@@ -1924,6 +2021,59 @@ export function MembersView({
                       );
                     }
                   }
+
+                  rows.push(
+                    <tr
+                      key={`${member.id}-assign-epic`}
+                      className="tr-assign-member"
+                    >
+                      <td className="td-assign td-assign-member">
+                        {assigningMemberId === member.id ? (
+                          <select
+                            className="assign-select"
+                            // biome-ignore lint/a11y/noAutofocus: intentional focus for inline dropdown
+                            autoFocus
+                            defaultValue=""
+                            onChange={(e) => {
+                              const id = Number(e.target.value);
+                              if (id) void assignEpicToMember(member.id, id);
+                              setAssigningMemberId(null);
+                            }}
+                            onBlur={() => setAssigningMemberId(null)}
+                          >
+                            <option value="" disabled>
+                              -- Epicを選択 --
+                            </option>
+                            {unassignedEpics.map((e) => (
+                              <option key={e.id} value={e.id}>
+                                {e.name}
+                                {e.initiativeName
+                                  ? ` (${e.initiativeName})`
+                                  : ""}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn-assign"
+                            disabled={busy || unassignedEpics.length === 0}
+                            onClick={() => setAssigningMemberId(member.id)}
+                          >
+                            + Epicを割り当て
+                          </button>
+                        )}
+                      </td>
+                      <td style={{ width: 80, minWidth: 80 }} />
+                      {columns.map((column) => (
+                        <td
+                          key={column.key}
+                          className="td-quarter"
+                          style={{ width: COL_W, minWidth: COL_W }}
+                        />
+                      ))}
+                    </tr>,
+                  );
                 }
 
                 return rows;
@@ -2077,6 +2227,52 @@ export function MembersView({
                   {importing ? "インポート中…" : "インポート"}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {removeEpicConfirm && (
+        // biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop closes on click
+        // biome-ignore lint/a11y/useKeyWithClickEvents: modal backdrop closes on click
+        <div
+          className="confirm-overlay"
+          onClick={() => setRemoveEpicConfirm(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="confirm-dialog"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Escape") setRemoveEpicConfirm(null);
+            }}
+          >
+            <p className="confirm-msg">
+              「{removeEpicConfirm.memberName}」から「
+              {removeEpicConfirm.epicName}」の割り当てを削除しますか？
+            </p>
+            <div className="confirm-actions">
+              <button
+                type="button"
+                className="btn-sm btn-danger"
+                onClick={() =>
+                  void removeEpicFromMember(
+                    removeEpicConfirm.memberId,
+                    removeEpicConfirm.epicId,
+                  )
+                }
+              >
+                削除
+              </button>
+              <button
+                type="button"
+                className="btn-sm"
+                onClick={() => setRemoveEpicConfirm(null)}
+              >
+                キャンセル
+              </button>
             </div>
           </div>
         </div>

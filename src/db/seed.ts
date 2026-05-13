@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 /**
  * DB seed script — populates db.sqlite with sample data via the running server.
  *
@@ -12,11 +13,11 @@
  * Quarters (no CLI import available) are created via the oRPC client.
  */
 
-import { $ } from "bun";
 import { join } from "node:path";
 import { createORPCClient } from "@orpc/client";
 import { RPCLink } from "@orpc/client/fetch";
 import type { RouterClient } from "@orpc/server";
+import { $ } from "bun";
 import type { AppRouter } from "../router";
 import { getLocalBaseUrl } from "../runtime-config";
 

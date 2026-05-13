@@ -41,3 +41,4 @@ db.sqlite-shm
 
 # playwright-cli session data
 .playwright-cli
+*.png

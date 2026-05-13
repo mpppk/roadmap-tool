@@ -1407,17 +1407,43 @@ const epicsMove = o
 
 const membersList = o
   .input(z.object({}))
-  .handler(async ({ context }) => context.db.select().from(members).all());
+  .handler(async ({ context }) =>
+    context.db
+      .select()
+      .from(members)
+      .orderBy(asc(members.position), asc(members.id))
+      .all(),
+  );
+
+async function nextMemberPosition(db: typeof DbType): Promise<number> {
+  const result = await db
+    .select({ maxPos: sql<number>`COALESCE(MAX(${members.position}), -1)` })
+    .from(members);
+  return (result[0]?.maxPos ?? -1) + 1;
+}
+
+async function resequenceMembers(
+  db: typeof DbType,
+  orderedIds: number[],
+): Promise<void> {
+  for (let index = 0; index < orderedIds.length; index++) {
+    await db
+      .update(members)
+      .set({ position: index })
+      .where(eq(members.id, orderedIds[index]!));
+  }
+}
 
 const membersCreate = o
   .input(z.object({ name: z.string() }))
   .handler(async ({ input, context }) => {
     const name = normalizeNameInput(input.name, "member");
     await assertMemberNameAvailable(context.db, name);
+    const position = await nextMemberPosition(context.db);
     try {
       const [row] = await context.db
         .insert(members)
-        .values({ name })
+        .values({ name, position })
         .returning();
       return row;
     } catch (error) {
@@ -1462,6 +1488,37 @@ const membersSetMaxCapacity = o
       .where(eq(members.id, input.id))
       .returning();
     return row;
+  });
+
+const membersMove = o
+  .input(
+    z.object({
+      id: z.number().int(),
+      beforeId: z.number().int().optional(),
+      afterId: z.number().int().optional(),
+    }),
+  )
+  .handler(async ({ input, context }) => {
+    const rows = await context.db
+      .select({ id: members.id })
+      .from(members)
+      .orderBy(asc(members.position), asc(members.id))
+      .all();
+    if (!rows.some((row) => row.id === input.id)) {
+      throw new ORPCError("NOT_FOUND", { message: "Member not found" });
+    }
+    const orderedIds = insertMovedId(
+      rows.map((row) => row.id),
+      input.id,
+      input.beforeId,
+      input.afterId,
+    );
+    await resequenceMembers(context.db, orderedIds);
+    return context.db
+      .select()
+      .from(members)
+      .orderBy(asc(members.position), asc(members.id))
+      .all();
   });
 
 const membersGetCapacitySummary = o
@@ -3394,6 +3451,7 @@ export const router = {
     rename: membersRename,
     delete: membersDelete,
     setMaxCapacity: membersSetMaxCapacity,
+    move: membersMove,
     getCapacitySummary: membersGetCapacitySummary,
   },
   quarters: {

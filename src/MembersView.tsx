@@ -1869,7 +1869,7 @@ export function MembersView({
                               )}
                               <button
                                 type="button"
-                                className="member-delete-btn"
+                                className="del-member-btn"
                                 title="このEpicの割り当てを削除"
                                 disabled={busy}
                                 onClick={() =>

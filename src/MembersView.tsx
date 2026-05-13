@@ -1794,14 +1794,15 @@ export function MembersView({
                   >
                     <td className="td-label">
                       <div className="td-label-inner">
-                        <span
+                        <button
+                          type="button"
                           className="drag-handle"
                           draggable
                           onDragStart={() => setDraggingMemberId(member.id)}
                           onDragEnd={() => setDraggingMemberId(null)}
                         >
                           <GripVertical size={14} />
-                        </span>
+                        </button>
                         <button
                           type="button"
                           className="toggle-btn"

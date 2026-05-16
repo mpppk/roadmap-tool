@@ -2227,9 +2227,11 @@ const exportAllocationTSV = o
       "キャパシティ",
       "月",
     ].join("\t");
+    const allocatedEpicIds = new Set<number>();
     const rows = maRows
       .filter((r) => r.capacity > 0)
       .flatMap((r) => {
+        allocatedEpicIds.add(r.epicId);
         const epic = epicById.get(r.epicId);
         const epicName = epic?.name ?? "";
         const memberName = memberById.get(r.memberId) ?? "";
@@ -2247,6 +2249,20 @@ const exportAllocationTSV = o
           ].join("\t"),
         ];
       });
+    for (const epic of allEpics) {
+      if (allocatedEpicIds.has(epic.id)) continue;
+      rows.push(
+        [
+          tsvCell(initiativeById.get(epic.initiativeId) ?? ""),
+          tsvCell(epic.name),
+          epic.id,
+          "",
+          "",
+          0,
+          "",
+        ].join("\t"),
+      );
+    }
 
     return [header, ...rows].join("\n");
   });
@@ -2873,6 +2889,16 @@ const tsvImport = o
 
       if (!epicName) {
         errors.push({ row: rowNum, message: "Epic名が空です" });
+        skipped++;
+        continue;
+      }
+      const isZeroCapacityPlaceholder =
+        capacityStr !== "" &&
+        Number(capacityStr) === 0 &&
+        !memberName &&
+        !rawMemberId &&
+        !monthStr;
+      if (isZeroCapacityPlaceholder) {
         skipped++;
         continue;
       }

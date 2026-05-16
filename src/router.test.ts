@@ -68,6 +68,7 @@ function createTestDb() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       max_capacity REAL,
+      position INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       CONSTRAINT members_name_trimmed_check CHECK (name = trim(name)),
       CONSTRAINT members_name_not_empty_check CHECK (length(name) > 0),
@@ -536,6 +537,33 @@ describe("feature metadata", () => {
     expect(members.some((m) => m.name === "Alice")).toBe(true);
   });
 
+  test("imports allocation tsv zero placeholder rows without creating allocations", async () => {
+    const createFeature = router.epics.create.callable({
+      context: { db: state.db },
+    });
+    const importTsv = router.import.tsvImport.callable({
+      context: { db: state.db },
+    });
+
+    const feature = await createFeature({ name: "Auth" });
+    const result = await importTsv({
+      tsv: [
+        "Initiative\tEpic\tepic_id\t担当者\tmember_id\tキャパシティ\t月",
+        `未分類\tAuth\t${feature!.id}\t\t\t0\t`,
+      ].join("\n"),
+    });
+
+    expect(result.success).toBe(0);
+    expect(result.skipped).toBe(1);
+    expect(result.errors).toHaveLength(0);
+
+    const allocations = await state.db
+      .select()
+      .from(memberMonthAllocations)
+      .all();
+    expect(allocations).toHaveLength(0);
+  });
+
   test("imports allocation tsv with feature_id and member_id for rename tracking", async () => {
     const createQuarter = router.quarters.create.callable({
       context: { db: state.db },
@@ -673,6 +701,71 @@ describe("feature metadata", () => {
     const memberIdCol = headerCols.indexOf("member_id");
     expect(Number(cols[epicIdCol])).toBe(feature!.id);
     expect(Number(cols[memberIdCol])).toBe(member!.id);
+  });
+
+  test("exports allocationTSV with zero placeholder rows for unallocated features", async () => {
+    const createQuarter = router.quarters.create.callable({
+      context: { db: state.db },
+    });
+    const createFeature = router.epics.create.callable({
+      context: { db: state.db },
+    });
+    const createMember = router.members.create.callable({
+      context: { db: state.db },
+    });
+    const assignMember = router.allocations.assignMember.callable({
+      context: { db: state.db },
+    });
+    const exportTsv = router.export.allocationTSV.callable({
+      context: { db: state.db },
+    });
+
+    await createQuarter({ year: 2026, quarter: 2 });
+    const allocated = await createFeature({ name: "Auth" });
+    const unallocated = await createFeature({ name: "Search" });
+    const zeroOnly = await createFeature({ name: "Reports" });
+    const member = await createMember({ name: "Alice" });
+    await assignMember({ epicId: allocated!.id, memberId: member!.id });
+    await assignMember({ epicId: zeroOnly!.id, memberId: member!.id });
+
+    await router.allocations.updateMemberAllocation.callable({
+      context: { db: state.db },
+    })({
+      epicId: allocated!.id,
+      memberId: member!.id,
+      periodType: "month",
+      monthId: (await state.db.select().from(months).all())[0]!.id,
+      capacity: 0.5,
+    });
+
+    const tsv = await exportTsv({});
+    const [header, ...dataLines] = tsv.split("\n");
+    const headerCols = header!.split("\t");
+    const epicCol = headerCols.indexOf("Epic");
+    const epicIdCol = headerCols.indexOf("epic_id");
+    const memberCol = headerCols.indexOf("担当者");
+    const memberIdCol = headerCols.indexOf("member_id");
+    const capacityCol = headerCols.indexOf("キャパシティ");
+    const monthCol = headerCols.indexOf("月");
+    const rowsByEpic = new Map(
+      dataLines.map((line) => {
+        const cols = line.split("\t");
+        return [cols[epicCol], cols] as const;
+      }),
+    );
+
+    expect(rowsByEpic.get("Auth")?.[capacityCol]).toBe("0.5");
+    expect(rowsByEpic.get("Auth")?.[memberCol]).toBe("Alice");
+    expect(rowsByEpic.get("Auth")?.[monthCol]).toBe("2026-04");
+
+    for (const feature of [unallocated, zeroOnly]) {
+      const row = rowsByEpic.get(feature!.name);
+      expect(row?.[epicIdCol]).toBe(String(feature!.id));
+      expect(row?.[memberCol]).toBe("");
+      expect(row?.[memberIdCol]).toBe("");
+      expect(row?.[capacityCol]).toBe("0");
+      expect(row?.[monthCol]).toBe("");
+    }
   });
 
   test("featureMetadataCSVImport uses feature_id for rename tracking", async () => {

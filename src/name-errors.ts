@@ -48,7 +48,8 @@ function resourceMessage(resource: unknown): string | null {
   if (resource === "member") return NAME_ERROR_MESSAGES.member;
   if (resource === "initiative") return NAME_ERROR_MESSAGES.initiative;
   if (resource === "vision") return NAME_ERROR_MESSAGES.vision;
-  if (resource === "strategicIntent") return NAME_ERROR_MESSAGES.strategicIntent;
+  if (resource === "strategicIntent")
+    return NAME_ERROR_MESSAGES.strategicIntent;
   return null;
 }
 

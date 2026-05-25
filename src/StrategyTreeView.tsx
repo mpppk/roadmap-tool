@@ -228,9 +228,7 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
       }
       cancelEdit();
     } catch (error) {
-      setEditingError(
-        getNameErrorMessage(error) ?? "保存できませんでした。",
-      );
+      setEditingError(getNameErrorMessage(error) ?? "保存できませんでした。");
     }
   }
 
@@ -314,8 +312,9 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
   ) {
     let warning = "";
     if (type === "vision") {
-      const siCount = strategicIntents.filter((si) => si.visionId === id)
-        .length;
+      const siCount = strategicIntents.filter(
+        (si) => si.visionId === id,
+      ).length;
       if (siCount > 0) {
         warning = `この Vision には ${siCount} 件の Strategic Intent が含まれます。削除すると紐付く Initiative の関連も解除されます。`;
       }
@@ -389,10 +388,7 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
     );
     const created = await orpc.visions.create({ name });
     if (!created) return;
-    setVisions((vs) => [
-      ...vs,
-      { ...created, expanded: true },
-    ]);
+    setVisions((vs) => [...vs, { ...created, expanded: true }]);
     startEdit({ type: "vision", id: created.id }, created.name);
   }
 
@@ -401,10 +397,7 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
     const name = nextAvailableGeneratedName("Strategic Intent", siNames);
     const created = await orpc.strategicIntents.create({ visionId, name });
     if (!created) return;
-    setStrategicIntents((sis) => [
-      ...sis,
-      { ...created, expanded: true },
-    ]);
+    setStrategicIntents((sis) => [...sis, { ...created, expanded: true }]);
     setVisions((vs) =>
       vs.map((v) => (v.id === visionId ? { ...v, expanded: true } : v)),
     );
@@ -479,17 +472,13 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
 
   function toggleSI(id: number) {
     setStrategicIntents((sis) =>
-      sis.map((si) =>
-        si.id === id ? { ...si, expanded: !si.expanded } : si,
-      ),
+      sis.map((si) => (si.id === id ? { ...si, expanded: !si.expanded } : si)),
     );
   }
 
   function toggleInitiative(id: number) {
     setInitiatives((inits) =>
-      inits.map((i) =>
-        i.id === id ? { ...i, expanded: !i.expanded } : i,
-      ),
+      inits.map((i) => (i.id === id ? { ...i, expanded: !i.expanded } : i)),
     );
   }
 
@@ -532,14 +521,23 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
       if (dragItem.type === "vision") {
         const updated = await orpc.visions.move({ id, beforeId: targetId });
         const expandMap = new Map(visions.map((v) => [v.id, v.expanded]));
-        setVisions(updated.map((v) => ({ ...v, expanded: expandMap.get(v.id) ?? true })));
+        setVisions(
+          updated.map((v) => ({ ...v, expanded: expandMap.get(v.id) ?? true })),
+        );
       } else if (dragItem.type === "si") {
         const updated = await orpc.strategicIntents.move({
           id,
           beforeId: targetId,
         });
-        const expandMap = new Map(strategicIntents.map((si) => [si.id, si.expanded]));
-        setStrategicIntents(updated.map((si) => ({ ...si, expanded: expandMap.get(si.id) ?? true })));
+        const expandMap = new Map(
+          strategicIntents.map((si) => [si.id, si.expanded]),
+        );
+        setStrategicIntents(
+          updated.map((si) => ({
+            ...si,
+            expanded: expandMap.get(si.id) ?? true,
+          })),
+        );
       } else {
         const updated = await orpc.initiatives.move({ id, beforeId: targetId });
         const expandMap = new Map(initiatives.map((i) => [i.id, i.expanded]));
@@ -640,10 +638,14 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
           const visionSIs = strategicIntents.filter(
             (si) => si.visionId === vision.id,
           );
-          const isVisionDragOver = dropTargetId === vision.id && dragItem?.type === "vision";
+          const isVisionDragOver =
+            dropTargetId === vision.id && dragItem?.type === "vision";
 
           return (
-            <div key={vision.id} className={`st-vision-block${isVisionDragOver ? " st-drag-over" : ""}`}>
+            <div
+              key={vision.id}
+              className={`st-vision-block${isVisionDragOver ? " st-drag-over" : ""}`}
+            >
               {/* Vision row */}
               {/* biome-ignore lint/a11y/noStaticElementInteractions: drag-and-drop target */}
               <div
@@ -655,7 +657,9 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
                   type="button"
                   className="st-grip"
                   draggable
-                  onDragStart={() => handleDragStart({ type: "vision", id: vision.id })}
+                  onDragStart={() =>
+                    handleDragStart({ type: "vision", id: vision.id })
+                  }
                   onDragEnd={handleDragEnd}
                   title="ドラッグして並び替え"
                   aria-label="ドラッグして並び替え"
@@ -788,7 +792,10 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
                       dropTargetId === si.id && dragItem?.type === "si";
 
                     return (
-                      <div key={si.id} className={`st-si-block${isSIDragOver ? " st-drag-over" : ""}`}>
+                      <div
+                        key={si.id}
+                        className={`st-si-block${isSIDragOver ? " st-drag-over" : ""}`}
+                      >
                         {/* Strategic Intent row */}
                         {/* biome-ignore lint/a11y/noStaticElementInteractions: drag-and-drop target */}
                         <div
@@ -824,9 +831,7 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
                               <ChevronRight size={14} />
                             )}
                           </button>
-                          <span className="st-layer-badge st-badge-si">
-                            SI
-                          </span>
+                          <span className="st-layer-badge st-badge-si">SI</span>
                           {editingNode?.type === "si" &&
                           editingNode.id === si.id ? (
                             <div className="st-inline-edit">
@@ -844,12 +849,10 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
                                   if (e.key === "Escape") cancelEdit();
                                 }}
                                 // biome-ignore lint/a11y/noAutofocus: intentional focus for inline editing
-                      autoFocus
+                                autoFocus
                               />
                               {editingError && (
-                                <span className="st-error">
-                                  {editingError}
-                                </span>
+                                <span className="st-error">{editingError}</span>
                               )}
                             </div>
                           ) : (
@@ -957,9 +960,7 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
                                     onDragOver={(e) =>
                                       handleDragOver(e, init.id, "initiative")
                                     }
-                                    onDrop={(e) =>
-                                      void handleDrop(e, init.id)
-                                    }
+                                    onDrop={(e) => void handleDrop(e, init.id)}
                                   >
                                     <button
                                       type="button"
@@ -1017,7 +1018,7 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
                                               cancelEdit();
                                           }}
                                           // biome-ignore lint/a11y/noAutofocus: intentional focus for inline editing
-                      autoFocus
+                                          autoFocus
                                         />
                                         {editingError && (
                                           <span className="st-error">
@@ -1154,7 +1155,9 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
                             <button
                               type="button"
                               className="st-add-child-btn"
-                              onClick={() => void createInitiativeUnderSI(si.id)}
+                              onClick={() =>
+                                void createInitiativeUnderSI(si.id)
+                              }
                             >
                               <Plus size={12} />
                               Initiative を追加
@@ -1195,9 +1198,7 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
           <div className="st-unclassified">
             <div className="st-unclassified-header">未分類 Initiatives</div>
             {unclassifiedInitiatives.map((init) => {
-              const initEpics = epics.filter(
-                (e) => e.initiativeId === init.id,
-              );
+              const initEpics = epics.filter((e) => e.initiativeId === init.id);
               const isInitDragOver =
                 dropTargetId === init.id && dragItem?.type === "initiative";
 
@@ -1209,9 +1210,7 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
                   {/* biome-ignore lint/a11y/noStaticElementInteractions: drag-and-drop target */}
                   <div
                     className="st-node st-layer-initiative"
-                    onDragOver={(e) =>
-                      handleDragOver(e, init.id, "initiative")
-                    }
+                    onDragOver={(e) => handleDragOver(e, init.id, "initiative")}
                     onDrop={(e) => void handleDrop(e, init.id)}
                   >
                     <button
@@ -1265,7 +1264,7 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
                             if (e.key === "Escape") cancelEdit();
                           }}
                           // biome-ignore lint/a11y/noAutofocus: intentional focus for inline editing
-                      autoFocus
+                          autoFocus
                         />
                         {editingError && (
                           <span className="st-error">{editingError}</span>
@@ -1359,10 +1358,7 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
                   {init.expanded && initEpics.length > 0 && (
                     <div className="st-epic-list">
                       {initEpics.map((epic) => (
-                        <div
-                          key={epic.id}
-                          className="st-node st-layer-epic"
-                        >
+                        <div key={epic.id} className="st-node st-layer-epic">
                           <span className="st-epic-bullet">·</span>
                           <span className="st-layer-badge st-badge-epic">
                             Epic
@@ -1383,10 +1379,7 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
       {descDialog && (
         // biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop closes on click; keyboard handled by dialog via Escape
         // biome-ignore lint/a11y/useKeyWithClickEvents: modal backdrop closes on click; keyboard handled by dialog via Escape
-        <div
-          className="confirm-overlay"
-          onClick={() => setDescDialog(null)}
-        >
+        <div className="confirm-overlay" onClick={() => setDescDialog(null)}>
           <div
             className="confirm-dialog st-desc-dialog"
             role="dialog"
@@ -1409,9 +1402,7 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
               className="st-desc-textarea"
               value={descDialog.value}
               onChange={(e) =>
-                setDescDialog((d) =>
-                  d ? { ...d, value: e.target.value } : d,
-                )
+                setDescDialog((d) => (d ? { ...d, value: e.target.value } : d))
               }
               placeholder="説明を入力（任意）"
               rows={6}
@@ -1441,10 +1432,7 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
       {deleteDialog && (
         // biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop closes on click; keyboard handled by dialog via Escape
         // biome-ignore lint/a11y/useKeyWithClickEvents: modal backdrop closes on click; keyboard handled by dialog via Escape
-        <div
-          className="confirm-overlay"
-          onClick={() => setDeleteDialog(null)}
-        >
+        <div className="confirm-overlay" onClick={() => setDeleteDialog(null)}>
           <div
             className="confirm-dialog"
             role="dialog"
@@ -1485,10 +1473,7 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
       {moveDialog && (
         // biome-ignore lint/a11y/noStaticElementInteractions: modal backdrop closes on click; keyboard handled by dialog via Escape
         // biome-ignore lint/a11y/useKeyWithClickEvents: modal backdrop closes on click; keyboard handled by dialog via Escape
-        <div
-          className="confirm-overlay"
-          onClick={() => setMoveDialog(null)}
-        >
+        <div className="confirm-overlay" onClick={() => setMoveDialog(null)}>
           <div
             className="confirm-dialog st-move-dialog"
             role="dialog"
@@ -1505,9 +1490,7 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
             >
               <X size={16} />
             </button>
-            <h2 className="st-dialog-title">
-              「{moveDialog.name}」を移動
-            </h2>
+            <h2 className="st-dialog-title">「{moveDialog.name}」を移動</h2>
             <p className="st-dialog-label">移動先 Strategic Intent</p>
             <select
               className="st-move-select"

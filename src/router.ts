@@ -1118,8 +1118,7 @@ async function assertStrategicIntentNameAvailable(
     .select({ id: strategicIntents.id })
     .from(strategicIntents)
     .where(where);
-  if (existing.length > 0)
-    throwNameError("strategicIntent", "DUPLICATE_NAME");
+  if (existing.length > 0) throwNameError("strategicIntent", "DUPLICATE_NAME");
 }
 
 async function resequenceVisions(db: typeof DbType, orderedIds: number[]) {

@@ -47,10 +47,7 @@ export const strategicIntents = sqliteTable(
       "strategic_intents_name_trimmed_check",
       sql`${t.name} = trim(${t.name})`,
     ),
-    check(
-      "strategic_intents_name_not_empty_check",
-      sql`length(${t.name}) > 0`,
-    ),
+    check("strategic_intents_name_not_empty_check", sql`length(${t.name}) > 0`),
     check("strategic_intents_position_check", sql`${t.position} >= 0`),
     uniqueIndex("strategic_intents_name_trim_unique").on(sql`trim(${t.name})`),
   ],

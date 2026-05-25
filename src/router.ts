@@ -12,6 +12,8 @@ import {
   members,
   months,
   quarters,
+  strategicIntents,
+  visions,
 } from "./db/schema";
 import {
   NAME_ERROR_MESSAGES,
@@ -228,7 +230,11 @@ function rethrowNameMutationError(
       ? "epics"
       : resource === "member"
         ? "members"
-        : "initiatives";
+        : resource === "vision"
+          ? "visions"
+          : resource === "strategicIntent"
+            ? "strategic_intents"
+            : "initiatives";
   if (
     sqliteError?.code === "SQLITE_CONSTRAINT_UNIQUE" &&
     (message.includes(`${tableName}.name`) ||
@@ -1077,6 +1083,320 @@ async function resequenceEpics(
 }
 
 // ---------------------------------------------------------------------------
+// Visions & Strategic Intents helpers
+// ---------------------------------------------------------------------------
+
+async function assertVisionNameAvailable(
+  db: typeof DbType,
+  name: string,
+  excludeId?: number,
+): Promise<void> {
+  const where =
+    excludeId === undefined
+      ? sql`trim(${visions.name}) = ${name}`
+      : and(sql`trim(${visions.name}) = ${name}`, ne(visions.id, excludeId));
+  const existing = await db
+    .select({ id: visions.id })
+    .from(visions)
+    .where(where);
+  if (existing.length > 0) throwNameError("vision", "DUPLICATE_NAME");
+}
+
+async function assertStrategicIntentNameAvailable(
+  db: typeof DbType,
+  name: string,
+  excludeId?: number,
+): Promise<void> {
+  const where =
+    excludeId === undefined
+      ? sql`trim(${strategicIntents.name}) = ${name}`
+      : and(
+          sql`trim(${strategicIntents.name}) = ${name}`,
+          ne(strategicIntents.id, excludeId),
+        );
+  const existing = await db
+    .select({ id: strategicIntents.id })
+    .from(strategicIntents)
+    .where(where);
+  if (existing.length > 0)
+    throwNameError("strategicIntent", "DUPLICATE_NAME");
+}
+
+async function resequenceVisions(db: typeof DbType, orderedIds: number[]) {
+  for (let index = 0; index < orderedIds.length; index++) {
+    await db
+      .update(visions)
+      .set({ position: index })
+      .where(eq(visions.id, orderedIds[index]!));
+  }
+}
+
+async function resequenceStrategicIntents(
+  db: typeof DbType,
+  visionId: number,
+  orderedIds: number[],
+) {
+  const tempOffset = 1_000_000;
+  for (let index = 0; index < orderedIds.length; index++) {
+    await db
+      .update(strategicIntents)
+      .set({ position: tempOffset + index })
+      .where(eq(strategicIntents.id, orderedIds[index]!));
+  }
+  for (let index = 0; index < orderedIds.length; index++) {
+    await db
+      .update(strategicIntents)
+      .set({ visionId, position: index })
+      .where(eq(strategicIntents.id, orderedIds[index]!));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Visions
+// ---------------------------------------------------------------------------
+
+const visionsList = o.input(z.object({})).handler(async ({ context }) => {
+  return context.db
+    .select()
+    .from(visions)
+    .orderBy(asc(visions.position), asc(visions.id))
+    .all();
+});
+
+const visionsCreate = o
+  .input(
+    z.object({
+      name: z.string(),
+      description: z.string().nullable().optional(),
+    }),
+  )
+  .handler(async ({ input, context }) => {
+    const name = normalizeNameInput(input.name, "vision");
+    const description = normalizeFeatureDescriptionInput(input.description);
+    await assertVisionNameAvailable(context.db, name);
+    const [last] = await context.db
+      .select({ position: visions.position })
+      .from(visions)
+      .orderBy(sql`${visions.position} DESC`, sql`${visions.id} DESC`)
+      .limit(1);
+    try {
+      const [row] = await context.db
+        .insert(visions)
+        .values({
+          name,
+          description: description ?? null,
+          position: (last?.position ?? -1) + 1,
+        })
+        .returning();
+      return row;
+    } catch (error) {
+      rethrowNameMutationError("vision", error);
+    }
+  });
+
+const visionsUpdate = o
+  .input(
+    z.object({
+      id: z.number().int(),
+      name: z.string(),
+      description: z.string().nullable().optional(),
+    }),
+  )
+  .handler(async ({ input, context }) => {
+    const name = normalizeNameInput(input.name, "vision");
+    const description = normalizeFeatureDescriptionInput(input.description);
+    await assertVisionNameAvailable(context.db, name, input.id);
+    try {
+      const values: { name: string; description?: string | null } = { name };
+      if (description !== undefined) values.description = description;
+      const [row] = await context.db
+        .update(visions)
+        .set(values)
+        .where(eq(visions.id, input.id))
+        .returning();
+      return row;
+    } catch (error) {
+      rethrowNameMutationError("vision", error);
+    }
+  });
+
+const visionsDelete = o
+  .input(z.object({ id: z.number().int() }))
+  .handler(async ({ input, context }) => {
+    await context.db.delete(visions).where(eq(visions.id, input.id));
+  });
+
+const visionsMove = o
+  .input(
+    z.object({
+      id: z.number().int(),
+      beforeId: z.number().int().optional(),
+      afterId: z.number().int().optional(),
+    }),
+  )
+  .handler(async ({ input, context }) => {
+    const rows = await context.db
+      .select({ id: visions.id })
+      .from(visions)
+      .orderBy(asc(visions.position), asc(visions.id))
+      .all();
+    if (!rows.some((row) => row.id === input.id)) {
+      throw new ORPCError("NOT_FOUND", { message: "Vision not found" });
+    }
+    const orderedIds = insertMovedId(
+      rows.map((row) => row.id),
+      input.id,
+      input.beforeId,
+      input.afterId,
+    );
+    await resequenceVisions(context.db, orderedIds);
+    return context.db
+      .select()
+      .from(visions)
+      .orderBy(asc(visions.position), asc(visions.id))
+      .all();
+  });
+
+// ---------------------------------------------------------------------------
+// Strategic Intents
+// ---------------------------------------------------------------------------
+
+const strategicIntentsList = o
+  .input(z.object({ visionId: z.number().int().optional() }))
+  .handler(async ({ input, context }) => {
+    const where = input.visionId
+      ? eq(strategicIntents.visionId, input.visionId)
+      : undefined;
+    return context.db
+      .select()
+      .from(strategicIntents)
+      .where(where)
+      .orderBy(
+        asc(strategicIntents.visionId),
+        asc(strategicIntents.position),
+        asc(strategicIntents.id),
+      )
+      .all();
+  });
+
+const strategicIntentsCreate = o
+  .input(
+    z.object({
+      visionId: z.number().int(),
+      name: z.string(),
+      description: z.string().nullable().optional(),
+    }),
+  )
+  .handler(async ({ input, context }) => {
+    const name = normalizeNameInput(input.name, "strategicIntent");
+    const description = normalizeFeatureDescriptionInput(input.description);
+    await assertStrategicIntentNameAvailable(context.db, name);
+    const [last] = await context.db
+      .select({ position: strategicIntents.position })
+      .from(strategicIntents)
+      .where(eq(strategicIntents.visionId, input.visionId))
+      .orderBy(
+        sql`${strategicIntents.position} DESC`,
+        sql`${strategicIntents.id} DESC`,
+      )
+      .limit(1);
+    try {
+      const [row] = await context.db
+        .insert(strategicIntents)
+        .values({
+          visionId: input.visionId,
+          name,
+          description: description ?? null,
+          position: (last?.position ?? -1) + 1,
+        })
+        .returning();
+      return row;
+    } catch (error) {
+      rethrowNameMutationError("strategicIntent", error);
+    }
+  });
+
+const strategicIntentsUpdate = o
+  .input(
+    z.object({
+      id: z.number().int(),
+      name: z.string(),
+      description: z.string().nullable().optional(),
+    }),
+  )
+  .handler(async ({ input, context }) => {
+    const name = normalizeNameInput(input.name, "strategicIntent");
+    const description = normalizeFeatureDescriptionInput(input.description);
+    await assertStrategicIntentNameAvailable(context.db, name, input.id);
+    try {
+      const values: { name: string; description?: string | null } = { name };
+      if (description !== undefined) values.description = description;
+      const [row] = await context.db
+        .update(strategicIntents)
+        .set(values)
+        .where(eq(strategicIntents.id, input.id))
+        .returning();
+      return row;
+    } catch (error) {
+      rethrowNameMutationError("strategicIntent", error);
+    }
+  });
+
+const strategicIntentsDelete = o
+  .input(z.object({ id: z.number().int() }))
+  .handler(async ({ input, context }) => {
+    await context.db
+      .update(initiatives)
+      .set({ strategicIntentId: null })
+      .where(eq(initiatives.strategicIntentId, input.id));
+    await context.db
+      .delete(strategicIntents)
+      .where(eq(strategicIntents.id, input.id));
+  });
+
+const strategicIntentsMove = o
+  .input(
+    z.object({
+      id: z.number().int(),
+      beforeId: z.number().int().optional(),
+      afterId: z.number().int().optional(),
+    }),
+  )
+  .handler(async ({ input, context }) => {
+    const [current] = await context.db
+      .select({ visionId: strategicIntents.visionId })
+      .from(strategicIntents)
+      .where(eq(strategicIntents.id, input.id));
+    if (!current) {
+      throw new ORPCError("NOT_FOUND", {
+        message: "Strategic Intent not found",
+      });
+    }
+    const rows = await context.db
+      .select({ id: strategicIntents.id })
+      .from(strategicIntents)
+      .where(eq(strategicIntents.visionId, current.visionId))
+      .orderBy(asc(strategicIntents.position), asc(strategicIntents.id))
+      .all();
+    const orderedIds = insertMovedId(
+      rows.map((row) => row.id),
+      input.id,
+      input.beforeId,
+      input.afterId,
+    );
+    await resequenceStrategicIntents(context.db, current.visionId, orderedIds);
+    return context.db
+      .select()
+      .from(strategicIntents)
+      .orderBy(
+        asc(strategicIntents.visionId),
+        asc(strategicIntents.position),
+        asc(strategicIntents.id),
+      )
+      .all();
+  });
+
+// ---------------------------------------------------------------------------
 // History
 // ---------------------------------------------------------------------------
 
@@ -1248,6 +1568,22 @@ const initiativesMove = o
         buildInitiativeDto(context.db, initiative),
       ),
     );
+  });
+
+const initiativesSetStrategicIntent = o
+  .input(
+    z.object({
+      id: z.number().int(),
+      strategicIntentId: z.number().int().nullable(),
+    }),
+  )
+  .handler(async ({ input, context }) => {
+    const [row] = await context.db
+      .update(initiatives)
+      .set({ strategicIntentId: input.strategicIntentId })
+      .where(eq(initiatives.id, input.id))
+      .returning();
+    return row;
   });
 
 // ---------------------------------------------------------------------------
@@ -3431,12 +3767,27 @@ export const router = {
     snapshot: historySnapshot,
     restore: historyRestore,
   },
+  visions: {
+    list: visionsList,
+    create: visionsCreate,
+    update: visionsUpdate,
+    delete: visionsDelete,
+    move: visionsMove,
+  },
+  strategicIntents: {
+    list: strategicIntentsList,
+    create: strategicIntentsCreate,
+    update: strategicIntentsUpdate,
+    delete: strategicIntentsDelete,
+    move: strategicIntentsMove,
+  },
   initiatives: {
     list: initiativesList,
     create: initiativesCreate,
     rename: initiativesRename,
     delete: initiativesDelete,
     move: initiativesMove,
+    setStrategicIntent: initiativesSetStrategicIntent,
   },
   epics: {
     list: epicsList,

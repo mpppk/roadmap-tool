@@ -14,6 +14,9 @@ import migration0004 from "../../drizzle/0004_feature_metadata.sql" with {
 import migration0008 from "../../drizzle/0008_member_position.sql" with {
   type: "text",
 };
+import migration0009 from "../../drizzle/0009_strategy_tree.sql" with {
+  type: "text",
+};
 import { trimSqliteSpaces } from "../name-errors";
 
 type Migration = {
@@ -55,6 +58,7 @@ const MIGRATIONS: Migration[] = [
     transaction: false,
   },
   { name: "0008_member_position", sql: migration0008 },
+  { name: "0009_strategy_tree", sql: migration0009 },
 ];
 
 function normalizedNameRows(

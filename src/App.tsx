@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CapacityView } from "./CapacityView";
 import type { HistoryController, RoadmapSnapshot } from "./history-client";
 import { MembersView } from "./MembersView";
+import { StrategyTreeView } from "./StrategyTreeView";
 import { orpc, roadmapClientId } from "./orpc-client";
 
 type HistoryEntry = {
@@ -254,6 +255,13 @@ export function App() {
   if (path === "/members")
     return (
       <MembersView
+        history={history}
+        externalDataVersion={externalDataVersion}
+      />
+    );
+  if (path === "/strategy")
+    return (
+      <StrategyTreeView
         history={history}
         externalDataVersion={externalDataVersion}
       />

@@ -3018,6 +3018,13 @@ export function CapacityView({
             >
               Members
             </button>
+            <button
+              type="button"
+              className="cv-nav-link"
+              onClick={() => navigate("/strategy")}
+            >
+              Strategy
+            </button>
           </nav>
         </header>
         <div className="cv-loading">読み込み中…</div>
@@ -3047,6 +3054,13 @@ export function CapacityView({
             onClick={() => navigate("/members")}
           >
             Members
+          </button>
+          <button
+            type="button"
+            className="cv-nav-link"
+            onClick={() => navigate("/strategy")}
+          >
+            Strategy
           </button>
         </nav>
         {history.controls}

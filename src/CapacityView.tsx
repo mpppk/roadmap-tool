@@ -17,6 +17,7 @@ import {
   useState,
 } from "react";
 import "./capacity.css";
+import { toast } from "sonner";
 import { parseCapacityTSV } from "./capacity-clipboard";
 import type { HistoryController } from "./history-client";
 import {
@@ -27,7 +28,6 @@ import {
 } from "./name-errors";
 import { navigate } from "./navigate";
 import { orpc } from "./orpc-client";
-import { toast } from "sonner";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -3018,6 +3018,13 @@ export function CapacityView({
             >
               Members
             </button>
+            <button
+              type="button"
+              className="cv-nav-link"
+              onClick={() => navigate("/strategy")}
+            >
+              Strategy
+            </button>
           </nav>
         </header>
         <div className="cv-loading">読み込み中…</div>
@@ -3047,6 +3054,13 @@ export function CapacityView({
             onClick={() => navigate("/members")}
           >
             Members
+          </button>
+          <button
+            type="button"
+            className="cv-nav-link"
+            onClick={() => navigate("/strategy")}
+          >
+            Strategy
           </button>
         </nav>
         {history.controls}

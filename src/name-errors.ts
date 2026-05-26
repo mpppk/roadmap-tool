@@ -1,4 +1,9 @@
-export type NameResource = "epic" | "member" | "initiative";
+export type NameResource =
+  | "epic"
+  | "member"
+  | "initiative"
+  | "vision"
+  | "strategicIntent";
 export type NameErrorCode = "DUPLICATE_NAME" | "BLANK_NAME";
 
 export const NAME_ERROR_MESSAGES: Record<NameResource, string> & {
@@ -7,6 +12,9 @@ export const NAME_ERROR_MESSAGES: Record<NameResource, string> & {
   epic: "Epic名は重複できません。別の名前を入力してください。",
   member: "Member名は重複できません。別の名前を入力してください。",
   initiative: "Initiative名は重複できません。別の名前を入力してください。",
+  vision: "Vision名は重複できません。別の名前を入力してください。",
+  strategicIntent:
+    "Strategic Intent名は重複できません。別の名前を入力してください。",
   blank: "名前は空にできません。",
 };
 
@@ -15,7 +23,7 @@ export function trimSqliteSpaces(value: string): string {
 }
 
 export function nextAvailableGeneratedName(
-  prefix: "Epic" | "Member" | "Initiative",
+  prefix: "Epic" | "Member" | "Initiative" | "Vision" | "Strategic Intent",
   existingNames: Iterable<string>,
 ): string {
   const used = new Set(existingNames);
@@ -39,6 +47,9 @@ function resourceMessage(resource: unknown): string | null {
   if (resource === "epic") return NAME_ERROR_MESSAGES.epic;
   if (resource === "member") return NAME_ERROR_MESSAGES.member;
   if (resource === "initiative") return NAME_ERROR_MESSAGES.initiative;
+  if (resource === "vision") return NAME_ERROR_MESSAGES.vision;
+  if (resource === "strategicIntent")
+    return NAME_ERROR_MESSAGES.strategicIntent;
   return null;
 }
 
@@ -60,7 +71,9 @@ export function getNameErrorMessage(error: unknown): string | null {
     message === NAME_ERROR_MESSAGES.blank ||
     message === NAME_ERROR_MESSAGES.epic ||
     message === NAME_ERROR_MESSAGES.member ||
-    message === NAME_ERROR_MESSAGES.initiative
+    message === NAME_ERROR_MESSAGES.initiative ||
+    message === NAME_ERROR_MESSAGES.vision ||
+    message === NAME_ERROR_MESSAGES.strategicIntent
   ) {
     return message;
   }

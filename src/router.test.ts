@@ -12,10 +12,14 @@ import {
   members,
   months,
   quarters,
+  strategicIntents,
+  visions,
 } from "./db/schema";
 import { router } from "./router";
 
 const testSchema = {
+  visions,
+  strategicIntents,
   initiatives,
   initiativeLinks,
   epics,
@@ -33,12 +37,38 @@ function createTestDb() {
   const sqlite = new Database(":memory:");
   sqlite.exec("PRAGMA foreign_keys = ON;");
   sqlite.exec(`
+    CREATE TABLE visions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      description TEXT,
+      position INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      CONSTRAINT visions_name_trimmed_check CHECK (name = trim(name)),
+      CONSTRAINT visions_name_not_empty_check CHECK (length(name) > 0),
+      CONSTRAINT visions_position_check CHECK (position >= 0)
+    );
+    CREATE UNIQUE INDEX visions_name_trim_unique ON visions (trim(name));
+
+    CREATE TABLE strategic_intents (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      vision_id INTEGER NOT NULL REFERENCES visions(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT,
+      position INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      CONSTRAINT strategic_intents_name_trimmed_check CHECK (name = trim(name)),
+      CONSTRAINT strategic_intents_name_not_empty_check CHECK (length(name) > 0),
+      CONSTRAINT strategic_intents_position_check CHECK (position >= 0)
+    );
+    CREATE UNIQUE INDEX strategic_intents_name_trim_unique ON strategic_intents (trim(name));
+
     CREATE TABLE initiatives (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       description TEXT,
       position INTEGER NOT NULL DEFAULT 0,
       is_default INTEGER NOT NULL DEFAULT 0,
+      strategic_intent_id INTEGER REFERENCES strategic_intents(id),
       created_at INTEGER NOT NULL,
       CONSTRAINT initiatives_name_trimmed_check CHECK (name = trim(name)),
       CONSTRAINT initiatives_name_not_empty_check CHECK (length(name) > 0),

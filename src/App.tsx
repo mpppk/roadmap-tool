@@ -3,6 +3,7 @@ import { CapacityView } from "./CapacityView";
 import type { HistoryController, RoadmapSnapshot } from "./history-client";
 import { MembersView } from "./MembersView";
 import { orpc, roadmapClientId } from "./orpc-client";
+import { StrategyTreeView } from "./StrategyTreeView";
 
 type HistoryEntry = {
   label: string;
@@ -254,6 +255,13 @@ export function App() {
   if (path === "/members")
     return (
       <MembersView
+        history={history}
+        externalDataVersion={externalDataVersion}
+      />
+    );
+  if (path === "/strategy")
+    return (
+      <StrategyTreeView
         history={history}
         externalDataVersion={externalDataVersion}
       />

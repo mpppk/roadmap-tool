@@ -9,6 +9,50 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
+export const visions = sqliteTable(
+  "visions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull(),
+    description: text("description"),
+    position: integer("position").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => [
+    check("visions_name_trimmed_check", sql`${t.name} = trim(${t.name})`),
+    check("visions_name_not_empty_check", sql`length(${t.name}) > 0`),
+    check("visions_position_check", sql`${t.position} >= 0`),
+    uniqueIndex("visions_name_trim_unique").on(sql`trim(${t.name})`),
+  ],
+);
+
+export const strategicIntents = sqliteTable(
+  "strategic_intents",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    visionId: integer("vision_id")
+      .notNull()
+      .references(() => visions.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    position: integer("position").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => [
+    check(
+      "strategic_intents_name_trimmed_check",
+      sql`${t.name} = trim(${t.name})`,
+    ),
+    check("strategic_intents_name_not_empty_check", sql`length(${t.name}) > 0`),
+    check("strategic_intents_position_check", sql`${t.position} >= 0`),
+    uniqueIndex("strategic_intents_name_trim_unique").on(sql`trim(${t.name})`),
+  ],
+);
+
 export const initiatives = sqliteTable(
   "initiatives",
   {
@@ -19,6 +63,10 @@ export const initiatives = sqliteTable(
     isDefault: integer("is_default", { mode: "boolean" })
       .notNull()
       .default(false),
+    strategicIntentId: integer("strategic_intent_id").references(
+      () => strategicIntents.id,
+      { onDelete: "set null" },
+    ),
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .$defaultFn(() => new Date()),

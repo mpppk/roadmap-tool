@@ -45,7 +45,7 @@ bun run db:push      # スキーマを直接プッシュ（開発環境のみ）
 bun run db:studio    # Drizzle Studio UI を起動
 ```
 
-CI では `typecheck` → `lint` → `format:check` → `build` の順に実行されます。マージ前にすべて通過する必要があります。
+CI では `typecheck` → `lint` → `format:check` → `test` → `build` の順に実行されます。マージ前にすべて通過する必要があります。
 
 ## アーキテクチャ
 

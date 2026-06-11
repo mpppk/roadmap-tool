@@ -31,6 +31,13 @@ const capacityConflictResolutionSchema = z.enum([
   "rebalanceAllProportionally",
 ]);
 
+// キャパシティ比較で許容する浮動小数点誤差（既存の割り当てロジックと同値）
+const CAPACITY_EPSILON = 0.000001;
+// メンバー個人の月次キャパシティ（0〜1）
+const capacitySchema = z.number().min(0).max(1);
+// Epic 月次の合計キャパシティ。メンバー合算の集約値のため上限は設けない
+const totalCapacitySchema = z.number().min(0);
+
 const snapshotInitiativeSchema = z.object({
   id: z.number().int(),
   name: z.string(),
@@ -56,7 +63,7 @@ const snapshotEpicLinkSchema = z.object({
 const snapshotMemberSchema = z.object({
   id: z.number().int(),
   name: z.string(),
-  maxCapacity: z.number().nullable(),
+  maxCapacity: z.number().gt(0).max(1).nullable(),
   createdAt: z.number().int(),
 });
 const snapshotQuarterSchema = z.object({
@@ -74,14 +81,14 @@ const snapshotEpicMonthSchema = z.object({
   id: z.number().int(),
   epicId: z.number().int(),
   monthId: z.number().int(),
-  totalCapacity: z.number(),
+  totalCapacity: totalCapacitySchema,
 });
 const snapshotMemberMonthAllocationSchema = z.object({
   id: z.number().int(),
   epicId: z.number().int(),
   monthId: z.number().int(),
   memberId: z.number().int(),
-  capacity: z.number(),
+  capacity: capacitySchema,
 });
 const roadmapSnapshotSchema = z.object({
   initiatives: z.array(snapshotInitiativeSchema),
@@ -388,7 +395,10 @@ async function getDefaultInitiativeId(db: typeof DbType): Promise<number> {
     .insert(initiatives)
     .values({ name: "未分類", position: 0, isDefault: true })
     .returning();
-  if (!created) throw new Error("Failed to create default Initiative");
+  if (!created)
+    throw new ORPCError("INTERNAL_SERVER_ERROR", {
+      message: "Failed to create default Initiative",
+    });
   return created.id;
 }
 
@@ -421,7 +431,10 @@ async function getOrCreateInitiativeByName(
       isDefault: false,
     })
     .returning();
-  if (!created) throw new Error(`Failed to create Initiative: ${normalized}`);
+  if (!created)
+    throw new ORPCError("INTERNAL_SERVER_ERROR", {
+      message: `Failed to create Initiative: ${normalized}`,
+    });
   return created.id;
 }
 
@@ -477,18 +490,22 @@ async function getQuarterMonthRows(db: typeof DbType, quarterId: number) {
 
 async function getTargetMonthRows(db: typeof DbType, target: PeriodTarget) {
   if (target.periodType === "month") {
-    if (!target.monthId) throw new Error("monthId is required");
+    if (!target.monthId)
+      throw new ORPCError("BAD_REQUEST", { message: "monthId is required" });
     const [month] = await db
       .select()
       .from(months)
       .where(eq(months.id, target.monthId));
-    if (!month) throw new Error("Month not found");
+    if (!month)
+      throw new ORPCError("NOT_FOUND", { message: "Month not found" });
     return [month];
   }
 
-  if (!target.quarterId) throw new Error("quarterId is required");
+  if (!target.quarterId)
+    throw new ORPCError("BAD_REQUEST", { message: "quarterId is required" });
   const monthRows = await getQuarterMonthRows(db, target.quarterId);
-  if (monthRows.length === 0) throw new Error("Quarter has no months");
+  if (monthRows.length === 0)
+    throw new ORPCError("BAD_REQUEST", { message: "Quarter has no months" });
   return monthRows;
 }
 
@@ -879,6 +896,11 @@ function splitTotalAcrossMonths(
   requestedTotal: number,
   currentTotals: number[],
 ): number[] {
+  if (currentTotals.length === 0) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: "対象となる月が存在しません。",
+    });
+  }
   const currentSum = currentTotals.reduce((s, v) => s + v, 0);
   if (currentSum <= 0) {
     const even = requestedTotal / currentTotals.length;
@@ -975,6 +997,60 @@ async function getRoadmapSnapshot(db: typeof DbType): Promise<RoadmapSnapshot> {
       capacity: row.capacity,
     })),
   };
+}
+
+// スナップショットのクロスレコード整合性を検証する。
+// per-field の上限（capacity/maxCapacity の範囲）は Zod スキーマ側で担保される。
+function validateSnapshotIntegrity(snapshot: RoadmapSnapshot): void {
+  // (a) 各メンバーの月次 capacity 合計が maxCapacity（未設定時は 1.0）を超えない
+  const maxByMember = new Map<number, number>();
+  for (const member of snapshot.members) {
+    maxByMember.set(member.id, member.maxCapacity ?? 1);
+  }
+  const usageByMemberMonth = new Map<string, number>();
+  for (const alloc of snapshot.memberMonthAllocations) {
+    const key = `${alloc.memberId}:${alloc.monthId}`;
+    usageByMemberMonth.set(
+      key,
+      (usageByMemberMonth.get(key) ?? 0) + alloc.capacity,
+    );
+  }
+  for (const [key, used] of usageByMemberMonth) {
+    const memberId = Number(key.split(":")[0]);
+    const maxCapacity = maxByMember.get(memberId) ?? 1;
+    if (used > maxCapacity + CAPACITY_EPSILON) {
+      throw new ORPCError("BAD_REQUEST", {
+        message:
+          "復元しようとしたデータに不整合があります（メンバーの月次キャパシティ合計が上限を超えています）。",
+      });
+    }
+  }
+
+  // (b) 各 (epicId, monthId) で epicMonths.totalCapacity >= Σ member capacity
+  const allocSumByEpicMonth = new Map<string, number>();
+  for (const alloc of snapshot.memberMonthAllocations) {
+    const key = `${alloc.epicId}:${alloc.monthId}`;
+    allocSumByEpicMonth.set(
+      key,
+      (allocSumByEpicMonth.get(key) ?? 0) + alloc.capacity,
+    );
+  }
+  const totalByEpicMonth = new Map<string, number>();
+  for (const epicMonth of snapshot.epicMonths) {
+    totalByEpicMonth.set(
+      `${epicMonth.epicId}:${epicMonth.monthId}`,
+      epicMonth.totalCapacity,
+    );
+  }
+  for (const [key, allocSum] of allocSumByEpicMonth) {
+    const total = totalByEpicMonth.get(key) ?? 0;
+    if (allocSum > total + CAPACITY_EPSILON) {
+      throw new ORPCError("BAD_REQUEST", {
+        message:
+          "復元しようとしたデータに不整合があります（メンバー割り当ての合計が Epic 月次の合計キャパシティを超えています）。",
+      });
+    }
+  }
 }
 
 async function restoreRoadmapSnapshot(
@@ -1411,6 +1487,7 @@ const historyRestore = o
     }),
   )
   .handler(async ({ input, context }) => {
+    validateSnapshotIntegrity(input.snapshot);
     await context.db.transaction(async (tx) => {
       const txDb = tx as unknown as typeof DbType;
       const current = await getRoadmapSnapshot(txDb);
@@ -1944,7 +2021,7 @@ const allocationsGetEpicView = o
       .select()
       .from(epics)
       .where(eq(epics.id, input.epicId));
-    if (!epic) throw new Error("Epic not found");
+    if (!epic) throw new ORPCError("NOT_FOUND", { message: "Epic not found" });
 
     const allQuarters = await getQuarterRowsWithMonths(db);
     const allMembers = await db.select().from(members).all();
@@ -1996,7 +2073,8 @@ const allocationsGetMemberView = o
       .select()
       .from(members)
       .where(eq(members.id, input.memberId));
-    if (!member) throw new Error("Member not found");
+    if (!member)
+      throw new ORPCError("NOT_FOUND", { message: "Member not found" });
 
     const allQuarters = await getQuarterRowsWithMonths(db);
     const allEpics = await db.select().from(epics).all();
@@ -2119,7 +2197,7 @@ const allocationsUpdateTotal = o
   .input(
     z.object({
       epicId: z.number().int(),
-      totalCapacity: z.number().min(0),
+      totalCapacity: totalCapacitySchema,
       ...periodInput,
     }),
   )
@@ -2155,12 +2233,19 @@ const allocationsUpdateTotal = o
 
 const allocationsPreviewMemberAllocation = o
   .input(
-    z.object({
-      epicId: z.number().int(),
-      memberId: z.number().int(),
-      capacity: z.number().min(0),
-      ...periodInput,
-    }),
+    z
+      .object({
+        epicId: z.number().int(),
+        memberId: z.number().int(),
+        capacity: z.number().min(0),
+        ...periodInput,
+      })
+      .refine(
+        (value) =>
+          value.capacity <=
+          (value.periodType === "quarter" ? 3 : 1) + CAPACITY_EPSILON,
+        { message: "capacity が許容範囲を超えています。", path: ["capacity"] },
+      ),
   )
   .handler(async ({ input, context }) => {
     const monthRows = await getTargetMonthRows(context.db, input);
@@ -2202,15 +2287,22 @@ const allocationsPreviewMemberAllocation = o
 
 const allocationsUpdateMemberAllocation = o
   .input(
-    z.object({
-      epicId: z.number().int(),
-      memberId: z.number().int(),
-      capacity: z.number().min(0),
-      ...periodInput,
-      capacityConflictResolution: capacityConflictResolutionSchema
-        .optional()
-        .default("fitWithinLimit"),
-    }),
+    z
+      .object({
+        epicId: z.number().int(),
+        memberId: z.number().int(),
+        capacity: z.number().min(0),
+        ...periodInput,
+        capacityConflictResolution: capacityConflictResolutionSchema
+          .optional()
+          .default("fitWithinLimit"),
+      })
+      .refine(
+        (value) =>
+          value.capacity <=
+          (value.periodType === "quarter" ? 3 : 1) + CAPACITY_EPSILON,
+        { message: "capacity が許容範囲を超えています。", path: ["capacity"] },
+      ),
   )
   .handler(async ({ input, context }) => {
     const { db } = context;
@@ -2705,7 +2797,10 @@ async function findOrCreateMonth(
       .insert(months)
       .values({ year, month, quarterId })
       .returning();
-    if (!newM) throw new Error("Failed to create month record");
+    if (!newM)
+      throw new ORPCError("INTERNAL_SERVER_ERROR", {
+        message: "Failed to create month record",
+      });
     cache.set(key, newM.id);
     return newM.id;
   }
@@ -2715,7 +2810,10 @@ async function findOrCreateMonth(
     .insert(quarters)
     .values({ year, quarter: quarterNum })
     .returning();
-  if (!newQ) throw new Error("Failed to create quarter record");
+  if (!newQ)
+    throw new ORPCError("INTERNAL_SERVER_ERROR", {
+      message: "Failed to create quarter record",
+    });
   quarterId = newQ.id;
   const monthRows = await db
     .insert(months)
@@ -3044,7 +3142,10 @@ const csvImport = o
             position: await nextEpicPosition(db, initiativeId),
           })
           .returning();
-        if (!newF) throw new Error(`Failed to create epic: ${epicName}`);
+        if (!newF)
+          throw new ORPCError("INTERNAL_SERVER_ERROR", {
+            message: `Failed to create epic: ${epicName}`,
+          });
         epicId = newF.id;
         epicRecord = { id: epicId, initiativeId: newF.initiativeId };
         epicCache.set(epicName, epicRecord);
@@ -3078,7 +3179,10 @@ const csvImport = o
           .insert(members)
           .values({ name: memberName })
           .returning();
-        if (!newM) throw new Error(`Failed to create member: ${memberName}`);
+        if (!newM)
+          throw new ORPCError("INTERNAL_SERVER_ERROR", {
+            message: `Failed to create member: ${memberName}`,
+          });
         memberId = newM.id;
         memberCache.set(memberName, memberId);
         memberCacheById.set(memberId, memberId);
@@ -3268,7 +3372,10 @@ const tsvImport = o
             position: await nextEpicPosition(db, initiativeId),
           })
           .returning();
-        if (!newF) throw new Error(`Failed to create epic: ${epicName}`);
+        if (!newF)
+          throw new ORPCError("INTERNAL_SERVER_ERROR", {
+            message: `Failed to create epic: ${epicName}`,
+          });
         epicId = newF.id;
         epicRecord = { id: epicId, initiativeId: newF.initiativeId };
         epicCache.set(epicName, epicRecord);
@@ -3302,7 +3409,10 @@ const tsvImport = o
           .insert(members)
           .values({ name: memberName })
           .returning();
-        if (!newM) throw new Error(`Failed to create member: ${memberName}`);
+        if (!newM)
+          throw new ORPCError("INTERNAL_SERVER_ERROR", {
+            message: `Failed to create member: ${memberName}`,
+          });
         memberId = newM.id;
         memberCache.set(memberName, memberId);
         memberCacheById.set(memberId, memberId);
@@ -3450,7 +3560,9 @@ const epicMetadataCSVImport = o
           .where(eq(epics.id, existing.id))
           .returning();
         if (!updated) {
-          throw new Error(`Failed to update epic metadata at row ${row.row}`);
+          throw new ORPCError("INTERNAL_SERVER_ERROR", {
+            message: `Failed to update epic metadata at row ${row.row}`,
+          });
         }
         await saveEpicLinks(db, existing.id, row.links);
         epicByName.set(row.name, updated);
@@ -3466,7 +3578,9 @@ const epicMetadataCSVImport = o
           })
           .returning();
         if (!created) {
-          throw new Error(`Failed to create epic metadata at row ${row.row}`);
+          throw new ORPCError("INTERNAL_SERVER_ERROR", {
+            message: `Failed to create epic metadata at row ${row.row}`,
+          });
         }
         await saveEpicLinks(db, created.id, row.links);
         epicByName.set(row.name, created);
@@ -3728,9 +3842,9 @@ const initiativeMetadataCSVImport = o
           .where(eq(initiatives.id, existing.id))
           .returning();
         if (!updated) {
-          throw new Error(
-            `Failed to update initiative metadata at row ${row.row}`,
-          );
+          throw new ORPCError("INTERNAL_SERVER_ERROR", {
+            message: `Failed to update initiative metadata at row ${row.row}`,
+          });
         }
         await saveInitiativeLinks(db, existing.id, row.links);
         initiativeByName.set(row.name, updated);
@@ -3745,9 +3859,9 @@ const initiativeMetadataCSVImport = o
           })
           .returning();
         if (!created) {
-          throw new Error(
-            `Failed to create initiative metadata at row ${row.row}`,
-          );
+          throw new ORPCError("INTERNAL_SERVER_ERROR", {
+            message: `Failed to create initiative metadata at row ${row.row}`,
+          });
         }
         await saveInitiativeLinks(db, created.id, row.links);
         initiativeByName.set(row.name, created);

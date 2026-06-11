@@ -1035,6 +1035,205 @@ describe("history snapshots", () => {
   });
 });
 
+describe("input validation (#143)", () => {
+  let sqlite: Database | null = null;
+
+  afterEach(() => {
+    sqlite?.close();
+    sqlite = null;
+  });
+
+  test("rejects per-month member capacity above 1", async () => {
+    const testDb = createTestDb();
+    sqlite = testDb.sqlite;
+    const { db } = testDb;
+    const { featureA, member, month } = await seedBase(db);
+
+    const update = router.allocations.updateMemberAllocation.callable({
+      context: { db },
+    });
+    await expectBadRequest(
+      update({
+        epicId: featureA.id,
+        periodType: "month",
+        monthId: month.id,
+        memberId: member.id,
+        capacity: 1.5,
+      }),
+    );
+  });
+
+  test("allows quarter-level member capacity up to 3 and splits across months", async () => {
+    const testDb = createTestDb();
+    sqlite = testDb.sqlite;
+    const { db } = testDb;
+    const { featureA, member, quarter } = await seedBase(db);
+
+    const update = router.allocations.updateMemberAllocation.callable({
+      context: { db },
+    });
+    await update({
+      epicId: featureA.id,
+      periodType: "quarter",
+      quarterId: quarter.id,
+      memberId: member.id,
+      capacity: 3,
+    });
+
+    const monthRows = await db
+      .select()
+      .from(months)
+      .where(eq(months.quarterId, quarter.id));
+    let total = 0;
+    for (const m of monthRows) {
+      const alloc = await getAllocation(db, featureA.id, m.id, member.id);
+      total += alloc?.capacity ?? 0;
+    }
+    expect(total).toBeCloseTo(3);
+  });
+
+  test("rejects quarter-level member capacity above 3", async () => {
+    const testDb = createTestDb();
+    sqlite = testDb.sqlite;
+    const { db } = testDb;
+    const { featureA, member, quarter } = await seedBase(db);
+
+    const update = router.allocations.updateMemberAllocation.callable({
+      context: { db },
+    });
+    await expectBadRequest(
+      update({
+        epicId: featureA.id,
+        periodType: "quarter",
+        quarterId: quarter.id,
+        memberId: member.id,
+        capacity: 3.5,
+      }),
+    );
+  });
+
+  test("returns NOT_FOUND for a missing month instead of a raw error", async () => {
+    const testDb = createTestDb();
+    sqlite = testDb.sqlite;
+    const { db } = testDb;
+    const { featureA, member } = await seedBase(db);
+
+    const update = router.allocations.updateMemberAllocation.callable({
+      context: { db },
+    });
+    try {
+      await update({
+        epicId: featureA.id,
+        periodType: "month",
+        monthId: 99999,
+        memberId: member.id,
+        capacity: 0.5,
+      });
+    } catch (error) {
+      expect((error as { code?: string }).code).toBe("NOT_FOUND");
+      return;
+    }
+    throw new Error("Expected NOT_FOUND error");
+  });
+
+  async function buildBaselineSnapshot(
+    db: ReturnType<typeof createTestDb>["db"],
+  ) {
+    const createFeature = router.epics.create.callable({ context: { db } });
+    const createMember = router.members.create.callable({ context: { db } });
+    const setMaxCapacity = router.members.setMaxCapacity.callable({
+      context: { db },
+    });
+    const createQuarter = router.quarters.create.callable({ context: { db } });
+    const updateAllocation = router.allocations.updateMemberAllocation.callable(
+      {
+        context: { db },
+      },
+    );
+    const snapshot = router.history.snapshot.callable({ context: { db } });
+
+    const feature = await createFeature({ name: "Auth" });
+    const member = await createMember({ name: "Alice" });
+    await setMaxCapacity({ id: member!.id, maxCapacity: 0.6 });
+    const quarter = await createQuarter({ year: 2026, quarter: 1 });
+    await updateAllocation({
+      epicId: feature!.id,
+      memberId: member!.id,
+      periodType: "month",
+      monthId: quarter!.months[0]!.id,
+      capacity: 0.4,
+    });
+    return snapshot({});
+  }
+
+  test("rejects restore with negative member capacity", async () => {
+    const testDb = createTestDb();
+    sqlite = testDb.sqlite;
+    const { db } = testDb;
+    const restore = router.history.restore.callable({ context: { db } });
+
+    const before = await buildBaselineSnapshot(db);
+    const mutated = structuredClone(before);
+    mutated.memberMonthAllocations[0]!.capacity = -0.5;
+
+    await expectBadRequest(restore({ expected: before, snapshot: mutated }));
+  });
+
+  test("rejects restore with maxCapacity above 1", async () => {
+    const testDb = createTestDb();
+    sqlite = testDb.sqlite;
+    const { db } = testDb;
+    const restore = router.history.restore.callable({ context: { db } });
+
+    const before = await buildBaselineSnapshot(db);
+    const mutated = structuredClone(before);
+    mutated.members[0]!.maxCapacity = 2;
+
+    await expectBadRequest(restore({ expected: before, snapshot: mutated }));
+  });
+
+  test("rejects restore when a member's monthly capacity exceeds maxCapacity", async () => {
+    const testDb = createTestDb();
+    sqlite = testDb.sqlite;
+    const { db } = testDb;
+    const restore = router.history.restore.callable({ context: { db } });
+
+    const before = await buildBaselineSnapshot(db);
+    const mutated = structuredClone(before);
+    mutated.members[0]!.maxCapacity = 0.3;
+    mutated.memberMonthAllocations[0]!.capacity = 0.5;
+    mutated.epicMonths[0]!.totalCapacity = 0.5;
+
+    await expectBadRequest(restore({ expected: before, snapshot: mutated }));
+  });
+
+  test("rejects restore when allocations exceed the epic month total", async () => {
+    const testDb = createTestDb();
+    sqlite = testDb.sqlite;
+    const { db } = testDb;
+    const restore = router.history.restore.callable({ context: { db } });
+
+    const before = await buildBaselineSnapshot(db);
+    const mutated = structuredClone(before);
+    mutated.memberMonthAllocations[0]!.capacity = 0.5;
+    mutated.epicMonths[0]!.totalCapacity = 0.1;
+
+    await expectBadRequest(restore({ expected: before, snapshot: mutated }));
+  });
+
+  test("accepts restore of a consistent snapshot", async () => {
+    const testDb = createTestDb();
+    sqlite = testDb.sqlite;
+    const { db } = testDb;
+    const restore = router.history.restore.callable({ context: { db } });
+    const snapshot = router.history.snapshot.callable({ context: { db } });
+
+    const before = await buildBaselineSnapshot(db);
+    await restore({ expected: before, snapshot: before });
+    expect(await snapshot({})).toEqual(before);
+  });
+});
+
 describe("allocation capacity conflicts", () => {
   let sqlite: Database | null = null;
 

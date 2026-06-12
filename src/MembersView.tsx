@@ -8,6 +8,27 @@ import {
   useState,
 } from "react";
 import "./capacity.css";
+import {
+  CapacityConflictPopover,
+  type CapacityConflictResolution,
+  MaxCapacityOverflowPopover,
+  type RebalancePreview,
+} from "@/shared/components/CapacityPopovers";
+import { useQuarterRange, type ViewMode } from "@/shared/hooks/useQuarterRange";
+import {
+  type CapacityAggMode,
+  fmt,
+  heatBg,
+  r2,
+  readStoredCapacityAggMode,
+} from "@/shared/utils/capacity-format";
+import {
+  isQuarterInRange,
+  monthLabel,
+  type QuarterYQ,
+  quarterLabel,
+  quartersInRange,
+} from "@/shared/utils/quarter-utils";
 import type { HistoryController } from "./history-client";
 import {
   getNameErrorMessage,
@@ -20,25 +41,11 @@ import { orpc } from "./orpc-client";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-type ViewMode = "quarter" | "month";
-type CapacityAggMode = "total" | "average";
 type ImportMode = "append" | "sync";
 type Month = { id: number; year: number; month: number; quarterId: number };
 type Quarter = { id: number; year: number; quarter: number; months: Month[] };
 type Member = { id: number; name: string; maxCapacity: number | null };
 type Epic = { id: number; name: string; initiativeName: string | null };
-
-type CapacityConflictResolution =
-  | "fitWithinLimit"
-  | "allowOverflow"
-  | "rebalanceOthersProportionally"
-  | "rebalanceAllProportionally";
-
-type RebalancePreview = {
-  featureName: string;
-  currentCapacity: number;
-  nextCapacity: number;
-};
 
 type PendingCapacityConflict = {
   featureId: number;
@@ -93,28 +100,6 @@ type PeriodColumn = {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function fmt(v: number): string {
-  if (v === 0) return "0";
-  return v % 1 === 0 ? v.toFixed(0) : v.toFixed(2).replace(/\.?0+$/, "");
-}
-
-function heatBg(value: number, maxVal: number): { bg: string; fg: string } {
-  if (value <= 0) return { bg: "transparent", fg: "var(--cv-text-3)" };
-  const t = Math.min(value / maxVal, 1);
-  const L = Math.round(96 - t * 78);
-  const bg = `oklch(${L}% 0.01 250)`;
-  const fg = L < 52 ? "#fff" : "var(--cv-text)";
-  return { bg, fg };
-}
-
-function quarterLabel(q: Quarter): string {
-  return `${q.year} Q${q.quarter}`;
-}
-
-function monthLabel(month: Month): string {
-  return `${month.year}-${String(month.month).padStart(2, "0")}`;
-}
-
 function nextQuarterYQ(qs: Quarter[]): { year: number; quarter: number } {
   const last = qs[qs.length - 1];
   if (!last) return { year: new Date().getFullYear(), quarter: 1 };
@@ -122,43 +107,8 @@ function nextQuarterYQ(qs: Quarter[]): { year: number; quarter: number } {
   return { year: last.year, quarter: last.quarter + 1 };
 }
 
-type QuarterYQ = { year: number; quarter: number };
-
-function quartersInRange(start: QuarterYQ, end: QuarterYQ): QuarterYQ[] {
-  const result: QuarterYQ[] = [];
-  let { year, quarter } = start;
-  const endKey = end.year * 4 + end.quarter;
-  while (year * 4 + quarter <= endKey) {
-    result.push({ year, quarter });
-    if (quarter === 4) {
-      year++;
-      quarter = 1;
-    } else {
-      quarter++;
-    }
-  }
-  return result;
-}
-
-function isQuarterInRange(
-  q: QuarterYQ,
-  start: QuarterYQ,
-  end: QuarterYQ,
-): boolean {
-  const qKey = q.year * 4 + q.quarter;
-  return (
-    qKey >= start.year * 4 + start.quarter && qKey <= end.year * 4 + end.quarter
-  );
-}
-
 function emptyMemberMonthData(): MemberMonthData {
   return { totalCapacity: 0, featureAllocations: [] };
-}
-
-const r2 = (v: number) => Math.round(v * 100) / 100;
-
-function fmt2(v: number): string {
-  return v.toFixed(2);
 }
 
 function aggregateMemberMonthData(
@@ -550,182 +500,10 @@ function HeatmapEditableFeatureCell({
   );
 }
 
-function MaxCapacityOverflowPopover({
-  memberName,
-  limit,
-  requestedCapacity,
-  usedElsewhere,
-  onResolve,
-  onCancel,
-  displayDivisor = 1,
-}: {
-  memberName: string;
-  limit: number;
-  requestedCapacity: number;
-  usedElsewhere: number;
-  onResolve: (resolution: "fitWithinLimit" | "allowOverflow") => void;
-  onCancel: () => void;
-  displayDivisor?: number;
-}) {
-  const d = displayDivisor;
-  const reducedValue = Math.max(0, limit - usedElsewhere);
-
-  return (
-    <div className="capacity-conflict-popover" role="dialog" aria-modal="false">
-      <div className="capacity-conflict-lines">
-        <div>
-          {memberName}のmax capacity ({fmt2(limit / d)}) を超えています。
-        </div>
-        <div>今回の割り当てキャパシティ: {fmt2(requestedCapacity / d)}</div>
-      </div>
-      <div className="capacity-conflict-actions">
-        <button
-          type="button"
-          className="btn-sm capacity-conflict-action-btn"
-          onClick={() => onResolve("fitWithinLimit")}
-        >
-          {`縮小して設定 (${fmt2(reducedValue / d)})`}
-        </button>
-        <button
-          type="button"
-          className="btn-sm capacity-conflict-action-btn"
-          onClick={() => onResolve("allowOverflow")}
-        >
-          {`max capacityを超えて設定 (${fmt2(requestedCapacity / d)})`}
-        </button>
-        <button
-          type="button"
-          className="btn-sm capacity-conflict-action-btn"
-          onClick={onCancel}
-        >
-          キャンセル
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function CapacityConflictPopover({
-  memberName,
-  usedElsewhere,
-  assignableCapacity,
-  requestedCapacity,
-  rebalancePreview,
-  rebalanceAllPreview,
-  onResolve,
-  onCancel,
-  displayDivisor = 1,
-}: {
-  memberName: string;
-  usedElsewhere: number;
-  assignableCapacity: number;
-  requestedCapacity: number;
-  rebalancePreview: RebalancePreview[];
-  rebalanceAllPreview: {
-    newCapacity: number;
-    othersPreview: RebalancePreview[];
-  };
-  onResolve: (resolution: CapacityConflictResolution) => void;
-  onCancel: () => void;
-  displayDivisor?: number;
-}) {
-  const d = displayDivisor;
-  const overflowTotal = usedElsewhere + requestedCapacity;
-
-  return (
-    <div className="capacity-conflict-popover" role="dialog" aria-modal="false">
-      <div className="capacity-conflict-lines">
-        <div>{memberName}の合計キャパシティが1を超えています。</div>
-        <div>割り当て済み: {fmt2(usedElsewhere / d)}</div>
-        <div>残りキャパシティ: {fmt2(assignableCapacity / d)}</div>
-        <div>今回の割り当てキャパシティ: {fmt2(requestedCapacity / d)}</div>
-      </div>
-      <div className="capacity-conflict-actions">
-        <button
-          type="button"
-          className="btn-sm capacity-conflict-action-btn"
-          onClick={() => onResolve("allowOverflow")}
-        >
-          {`そのまま割り当て(${fmt2(usedElsewhere / d)}+${fmt2(
-            requestedCapacity / d,
-          )}=${fmt2(overflowTotal / d)})`}
-        </button>
-        <button
-          type="button"
-          className="btn-sm capacity-conflict-action-btn"
-          onClick={() => onResolve("fitWithinLimit")}
-        >
-          超過しない最大値({fmt2(assignableCapacity / d)})を割り当て
-        </button>
-        <button
-          type="button"
-          className="btn-sm capacity-conflict-action-btn"
-          onClick={() => onResolve("rebalanceOthersProportionally")}
-        >
-          <span>超過しないように他Epicのキャパシティを削減</span>
-          {rebalancePreview.length > 0 && (
-            <span className="capacity-conflict-preview-list">
-              {rebalancePreview.map((change) => (
-                <span
-                  key={change.featureName}
-                  className="capacity-conflict-preview-item"
-                >
-                  {change.featureName}: {fmt(change.currentCapacity / d)}→
-                  {fmt(change.nextCapacity / d)}
-                </span>
-              ))}
-            </span>
-          )}
-        </button>
-        <button
-          type="button"
-          className="btn-sm capacity-conflict-action-btn"
-          onClick={() => onResolve("rebalanceAllProportionally")}
-        >
-          <span>比率を保ったままmax capacityに収まるように縮小</span>
-          <span className="capacity-conflict-preview-list">
-            <span className="capacity-conflict-preview-item">
-              今回: {fmt(requestedCapacity / d)}→
-              {fmt(rebalanceAllPreview.newCapacity / d)}
-            </span>
-            {rebalanceAllPreview.othersPreview.map((change) => (
-              <span
-                key={change.featureName}
-                className="capacity-conflict-preview-item"
-              >
-                {change.featureName}: {fmt(change.currentCapacity / d)}→
-                {fmt(change.nextCapacity / d)}
-              </span>
-            ))}
-          </span>
-        </button>
-        <button
-          type="button"
-          className="btn-sm capacity-conflict-action-btn"
-          onClick={onCancel}
-        >
-          キャンセル
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // ── Main component ──────────────────────────────────────────────────────────
 
 const COL_W = 148;
 const CAPACITY_AGG_MODE_STORAGE_KEY = "roadmap.membersView.capacityAggMode";
-
-function readStoredCapacityAggMode(
-  key: string,
-  defaultValue: CapacityAggMode,
-): CapacityAggMode {
-  try {
-    const v = localStorage.getItem(key);
-    if (v === "total" || v === "average") return v;
-  } catch {}
-  return defaultValue;
-}
 
 export function MembersView({
   history,
@@ -734,36 +512,21 @@ export function MembersView({
   history: HistoryController;
   externalDataVersion: number;
 }) {
-  const [viewMode, setViewMode] = useState<ViewMode>(() => {
-    try {
-      const v = localStorage.getItem("roadmap.membersView.viewMode");
-      if (v === "quarter" || v === "month") return v;
-    } catch {}
-    return "quarter";
-  });
+  const {
+    viewMode,
+    setViewMode,
+    rangeStart,
+    setRangeStart,
+    rangeEnd,
+    setRangeEnd,
+    rangeStartRef,
+    rangeEndRef,
+    rangeInitializedRef,
+  } = useQuarterRange("roadmap.membersView");
   const [capacityAggMode, setCapacityAggMode] = useState<CapacityAggMode>(() =>
     readStoredCapacityAggMode(CAPACITY_AGG_MODE_STORAGE_KEY, "total"),
   );
   const [quarters, setQuarters] = useState<Quarter[]>([]);
-  const [rangeStart, setRangeStart] = useState<QuarterYQ | null>(() => {
-    try {
-      const v = localStorage.getItem("roadmap.membersView.rangeStart");
-      return v ? (JSON.parse(v) as QuarterYQ) : null;
-    } catch {}
-    return null;
-  });
-  const [rangeEnd, setRangeEnd] = useState<QuarterYQ | null>(() => {
-    try {
-      const v = localStorage.getItem("roadmap.membersView.rangeEnd");
-      return v ? (JSON.parse(v) as QuarterYQ) : null;
-    } catch {}
-    return null;
-  });
-  const rangeInitializedRef = useRef(false);
-  const rangeStartRef = useRef(rangeStart);
-  rangeStartRef.current = rangeStart;
-  const rangeEndRef = useRef(rangeEnd);
-  rangeEndRef.current = rangeEnd;
   const [memberRows, setMemberRows] = useState<MemberRow[]>([]);
   const [draggingMemberId, setDraggingMemberId] = useState<number | null>(null);
   const [allEpics, setAllEpics] = useState<Epic[]>([]);
@@ -865,38 +628,13 @@ export function MembersView({
 
   useEffect(() => {
     try {
-      localStorage.setItem("roadmap.membersView.viewMode", viewMode);
-    } catch {}
-  }, [viewMode]);
-
-  useEffect(() => {
-    try {
       localStorage.setItem(CAPACITY_AGG_MODE_STORAGE_KEY, capacityAggMode);
     } catch {}
   }, [capacityAggMode]);
 
-  useEffect(() => {
-    try {
-      if (rangeStart !== null)
-        localStorage.setItem(
-          "roadmap.membersView.rangeStart",
-          JSON.stringify(rangeStart),
-        );
-    } catch {}
-  }, [rangeStart]);
-
-  useEffect(() => {
-    try {
-      if (rangeEnd !== null)
-        localStorage.setItem(
-          "roadmap.membersView.rangeEnd",
-          JSON.stringify(rangeEnd),
-        );
-    } catch {}
-  }, [rangeEnd]);
-
   // ── Initial load ────────────────────────────────────────────────────────
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refs from useQuarterRange are stable; accessing .current intentionally avoids stale-closure re-renders
   const loadAll = useCallback(async () => {
     setLoading(true);
     const [qs, ms, es, is_] = await Promise.all([

@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
   ChevronRight,
@@ -6,7 +7,7 @@ import {
   Plus,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "./capacity.css";
 import type { HistoryController } from "./history-client";
 import {
@@ -16,6 +17,13 @@ import {
 } from "./name-errors";
 import { navigate } from "./navigate";
 import { orpc } from "./orpc-client";
+import {
+  queryKeys,
+  useEpicsQuery,
+  useInitiativesQuery,
+  useStrategicIntentsQuery,
+  useVisionsQuery,
+} from "./queries";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -76,6 +84,22 @@ type DragItem =
   | { type: "si"; id: number; visionId: number }
   | { type: "initiative"; id: number; strategicIntentId: number | null };
 
+// ── Set helpers (UI-only expand/collapse flags) ─────────────────────────────
+
+function toggleInSet(set: Set<number>, id: number): Set<number> {
+  const next = new Set(set);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
+}
+
+function removeFromSet(set: Set<number>, id: number): Set<number> {
+  if (!set.has(id)) return set;
+  const next = new Set(set);
+  next.delete(id);
+  return next;
+}
+
 // ── Props ──────────────────────────────────────────────────────────────────
 
 type Props = {
@@ -85,14 +109,80 @@ type Props = {
 
 // ── Component ──────────────────────────────────────────────────────────────
 
-export function StrategyTreeView({ externalDataVersion }: Props) {
-  const [visions, setVisions] = useState<Vision[]>([]);
-  const [strategicIntents, setStrategicIntents] = useState<StrategicIntent[]>(
-    [],
+export function StrategyTreeView(_props: Props) {
+  const queryClient = useQueryClient();
+
+  const visionsQuery = useVisionsQuery();
+  const siQuery = useStrategicIntentsQuery();
+  const initiativesQuery = useInitiativesQuery();
+  const epicsQuery = useEpicsQuery();
+
+  // UI 専用の展開/折りたたみフラグ（キャッシュには載せない）。
+  // Vision / SI は既定で展開なので「折りたたみ集合」、Initiative は既定で折りたたみなので
+  // 「展開集合」を保持する。空集合 = 従来のデフォルト挙動。
+  const [collapsedVisionIds, setCollapsedVisionIds] = useState<Set<number>>(
+    () => new Set(),
   );
-  const [initiatives, setInitiatives] = useState<Initiative[]>([]);
-  const [epics, setEpics] = useState<Epic[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [collapsedSiIds, setCollapsedSiIds] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const [expandedInitiativeIds, setExpandedInitiativeIds] = useState<
+    Set<number>
+  >(() => new Set());
+
+  // クエリデータと UI フラグを合成したビューモデル（描画 JSX は従来どおり .expanded を参照）。
+  const visions = useMemo<Vision[]>(
+    () =>
+      (visionsQuery.data ?? []).map((v) => ({
+        id: v.id,
+        name: v.name,
+        description: v.description,
+        position: v.position,
+        expanded: !collapsedVisionIds.has(v.id),
+      })),
+    [visionsQuery.data, collapsedVisionIds],
+  );
+  const strategicIntents = useMemo<StrategicIntent[]>(
+    () =>
+      (siQuery.data ?? []).map((si) => ({
+        id: si.id,
+        visionId: si.visionId,
+        name: si.name,
+        description: si.description,
+        position: si.position,
+        expanded: !collapsedSiIds.has(si.id),
+      })),
+    [siQuery.data, collapsedSiIds],
+  );
+  const initiatives = useMemo<Initiative[]>(
+    () =>
+      (initiativesQuery.data ?? []).map((i) => ({
+        id: i.id,
+        name: i.name,
+        description: i.description,
+        strategicIntentId: i.strategicIntentId ?? null,
+        position: i.position,
+        expanded: expandedInitiativeIds.has(i.id),
+      })),
+    [initiativesQuery.data, expandedInitiativeIds],
+  );
+  const epics = useMemo<Epic[]>(
+    () =>
+      (epicsQuery.data ?? []).map((e) => ({
+        id: e.id,
+        name: e.name,
+        initiativeId: e.initiativeId,
+        position: e.position,
+      })),
+    [epicsQuery.data],
+  );
+
+  // 初回ロードのみ全画面ゲートを出す（isFetching ではなく isLoading を使う）。
+  const loading =
+    visionsQuery.isLoading ||
+    siQuery.isLoading ||
+    initiativesQuery.isLoading ||
+    epicsQuery.isLoading;
 
   // Editing state
   const [editingNode, setEditingNode] = useState<EditingNode | null>(null);
@@ -124,47 +214,6 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
     targetSiId: number | null;
   } | null>(null);
 
-  // ── Data loading ──────────────────────────────────────────────────────────
-
-  const loadAll = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [vs, sis, inits, eps] = await Promise.all([
-        orpc.visions.list({}),
-        orpc.strategicIntents.list({}),
-        orpc.initiatives.list({}),
-        orpc.epics.list({}),
-      ]);
-      setVisions(vs.map((v) => ({ ...v, expanded: true })));
-      setStrategicIntents(sis.map((si) => ({ ...si, expanded: true })));
-      setInitiatives(
-        inits.map((i) => ({
-          id: i.id,
-          name: i.name,
-          description: i.description,
-          strategicIntentId: i.strategicIntentId ?? null,
-          position: i.position,
-          expanded: false,
-        })),
-      );
-      setEpics(
-        eps.map((e) => ({
-          id: e.id,
-          name: e.name,
-          initiativeId: e.initiativeId,
-          position: e.position,
-        })),
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: externalDataVersion triggers reload
-  useEffect(() => {
-    void loadAll();
-  }, [loadAll, externalDataVersion]);
-
   // ── Inline editing ────────────────────────────────────────────────────────
 
   function startEdit(node: EditingNode, currentName: string) {
@@ -190,41 +239,20 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
     }
     try {
       if (editingNode.type === "vision") {
-        const updated = await orpc.visions.update({
-          id: editingNode.id,
-          name,
+        await orpc.visions.update({ id: editingNode.id, name });
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.visions(),
         });
-        if (updated) {
-          setVisions((vs) =>
-            vs.map((v) =>
-              v.id === editingNode.id ? { ...v, name: updated.name } : v,
-            ),
-          );
-        }
       } else if (editingNode.type === "si") {
-        const updated = await orpc.strategicIntents.update({
-          id: editingNode.id,
-          name,
+        await orpc.strategicIntents.update({ id: editingNode.id, name });
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.strategicIntents(),
         });
-        if (updated) {
-          setStrategicIntents((sis) =>
-            sis.map((si) =>
-              si.id === editingNode.id ? { ...si, name: updated.name } : si,
-            ),
-          );
-        }
       } else {
-        const updated = await orpc.initiatives.rename({
-          id: editingNode.id,
-          name,
+        await orpc.initiatives.rename({ id: editingNode.id, name });
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.initiatives(),
         });
-        if (updated) {
-          setInitiatives((inits) =>
-            inits.map((i) =>
-              i.id === editingNode.id ? { ...i, name: updated.name } : i,
-            ),
-          );
-        }
       }
       cancelEdit();
     } catch (error) {
@@ -250,50 +278,32 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
     try {
       const desc = descDialog.value.trim() || null;
       if (descDialog.type === "vision") {
-        const updated = await orpc.visions.update({
+        await orpc.visions.update({
           id: descDialog.id,
           name: descDialog.name,
           description: desc,
         });
-        if (updated) {
-          setVisions((vs) =>
-            vs.map((v) =>
-              v.id === descDialog.id
-                ? { ...v, description: updated.description ?? null }
-                : v,
-            ),
-          );
-        }
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.visions(),
+        });
       } else if (descDialog.type === "si") {
-        const updated = await orpc.strategicIntents.update({
+        await orpc.strategicIntents.update({
           id: descDialog.id,
           name: descDialog.name,
           description: desc,
         });
-        if (updated) {
-          setStrategicIntents((sis) =>
-            sis.map((si) =>
-              si.id === descDialog.id
-                ? { ...si, description: updated.description ?? null }
-                : si,
-            ),
-          );
-        }
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.strategicIntents(),
+        });
       } else {
-        const updated = await orpc.initiatives.rename({
+        await orpc.initiatives.rename({
           id: descDialog.id,
           name: descDialog.name,
           description: desc,
         });
-        if (updated) {
-          setInitiatives((inits) =>
-            inits.map((i) =>
-              i.id === descDialog.id
-                ? { ...i, description: updated.description ?? null }
-                : i,
-            ),
-          );
-        }
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.initiatives(),
+        });
       }
       setDescDialog(null);
     } catch {
@@ -336,38 +346,30 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
     try {
       if (deleteDialog.type === "vision") {
         await orpc.visions.delete({ id: deleteDialog.id });
-        setVisions((vs) => vs.filter((v) => v.id !== deleteDialog.id));
-        setStrategicIntents((sis) =>
-          sis.filter((si) => si.visionId !== deleteDialog.id),
-        );
-        setInitiatives((inits) =>
-          inits.map((i) => {
-            const si = strategicIntents.find(
-              (si) => si.id === i.strategicIntentId,
-            );
-            if (si?.visionId === deleteDialog.id) {
-              return { ...i, strategicIntentId: null };
-            }
-            return i;
-          }),
-        );
+        // Vision 削除は SI を CASCADE、Initiative を SET NULL で波及させる。
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.visions(),
+        });
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.strategicIntents(),
+        });
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.initiatives(),
+        });
       } else if (deleteDialog.type === "si") {
         await orpc.strategicIntents.delete({ id: deleteDialog.id });
-        setStrategicIntents((sis) =>
-          sis.filter((si) => si.id !== deleteDialog.id),
-        );
-        setInitiatives((inits) =>
-          inits.map((i) =>
-            i.strategicIntentId === deleteDialog.id
-              ? { ...i, strategicIntentId: null }
-              : i,
-          ),
-        );
+        // SI 削除は紐付く Initiative を SET NULL で未分類化する。
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.strategicIntents(),
+        });
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.initiatives(),
+        });
       } else {
         await orpc.initiatives.delete({ id: deleteDialog.id });
-        setInitiatives((inits) =>
-          inits.filter((i) => i.id !== deleteDialog.id),
-        );
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.initiatives(),
+        });
       }
       setDeleteDialog(null);
     } catch (error) {
@@ -388,7 +390,7 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
     );
     const created = await orpc.visions.create({ name });
     if (!created) return;
-    setVisions((vs) => [...vs, { ...created, expanded: true }]);
+    await queryClient.invalidateQueries({ queryKey: queryKeys.visions() });
     startEdit({ type: "vision", id: created.id }, created.name);
   }
 
@@ -397,10 +399,11 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
     const name = nextAvailableGeneratedName("Strategic Intent", siNames);
     const created = await orpc.strategicIntents.create({ visionId, name });
     if (!created) return;
-    setStrategicIntents((sis) => [...sis, { ...created, expanded: true }]);
-    setVisions((vs) =>
-      vs.map((v) => (v.id === visionId ? { ...v, expanded: true } : v)),
-    );
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.strategicIntents(),
+    });
+    // 親 Vision を展開状態にしておく。
+    setCollapsedVisionIds((prev) => removeFromSet(prev, visionId));
     startEdit({ type: "si", id: created.id }, created.name);
   }
 
@@ -415,18 +418,11 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
       id: created.id,
       strategicIntentId: siId,
     });
-    const newInit: Initiative = {
-      id: created.id,
-      name: created.name,
-      description: created.description ?? null,
-      strategicIntentId: siId,
-      position: created.position,
-      expanded: false,
-    };
-    setInitiatives((inits) => [...inits, newInit]);
-    setStrategicIntents((sis) =>
-      sis.map((si) => (si.id === siId ? { ...si, expanded: true } : si)),
-    );
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.initiatives(),
+    });
+    // 親 SI を展開状態にしておく。
+    setCollapsedSiIds((prev) => removeFromSet(prev, siId));
     startEdit({ type: "initiative", id: created.id }, created.name);
   }
 
@@ -449,13 +445,9 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
         id: moveDialog.id,
         strategicIntentId: moveDialog.targetSiId,
       });
-      setInitiatives((inits) =>
-        inits.map((i) =>
-          i.id === moveDialog.id
-            ? { ...i, strategicIntentId: moveDialog.targetSiId }
-            : i,
-        ),
-      );
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.initiatives(),
+      });
       setMoveDialog(null);
     } catch {
       alert("移動できませんでした。");
@@ -465,21 +457,15 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
   // ── Expand/Collapse ───────────────────────────────────────────────────────
 
   function toggleVision(id: number) {
-    setVisions((vs) =>
-      vs.map((v) => (v.id === id ? { ...v, expanded: !v.expanded } : v)),
-    );
+    setCollapsedVisionIds((prev) => toggleInSet(prev, id));
   }
 
   function toggleSI(id: number) {
-    setStrategicIntents((sis) =>
-      sis.map((si) => (si.id === id ? { ...si, expanded: !si.expanded } : si)),
-    );
+    setCollapsedSiIds((prev) => toggleInSet(prev, id));
   }
 
   function toggleInitiative(id: number) {
-    setInitiatives((inits) =>
-      inits.map((i) => (i.id === id ? { ...i, expanded: !i.expanded } : i)),
-    );
+    setExpandedInitiativeIds((prev) => toggleInSet(prev, id));
   }
 
   // ── Drag & Drop ───────────────────────────────────────────────────────────
@@ -518,39 +504,22 @@ export function StrategyTreeView({ externalDataVersion }: Props) {
       return;
     }
     try {
+      // 並び順はサーバ確定値を再取得する。展開状態は ID ベースの Set なので自動的に保持される。
       if (dragItem.type === "vision") {
-        const updated = await orpc.visions.move({ id, beforeId: targetId });
-        const expandMap = new Map(visions.map((v) => [v.id, v.expanded]));
-        setVisions(
-          updated.map((v) => ({ ...v, expanded: expandMap.get(v.id) ?? true })),
-        );
-      } else if (dragItem.type === "si") {
-        const updated = await orpc.strategicIntents.move({
-          id,
-          beforeId: targetId,
+        await orpc.visions.move({ id, beforeId: targetId });
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.visions(),
         });
-        const expandMap = new Map(
-          strategicIntents.map((si) => [si.id, si.expanded]),
-        );
-        setStrategicIntents(
-          updated.map((si) => ({
-            ...si,
-            expanded: expandMap.get(si.id) ?? true,
-          })),
-        );
+      } else if (dragItem.type === "si") {
+        await orpc.strategicIntents.move({ id, beforeId: targetId });
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.strategicIntents(),
+        });
       } else {
-        const updated = await orpc.initiatives.move({ id, beforeId: targetId });
-        const expandMap = new Map(initiatives.map((i) => [i.id, i.expanded]));
-        setInitiatives(
-          updated.map((init) => ({
-            id: init.id,
-            name: init.name,
-            description: init.description ?? null,
-            strategicIntentId: init.strategicIntentId ?? null,
-            position: init.position,
-            expanded: expandMap.get(init.id) ?? false,
-          })),
-        );
+        await orpc.initiatives.move({ id, beforeId: targetId });
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.initiatives(),
+        });
       }
     } catch {
       /* ignore */

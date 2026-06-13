@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDown,
   ArrowUp,
@@ -49,6 +50,14 @@ import {
 } from "./name-errors";
 import { navigate } from "./navigate";
 import { orpc } from "./orpc-client";
+import {
+  queryKeys,
+  useEpicsQuery,
+  useEpicViewsQueries,
+  useInitiativesQuery,
+  useMembersQuery,
+  useQuartersQuery,
+} from "./queries";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -98,16 +107,6 @@ type PeriodColumn = {
   monthIds: number[];
   monthId?: number;
   quarterId?: number;
-};
-
-type FeatureMonthUpdate = {
-  epicId: number;
-  months: Array<{
-    monthId: number;
-    totalCapacity: number;
-    unassignedCapacity: number;
-    memberAllocations: Array<{ memberId: number; capacity: number }>;
-  }>;
 };
 
 type PendingCapacityConflict = {
@@ -189,6 +188,14 @@ function emptyMonthData(): MonthData {
   return { totalCapacity: 0, unassignedCapacity: 0, memberAllocations: [] };
 }
 
+// UI 専用の展開/折りたたみフラグ（Set）をトグルする。キャッシュデータには載せない。
+function toggleInSet(set: Set<number>, id: number): Set<number> {
+  const next = new Set(set);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
+}
+
 function isOpenableFeatureUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
@@ -257,26 +264,6 @@ function columnMemberLimit(column: PeriodColumn, maxCapacity = 1): number {
   return column.type === "quarter"
     ? column.monthIds.length * maxCapacity
     : maxCapacity;
-}
-
-function updateMonthResults(
-  monthMap: Map<number, MonthData>,
-  results: Array<{
-    monthId: number;
-    totalCapacity: number;
-    unassignedCapacity: number;
-    memberAllocations: Array<{ memberId: number; capacity: number }>;
-  }>,
-) {
-  const newMap = new Map(monthMap);
-  for (const result of results) {
-    newMap.set(result.monthId, {
-      totalCapacity: result.totalCapacity,
-      unassignedCapacity: result.unassignedCapacity,
-      memberAllocations: result.memberAllocations,
-    });
-  }
-  return newMap;
 }
 
 function isEditablePasteTarget(target: EventTarget | null): boolean {
@@ -1221,11 +1208,21 @@ function readStoredLabelWidth(): number {
 
 export function CapacityView({
   history,
-  externalDataVersion,
 }: {
   history: HistoryController;
   externalDataVersion: number;
 }) {
+  const queryClient = useQueryClient();
+  const quartersQuery = useQuartersQuery();
+  const initiativesQuery = useInitiativesQuery();
+  const epicsQuery = useEpicsQuery();
+  const membersQuery = useMembersQuery();
+  const epicIds = useMemo(
+    () => (epicsQuery.data ?? []).map((e) => e.id),
+    [epicsQuery.data],
+  );
+  const epicViewsQueries = useEpicViewsQueries(epicIds);
+
   const {
     viewMode,
     setViewMode,
@@ -1240,11 +1237,13 @@ export function CapacityView({
   const [capacityAggMode, setCapacityAggMode] = useState<CapacityAggMode>(() =>
     readStoredCapacityAggMode(CAPACITY_AGG_MODE_STORAGE_KEY, "average"),
   );
-  const [quarters, setQuarters] = useState<Quarter[]>([]);
-  const [members, setMembers] = useState<Member[]>([]);
-  const [epicRows, setEpicRows] = useState<EpicRow[]>([]);
-  const [featureRows, setFeatureRows] = useState<FeatureRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  // UI 専用の展開/折りたたみフラグ（キャッシュには載せない）。
+  const [expandedFeatureIds, setExpandedFeatureIds] = useState<Set<number>>(
+    () => new Set(),
+  );
+  const [collapsedEpicIds, setCollapsedEpicIds] = useState<Set<number>>(
+    () => new Set(),
+  );
   const [busy, setBusy] = useState(false);
   const [actionWarning, setActionWarning] = useState<string | null>(null);
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -1361,6 +1360,109 @@ export function CapacityView({
       document.body.style.userSelect = "";
     };
   }, []);
+
+  // ── 派生ビューモデル（クエリデータ + UI フラグの合成） ─────────────────────
+  const members = useMemo<Member[]>(
+    () => membersQuery.data ?? [],
+    [membersQuery.data],
+  );
+
+  const quarters = useMemo<Quarter[]>(
+    () =>
+      [...(quartersQuery.data ?? [])]
+        .map((q) => ({
+          ...q,
+          months: [...q.months].sort((a, b) => a.month - b.month),
+        }))
+        .sort((a, b) => a.year - b.year || a.quarter - b.quarter),
+    [quartersQuery.data],
+  );
+
+  // UI 上の「Epic」は DB の initiative。
+  const epicRows = useMemo<EpicRow[]>(
+    () =>
+      (initiativesQuery.data ?? [])
+        .map((epic) => ({
+          id: epic.id,
+          name: epic.name,
+          description: epic.description,
+          position: epic.position,
+          isDefault: epic.isDefault,
+          links: epic.links,
+          collapsed: collapsedEpicIds.has(epic.id),
+        }))
+        .sort((a, b) => a.position - b.position || a.id - b.id),
+    [initiativesQuery.data, collapsedEpicIds],
+  );
+
+  // UI 上の「Feature」は DB の epic。メタデータは epics.list、月次は getEpicView から。
+  const featureRows = useMemo<FeatureRow[]>(() => {
+    const viewByEpicId = new Map<
+      number,
+      Awaited<ReturnType<typeof orpc.allocations.getEpicView>>
+    >();
+    for (const q of epicViewsQueries) {
+      if (q.data) viewByEpicId.set(q.data.epic.id, q.data);
+    }
+    return (epicsQuery.data ?? []).map((epic) => {
+      const fv = viewByEpicId.get(epic.id);
+      const monthMap = new Map<number, MonthData>();
+      if (fv) {
+        for (const qd of fv.quarters) {
+          for (const md of qd.months) {
+            monthMap.set(md.month.id, {
+              totalCapacity: md.totalCapacity,
+              unassignedCapacity: md.unassignedCapacity,
+              memberAllocations: md.memberAllocations.map((a) => ({
+                memberId: a.member.id,
+                capacity: a.capacity,
+              })),
+            });
+          }
+        }
+      }
+      return {
+        id: epic.id,
+        name: epic.name,
+        description: epic.description,
+        epicId: epic.initiativeId,
+        position: epic.position,
+        links: epic.links,
+        expanded: expandedFeatureIds.has(epic.id),
+        months: monthMap,
+      };
+    });
+  }, [epicsQuery.data, epicViewsQueries, expandedFeatureIds]);
+
+  // 初回ロードのみ全画面ゲートを出す（isFetching ではなく isLoading を使う）。
+  const loading =
+    quartersQuery.isLoading ||
+    initiativesQuery.isLoading ||
+    epicsQuery.isLoading ||
+    membersQuery.isLoading ||
+    epicViewsQueries.some((q) => q.isLoading);
+
+  // クォーター読み込み後、初回のみ表示レンジを初期化する。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refs from useQuarterRange are stable; intentionally runs once when quarters first load
+  useEffect(() => {
+    if (rangeInitializedRef.current) return;
+    if (quartersQuery.isLoading) return;
+    rangeInitializedRef.current = true;
+    if (rangeStartRef.current === null && rangeEndRef.current === null) {
+      const first = quarters[0];
+      const last = quarters[quarters.length - 1];
+      if (first && last) {
+        setRangeStart({ year: first.year, quarter: first.quarter });
+        setRangeEnd({ year: last.year, quarter: last.quarter });
+      } else {
+        const now = new Date();
+        const yr = now.getFullYear();
+        const q = Math.ceil((now.getMonth() + 1) / 3) as 1 | 2 | 3 | 4;
+        setRangeStart({ year: yr, quarter: q });
+        setRangeEnd({ year: yr, quarter: q });
+      }
+    }
+  }, [quarters, quartersQuery.isLoading]);
 
   const displayedQuarters = useMemo(() => {
     if (!rangeStart || !rangeEnd) return quarters;
@@ -1497,120 +1599,20 @@ export function CapacityView({
     } catch {}
   }, [labelWidth]);
 
-  // ── Initial load ────────────────────────────────────────────────────────
+  // ── ハイライト / ディープリンク ────────────────────────────────────────────
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refs from useQuarterRange are stable; accessing .current intentionally avoids stale-closure re-renders
-  const loadAll = useCallback(async () => {
-    setLoading(true);
-    const [qs, eps, fs, ms] = await Promise.all([
-      orpc.quarters.list({}),
-      orpc.initiatives.list({}),
-      orpc.epics.list({}),
-      orpc.members.list({}),
-    ]);
-
-    const sortedQs = [...qs]
-      .map((q) => ({
-        ...q,
-        months: [...q.months].sort((a, b) => a.month - b.month),
-      }))
-      .sort((a, b) => a.year - b.year || a.quarter - b.quarter);
-
-    const featureViews = await Promise.all(
-      fs.map((f) => orpc.allocations.getEpicView({ epicId: f.id })),
-    );
-
-    const rows: FeatureRow[] = featureViews.map((fv) => {
-      const monthMap = new Map<number, MonthData>();
-      for (const qd of fv.quarters) {
-        for (const md of qd.months) {
-          monthMap.set(md.month.id, {
-            totalCapacity: md.totalCapacity,
-            unassignedCapacity: md.unassignedCapacity,
-            memberAllocations: md.memberAllocations.map((a) => ({
-              memberId: a.member.id,
-              capacity: a.capacity,
-            })),
-          });
-        }
-      }
-      return {
-        id: fv.epic.id,
-        name: fv.epic.name,
-        description: fv.epic.description,
-        epicId: fv.epic.initiativeId,
-        position: fv.epic.position,
-        links: fv.epic.links.map((link) => ({
-          id: link.id,
-          title: link.title,
-          url: link.url,
-          position: link.position,
-        })),
-        expanded: false,
-        months: monthMap,
-      };
-    });
-
-    setQuarters(sortedQs);
-    if (!rangeInitializedRef.current) {
-      rangeInitializedRef.current = true;
-      if (rangeStartRef.current === null && rangeEndRef.current === null) {
-        const first = sortedQs[0];
-        const last = sortedQs[sortedQs.length - 1];
-        if (first && last) {
-          setRangeStart({ year: first.year, quarter: first.quarter });
-          setRangeEnd({ year: last.year, quarter: last.quarter });
-        } else {
-          const now = new Date();
-          const yr = now.getFullYear();
-          const q = Math.ceil((now.getMonth() + 1) / 3) as 1 | 2 | 3 | 4;
-          setRangeStart({ year: yr, quarter: q });
-          setRangeEnd({ year: yr, quarter: q });
-        }
-      }
-    }
-    setMembers(ms);
-    setEpicRows(
-      eps
-        .map((epic) => ({
-          id: epic.id,
-          name: epic.name,
-          description: epic.description,
-          position: epic.position,
-          isDefault: epic.isDefault,
-          links: epic.links.map((link) => ({
-            id: link.id,
-            title: link.title,
-            url: link.url,
-            position: link.position,
-          })),
-          collapsed: false,
-        }))
-        .sort((a, b) => a.position - b.position || a.id - b.id),
-    );
-    // pendingHighlightRefがあれば対象フィーチャーを展開し、既存のexpanded状態も保持
-    const pending = pendingHighlightRef.current;
-    setFeatureRows((prevRows) => {
-      const expandedIds = new Set(
-        prevRows.filter((r) => r.expanded).map((r) => r.id),
-      );
-      if (pending) expandedIds.add(pending.featureId);
-      return rows.map((r) => ({ ...r, expanded: expandedIds.has(r.id) }));
-    });
-    if (pending) {
-      setHighlightTarget(pending);
-      pendingHighlightRef.current = null;
-    }
-    setLoading(false);
-  }, []);
-
-  // マウント時にURLパラメータを読み取り、pendingHighlightRefに保存してURLをクリア
+  // マウント時にURLパラメータを読み取り、pendingHighlightRefに保存して対象を展開、URLをクリア
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const fid = parseInt(params.get("featureId") ?? "", 10);
     const mid = parseInt(params.get("memberId") ?? "", 10);
     if (!Number.isNaN(fid) && !Number.isNaN(mid) && fid > 0 && mid > 0) {
       pendingHighlightRef.current = { featureId: fid, memberId: mid };
+      setExpandedFeatureIds((prev) => {
+        const next = new Set(prev);
+        next.add(fid);
+        return next;
+      });
       const url = new URL(window.location.href);
       url.searchParams.delete("featureId");
       url.searchParams.delete("memberId");
@@ -1618,11 +1620,16 @@ export function CapacityView({
     }
   }, []);
 
+  // 対象 feature の月次データがロードされたら、1回だけハイライト対象を確定する。
   useEffect(() => {
-    void history.version;
-    void externalDataVersion;
-    loadAll();
-  }, [loadAll, history.version, externalDataVersion]);
+    const pending = pendingHighlightRef.current;
+    if (!pending) return;
+    const row = featureRows.find((r) => r.id === pending.featureId);
+    if (row && row.months.size > 0) {
+      setHighlightTarget(pending);
+      pendingHighlightRef.current = null;
+    }
+  }, [featureRows]);
 
   // ハイライト行が描画されたらスクロールして、一定時間後にハイライトを消す
   useEffect(() => {
@@ -1754,29 +1761,23 @@ export function CapacityView({
   };
 
   const toggleExpand = (featureId: number) => {
-    setFeatureRows((rows) =>
-      rows.map((r) =>
-        r.id === featureId ? { ...r, expanded: !r.expanded } : r,
-      ),
-    );
+    setExpandedFeatureIds((prev) => toggleInSet(prev, featureId));
   };
 
   const toggleEpicCollapse = (epicId: number) => {
-    setEpicRows((rows) =>
-      rows.map((row) =>
-        row.id === epicId ? { ...row, collapsed: !row.collapsed } : row,
-      ),
-    );
+    setCollapsedEpicIds((prev) => toggleInSet(prev, epicId));
   };
 
   const expandAll = () => {
-    setEpicRows((rows) => rows.map((row) => ({ ...row, collapsed: false })));
-    setFeatureRows((rows) => rows.map((r) => ({ ...r, expanded: true })));
+    setCollapsedEpicIds(new Set());
+    setExpandedFeatureIds(new Set((epicsQuery.data ?? []).map((e) => e.id)));
   };
 
   const collapseAll = () => {
-    setEpicRows((rows) => rows.map((row) => ({ ...row, collapsed: true })));
-    setFeatureRows((rows) => rows.map((r) => ({ ...r, expanded: false })));
+    setCollapsedEpicIds(
+      new Set((initiativesQuery.data ?? []).map((e) => e.id)),
+    );
+    setExpandedFeatureIds(new Set());
   };
 
   // ── Drag selection handlers ──────────────────────────────────────────────
@@ -1822,44 +1823,25 @@ export function CapacityView({
 
   // ── API actions ───────────────────────────────────────────────────────────
 
-  const applyFeatureMonthUpdates = useCallback(
-    (updates: FeatureMonthUpdate[]) => {
-      setFeatureRows((rows) =>
-        rows.map((r) => {
-          const rowUpdates = updates.filter((u) => u.epicId === r.id);
-          if (rowUpdates.length === 0) return r;
-          let newMap = new Map(r.months);
-          for (const update of rowUpdates) {
-            newMap = updateMonthResults(newMap, update.months);
-          }
-          return { ...r, months: newMap };
-        }),
-      );
-    },
-    [],
-  );
-
   const updateTotal = useCallback(
     async (featureId: number, column: PeriodColumn, totalCapacity: number) => {
       setBusy(true);
       try {
         await history.record("Capacityを変更", async () => {
-          const result = await orpc.allocations.updateTotal({
+          await orpc.allocations.updateTotal({
             epicId: featureId,
             totalCapacity,
             periodType: column.type,
             monthId: column.monthId,
             quarterId: column.quarterId,
           });
-          applyFeatureMonthUpdates([
-            { epicId: featureId, months: result.months },
-          ]);
+          await queryClient.invalidateQueries({ queryKey: ["epicView"] });
         });
       } finally {
         setBusy(false);
       }
     },
-    [applyFeatureMonthUpdates, history],
+    [history, queryClient],
   );
 
   const updateMemberAllocation = useCallback(
@@ -1927,7 +1909,7 @@ export function CapacityView({
         }
 
         await history.record("Member capacityを変更", async () => {
-          const result = await orpc.allocations.updateMemberAllocation({
+          await orpc.allocations.updateMemberAllocation({
             epicId: featureId,
             memberId,
             capacity,
@@ -1936,13 +1918,14 @@ export function CapacityView({
             quarterId: column.quarterId,
             capacityConflictResolution: "fitWithinLimit",
           });
-          applyFeatureMonthUpdates(result.updatedFeatures);
+          // rebalance は複数 epic に波及しうるため epicView 全体を無効化。
+          await queryClient.invalidateQueries({ queryKey: ["epicView"] });
         });
       } finally {
         setBusy(false);
       }
     },
-    [applyFeatureMonthUpdates, members, getMemberMaxCap, featureRows, history],
+    [members, getMemberMaxCap, featureRows, history, queryClient],
   );
 
   const resolveCapacityConflict = useCallback(
@@ -1951,7 +1934,7 @@ export function CapacityView({
       setBusy(true);
       try {
         await history.record("Capacity競合を解決", async () => {
-          const result = await orpc.allocations.updateMemberAllocation({
+          await orpc.allocations.updateMemberAllocation({
             epicId: capacityConflict.featureId,
             periodType: capacityConflict.periodType,
             monthId: capacityConflict.monthId,
@@ -1960,14 +1943,14 @@ export function CapacityView({
             capacity: capacityConflict.requestedCapacity,
             capacityConflictResolution: resolution,
           });
-          applyFeatureMonthUpdates(result.updatedFeatures);
+          await queryClient.invalidateQueries({ queryKey: ["epicView"] });
         });
         setCapacityConflict(null);
       } finally {
         setBusy(false);
       }
     },
-    [applyFeatureMonthUpdates, capacityConflict, history],
+    [capacityConflict, history, queryClient],
   );
 
   const resolveMaxCapacityOverflow = useCallback(
@@ -1976,7 +1959,7 @@ export function CapacityView({
       setBusy(true);
       try {
         await history.record("Max capacity超過を解決", async () => {
-          const result = await orpc.allocations.updateMemberAllocation({
+          await orpc.allocations.updateMemberAllocation({
             epicId: maxCapacityOverflow.featureId,
             periodType: maxCapacityOverflow.periodType,
             monthId: maxCapacityOverflow.monthId,
@@ -1985,14 +1968,14 @@ export function CapacityView({
             capacity: maxCapacityOverflow.requestedCapacity,
             capacityConflictResolution: resolution,
           });
-          applyFeatureMonthUpdates(result.updatedFeatures);
+          await queryClient.invalidateQueries({ queryKey: ["epicView"] });
         });
         setMaxCapacityOverflow(null);
       } finally {
         setBusy(false);
       }
     },
-    [applyFeatureMonthUpdates, maxCapacityOverflow, history],
+    [maxCapacityOverflow, history, queryClient],
   );
 
   // ── Copy / Paste logic ────────────────────────────────────────────────────
@@ -2152,18 +2135,15 @@ export function CapacityView({
           for (const op of ops) {
             const div = colDivisor(op.column);
             if (op.kind === "feature") {
-              const result = await orpc.allocations.updateTotal({
+              await orpc.allocations.updateTotal({
                 epicId: op.featureId,
                 totalCapacity: op.value * div,
                 periodType: op.column.type,
                 monthId: op.column.monthId,
                 quarterId: op.column.quarterId,
               });
-              applyFeatureMonthUpdates([
-                { epicId: op.featureId, months: result.months },
-              ]);
             } else {
-              const result = await orpc.allocations.updateMemberAllocation({
+              await orpc.allocations.updateMemberAllocation({
                 epicId: op.featureId,
                 memberId: op.memberId,
                 capacity: op.value * div,
@@ -2174,9 +2154,10 @@ export function CapacityView({
                   ? "allowOverflow"
                   : "fitWithinLimit",
               });
-              applyFeatureMonthUpdates(result.updatedFeatures);
             }
           }
+          // 全 op 適用後に一度だけ epicView 全体を無効化する。
+          await queryClient.invalidateQueries({ queryKey: ["epicView"] });
         });
       } finally {
         setBusy(false);
@@ -2186,7 +2167,7 @@ export function CapacityView({
         clearSelection();
       }
     },
-    [applyFeatureMonthUpdates, clearSelection, colDivisor, history],
+    [clearSelection, colDivisor, history, queryClient],
   );
 
   const handleGridPaste = useCallback(
@@ -2313,18 +2294,9 @@ export function CapacityView({
         ),
       });
       if (!epic) return;
-      setEpicRows((rows) => [
-        ...rows,
-        {
-          id: epic.id,
-          name: epic.name,
-          description: epic.description,
-          position: epic.position,
-          isDefault: epic.isDefault,
-          links: epic.links,
-          collapsed: false,
-        },
-      ]);
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.initiatives(),
+      });
     } catch (error) {
       const message = getNameErrorMessage(error);
       if (message) setActionWarning(message);
@@ -2348,19 +2320,7 @@ export function CapacityView({
         });
       });
       if (!f) return;
-      setFeatureRows((rows) => [
-        ...rows,
-        {
-          id: f.id,
-          name: f.name,
-          description: f.description,
-          epicId: f.initiativeId,
-          position: f.position,
-          links: f.links,
-          expanded: false,
-          months: new Map(),
-        },
-      ]);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.epics() });
     } catch (error) {
       const message = getNameErrorMessage(error);
       if (message) setActionWarning(message);
@@ -2370,23 +2330,17 @@ export function CapacityView({
     }
   };
 
-  const renameEpic = useCallback(async (id: number, name: string) => {
-    const epic = await orpc.initiatives.rename({ id, name });
-    if (!epic) return name;
-    setEpicRows((rows) =>
-      rows.map((row) =>
-        row.id === id
-          ? {
-              ...row,
-              name: epic.name,
-              description: epic.description,
-              links: epic.links,
-            }
-          : row,
-      ),
-    );
-    return epic.name;
-  }, []);
+  const renameEpic = useCallback(
+    async (id: number, name: string) => {
+      const epic = await orpc.initiatives.rename({ id, name });
+      if (!epic) return name;
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.initiatives(),
+      });
+      return epic.name;
+    },
+    [queryClient],
+  );
 
   const renameFeature = useCallback(
     async (id: number, name: string) => {
@@ -2394,23 +2348,10 @@ export function CapacityView({
         return orpc.epics.rename({ id, name });
       });
       if (!f) return name;
-      setFeatureRows((rows) =>
-        rows.map((r) =>
-          r.id === id
-            ? {
-                ...r,
-                name: f.name,
-                description: f.description,
-                epicId: f.initiativeId,
-                position: f.position,
-                links: f.links,
-              }
-            : r,
-        ),
-      );
+      await queryClient.invalidateQueries({ queryKey: queryKeys.epics() });
       return f.name;
     },
-    [history],
+    [history, queryClient],
   );
 
   const saveFeatureDetails = useCallback(
@@ -2428,20 +2369,7 @@ export function CapacityView({
         return orpc.epics.rename({ id, initiativeId, ...rest });
       });
       if (!f) return;
-      setFeatureRows((rows) =>
-        rows.map((r) =>
-          r.id === id
-            ? {
-                ...r,
-                name: f.name,
-                description: f.description,
-                epicId: f.initiativeId,
-                position: f.position,
-                links: f.links,
-              }
-            : r,
-        ),
-      );
+      await queryClient.invalidateQueries({ queryKey: queryKeys.epics() });
       setEditingFeatureDetails((current) =>
         current?.id === id
           ? {
@@ -2455,7 +2383,7 @@ export function CapacityView({
           : current,
       );
     },
-    [history],
+    [history, queryClient],
   );
 
   const saveEpicDetails = useCallback(
@@ -2469,18 +2397,9 @@ export function CapacityView({
     ) => {
       const epic = await orpc.initiatives.rename({ id, ...input });
       if (!epic) return;
-      setEpicRows((rows) =>
-        rows.map((row) =>
-          row.id === id
-            ? {
-                ...row,
-                name: epic.name,
-                description: epic.description,
-                links: epic.links,
-              }
-            : row,
-        ),
-      );
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.initiatives(),
+      });
       setEditingEpicDetails((current) =>
         current?.id === id
           ? {
@@ -2492,7 +2411,7 @@ export function CapacityView({
           : current,
       );
     },
-    [],
+    [queryClient],
   );
 
   const deleteFeature = useCallback(
@@ -2501,31 +2420,37 @@ export function CapacityView({
       try {
         await history.record("Epicを削除", async () => {
           await orpc.epics.delete({ id });
-          setFeatureRows((rows) => rows.filter((r) => r.id !== id));
+          await queryClient.invalidateQueries({ queryKey: queryKeys.epics() });
         });
+        queryClient.removeQueries({ queryKey: queryKeys.epicView(id) });
       } finally {
         setBusy(false);
       }
     },
-    [history],
+    [history, queryClient],
   );
 
-  const deleteEpic = useCallback(async (id: number) => {
-    setBusy(true);
-    setActionWarning(null);
-    try {
-      await orpc.initiatives.delete({ id });
-      setEpicRows((rows) => rows.filter((row) => row.id !== id));
-    } catch (error) {
-      setActionWarning(
-        error instanceof Error
-          ? error.message
-          : "Initiativeを削除できませんでした。",
-      );
-    } finally {
-      setBusy(false);
-    }
-  }, []);
+  const deleteEpic = useCallback(
+    async (id: number) => {
+      setBusy(true);
+      setActionWarning(null);
+      try {
+        await orpc.initiatives.delete({ id });
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.initiatives(),
+        });
+      } catch (error) {
+        setActionWarning(
+          error instanceof Error
+            ? error.message
+            : "Initiativeを削除できませんでした。",
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [queryClient],
+  );
 
   const moveEpic = useCallback(
     async (epicId: number, targetId: number) => {
@@ -2533,27 +2458,16 @@ export function CapacityView({
       const epicIndex = epicRows.findIndex((r) => r.id === epicId);
       const targetIndex = epicRows.findIndex((r) => r.id === targetId);
       const draggingDown = epicIndex < targetIndex;
-      const updated = await orpc.initiatives.move(
+      await orpc.initiatives.move(
         draggingDown
           ? { id: epicId, afterId: targetId }
           : { id: epicId, beforeId: targetId },
       );
-      setEpicRows((rows) => {
-        const collapsedById = new Map(
-          rows.map((row) => [row.id, row.collapsed]),
-        );
-        return updated.map((epic) => ({
-          id: epic.id,
-          name: epic.name,
-          description: epic.description,
-          position: epic.position,
-          isDefault: epic.isDefault,
-          links: epic.links,
-          collapsed: collapsedById.get(epic.id) ?? false,
-        }));
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.initiatives(),
       });
     },
-    [epicRows],
+    [epicRows, queryClient],
   );
 
   const moveFeature = useCallback(
@@ -2576,9 +2490,9 @@ export function CapacityView({
         afterId,
       });
       if (!moved) return;
-      await loadAll();
+      await queryClient.invalidateQueries({ queryKey: queryKeys.epics() });
     },
-    [loadAll, featureRows],
+    [featureRows, queryClient],
   );
 
   const addMember = async () => {
@@ -2594,7 +2508,7 @@ export function CapacityView({
         });
       });
       if (!m) return;
-      setMembers((ms) => [...ms, m]);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.members() });
     } catch (error) {
       const message = getNameErrorMessage(error);
       if (message) setActionWarning(message);
@@ -2627,54 +2541,11 @@ export function CapacityView({
         ),
       );
       if (!created) return;
-      const valid = created.filter(Boolean);
-      if (valid.length > 0) {
-        setQuarters((qs) =>
-          [
-            ...qs,
-            ...valid.map((q) => ({
-              ...q!,
-              months: [...q!.months].sort((a, b) => a.month - b.month),
-            })),
-          ].sort((a, b) => a.year - b.year || a.quarter - b.quarter),
-        );
-      }
+      await queryClient.invalidateQueries({ queryKey: queryKeys.quarters() });
     } finally {
       setBusy(false);
     }
   };
-
-  const refreshFeatureRow = useCallback(async (featureId: number) => {
-    const fv = await orpc.allocations.getEpicView({ epicId: featureId });
-    const monthMap = new Map<number, MonthData>();
-    for (const qd of fv.quarters) {
-      for (const md of qd.months) {
-        monthMap.set(md.month.id, {
-          totalCapacity: md.totalCapacity,
-          unassignedCapacity: md.unassignedCapacity,
-          memberAllocations: md.memberAllocations.map((a) => ({
-            memberId: a.member.id,
-            capacity: a.capacity,
-          })),
-        });
-      }
-    }
-    setFeatureRows((rows) =>
-      rows.map((r) =>
-        r.id === featureId
-          ? {
-              ...r,
-              name: fv.epic.name,
-              description: fv.epic.description,
-              epicId: fv.epic.initiativeId,
-              position: fv.epic.position,
-              links: fv.epic.links,
-              months: monthMap,
-            }
-          : r,
-      ),
-    );
-  }, []);
 
   const assignMemberToFeature = useCallback(
     async (featureId: number, memberId: number) => {
@@ -2682,13 +2553,15 @@ export function CapacityView({
       try {
         await history.record("MemberをEpicに割り当て", async () => {
           await orpc.allocations.assignMember({ epicId: featureId, memberId });
-          await refreshFeatureRow(featureId);
+          await queryClient.invalidateQueries({
+            queryKey: queryKeys.epicView(featureId),
+          });
         });
       } finally {
         setBusy(false);
       }
     },
-    [refreshFeatureRow, history],
+    [history, queryClient],
   );
 
   const removeMemberFromFeature = useCallback(
@@ -2700,13 +2573,15 @@ export function CapacityView({
             epicId: featureId,
             memberId,
           });
-          await refreshFeatureRow(featureId);
+          await queryClient.invalidateQueries({
+            queryKey: queryKeys.epicView(featureId),
+          });
         });
       } finally {
         setBusy(false);
       }
     },
-    [refreshFeatureRow, history],
+    [history, queryClient],
   );
 
   const copyAllocationTSV = useCallback(async () => {
@@ -2726,12 +2601,12 @@ export function CapacityView({
       setImportResult(result);
       if (result.success > 0) {
         history.clear();
-        await loadAll();
+        await queryClient.invalidateQueries();
       }
     } finally {
       setImporting(false);
     }
-  }, [importTsv, loadAll, history]);
+  }, [importTsv, history, queryClient]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 

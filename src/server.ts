@@ -24,6 +24,14 @@ let dataChangeVersion = 0;
 
 const dataChangeProcedures = new Set([
   "history.restore",
+  "visions.create",
+  "visions.update",
+  "visions.delete",
+  "visions.move",
+  "strategicIntents.create",
+  "strategicIntents.update",
+  "strategicIntents.delete",
+  "strategicIntents.move",
   "epics.create",
   "epics.rename",
   "epics.delete",
@@ -32,6 +40,7 @@ const dataChangeProcedures = new Set([
   "initiatives.rename",
   "initiatives.delete",
   "initiatives.move",
+  "initiatives.setStrategicIntent",
   "members.create",
   "members.rename",
   "members.delete",

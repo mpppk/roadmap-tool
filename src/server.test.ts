@@ -20,6 +20,11 @@ describe("shouldNotifyDataChange", () => {
   test("returns true for mutating procedures", () => {
     expect(shouldNotifyDataChange("/orpc/epics/create")).toBe(true);
     expect(shouldNotifyDataChange("/orpc/initiatives/create")).toBe(true);
+    expect(shouldNotifyDataChange("/orpc/initiatives/setStrategicIntent")).toBe(
+      true,
+    );
+    expect(shouldNotifyDataChange("/orpc/visions/create")).toBe(true);
+    expect(shouldNotifyDataChange("/orpc/strategicIntents/update")).toBe(true);
     expect(shouldNotifyDataChange("/orpc/members/setMaxCapacity")).toBe(true);
     expect(shouldNotifyDataChange("/orpc/history/restore")).toBe(true);
     expect(shouldNotifyDataChange("/orpc/import/memberTSVImport")).toBe(true);

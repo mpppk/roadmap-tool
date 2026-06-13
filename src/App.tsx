@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CapacityView } from "./CapacityView";
 import type { HistoryController, RoadmapSnapshot } from "./history-client";
@@ -36,6 +37,7 @@ function errorMessage(error: unknown): string {
 }
 
 export function App() {
+  const queryClient = useQueryClient();
   const [path, setPath] = useState(() => window.location.pathname);
   const [undoStack, setUndoStack] = useState<HistoryEntry[]>([]);
   const [redoStack, setRedoStack] = useState<HistoryEntry[]>([]);
@@ -70,6 +72,9 @@ export function App() {
       };
       if (payload.sourceClientId === roadmapClientId) return;
       clearHistory();
+      // 移行済み View 向け: 全クエリを無効化して再フェッチさせる。
+      void queryClient.invalidateQueries();
+      // 未移行 View 向け: 従来の版数トリガーも維持する。
       setExternalDataVersion((version) => version + 1);
     };
 
@@ -78,7 +83,7 @@ export function App() {
       events.removeEventListener("roadmap-data-changed", onDataChanged);
       events.close();
     };
-  }, [clearHistory]);
+  }, [clearHistory, queryClient]);
 
   const recordHistoryOperation = useCallback(
     <T,>(label: string, operation: () => Promise<T>): Promise<T> => {
@@ -150,13 +155,16 @@ export function App() {
       });
       setUndoStack((stack) => stack.slice(0, -1));
       setRedoStack((stack) => [...stack, entry].slice(-HISTORY_LIMIT));
+      // 移行済み View 向け: restore は何でも変えうるため全クエリを無効化。
+      await queryClient.invalidateQueries();
+      // 未移行 View 向け: 従来の版数トリガーも維持する。
       setHistoryVersion((version) => version + 1);
     } catch (error) {
       setHistoryWarning(errorMessage(error));
     } finally {
       setHistoryBusy(false);
     }
-  }, [historyBusy, undoStack]);
+  }, [historyBusy, undoStack, queryClient]);
 
   const redo = useCallback(async () => {
     if (historyBusy || redoStack.length === 0) return;
@@ -171,13 +179,16 @@ export function App() {
       });
       setRedoStack((stack) => stack.slice(0, -1));
       setUndoStack((stack) => [...stack, entry].slice(-HISTORY_LIMIT));
+      // 移行済み View 向け: restore は何でも変えうるため全クエリを無効化。
+      await queryClient.invalidateQueries();
+      // 未移行 View 向け: 従来の版数トリガーも維持する。
       setHistoryVersion((version) => version + 1);
     } catch (error) {
       setHistoryWarning(errorMessage(error));
     } finally {
       setHistoryBusy(false);
     }
-  }, [historyBusy, redoStack]);
+  }, [historyBusy, redoStack, queryClient]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

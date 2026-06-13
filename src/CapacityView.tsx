@@ -1206,12 +1206,7 @@ function readStoredLabelWidth(): number {
   return DEFAULT_LABEL_WIDTH;
 }
 
-export function CapacityView({
-  history,
-}: {
-  history: HistoryController;
-  externalDataVersion: number;
-}) {
+export function CapacityView({ history }: { history: HistoryController }) {
   const queryClient = useQueryClient();
   const quartersQuery = useQuartersQuery();
   const initiativesQuery = useInitiativesQuery();
@@ -1279,7 +1274,7 @@ export function CapacityView({
     memberId: number;
   } | null>(null);
   const highlightRowRef = useRef<HTMLTableRowElement | null>(null);
-  // URLパラメータで指定されたハイライト対象をloadAll完了時に適用するための一時保存
+  // URLパラメータで指定されたハイライト対象をデータロード完了時に適用するための一時保存
   const pendingHighlightRef = useRef<{
     featureId: number;
     memberId: number;

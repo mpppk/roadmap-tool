@@ -8,7 +8,6 @@ export type HistoryController = {
   canRedo: boolean;
   busy: boolean;
   warning: string | null;
-  version: number;
   undo: () => Promise<void>;
   redo: () => Promise<void>;
   clear: () => void;

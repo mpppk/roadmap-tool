@@ -104,7 +104,6 @@ function removeFromSet(set: Set<number>, id: number): Set<number> {
 
 type Props = {
   history: HistoryController;
-  externalDataVersion: number;
 };
 
 // ── Component ──────────────────────────────────────────────────────────────

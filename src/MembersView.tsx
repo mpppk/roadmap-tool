@@ -515,12 +515,7 @@ function HeatmapEditableFeatureCell({
 const COL_W = 148;
 const CAPACITY_AGG_MODE_STORAGE_KEY = "roadmap.membersView.capacityAggMode";
 
-export function MembersView({
-  history,
-}: {
-  history: HistoryController;
-  externalDataVersion: number;
-}) {
+export function MembersView({ history }: { history: HistoryController }) {
   const queryClient = useQueryClient();
   const membersQuery = useMembersQuery();
   const quartersQuery = useQuartersQuery();

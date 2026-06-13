@@ -43,8 +43,6 @@ export function App() {
   const [redoStack, setRedoStack] = useState<HistoryEntry[]>([]);
   const [historyBusy, setHistoryBusy] = useState(false);
   const [historyWarning, setHistoryWarning] = useState<string | null>(null);
-  const [historyVersion, setHistoryVersion] = useState(0);
-  const [externalDataVersion, setExternalDataVersion] = useState(0);
   const historyQueueRef = useRef<Promise<void>>(Promise.resolve());
   const historyPendingRef = useRef(0);
 
@@ -72,10 +70,8 @@ export function App() {
       };
       if (payload.sourceClientId === roadmapClientId) return;
       clearHistory();
-      // 移行済み View 向け: 全クエリを無効化して再フェッチさせる。
+      // 外部データ変更を検知したら全クエリを無効化して再フェッチさせる。
       void queryClient.invalidateQueries();
-      // 未移行 View 向け: 従来の版数トリガーも維持する。
-      setExternalDataVersion((version) => version + 1);
     };
 
     events.addEventListener("roadmap-data-changed", onDataChanged);
@@ -155,10 +151,8 @@ export function App() {
       });
       setUndoStack((stack) => stack.slice(0, -1));
       setRedoStack((stack) => [...stack, entry].slice(-HISTORY_LIMIT));
-      // 移行済み View 向け: restore は何でも変えうるため全クエリを無効化。
+      // restore は何でも変えうるため全クエリを無効化。
       await queryClient.invalidateQueries();
-      // 未移行 View 向け: 従来の版数トリガーも維持する。
-      setHistoryVersion((version) => version + 1);
     } catch (error) {
       setHistoryWarning(errorMessage(error));
     } finally {
@@ -179,10 +173,8 @@ export function App() {
       });
       setRedoStack((stack) => stack.slice(0, -1));
       setUndoStack((stack) => [...stack, entry].slice(-HISTORY_LIMIT));
-      // 移行済み View 向け: restore は何でも変えうるため全クエリを無効化。
+      // restore は何でも変えうるため全クエリを無効化。
       await queryClient.invalidateQueries();
-      // 未移行 View 向け: 従来の版数トリガーも維持する。
-      setHistoryVersion((version) => version + 1);
     } catch (error) {
       setHistoryWarning(errorMessage(error));
     } finally {
@@ -241,7 +233,6 @@ export function App() {
       canRedo: redoStack.length > 0,
       busy: historyBusy,
       warning: historyWarning,
-      version: historyVersion,
       undo,
       redo,
       clear: clearHistory,
@@ -254,7 +245,6 @@ export function App() {
       redoStack.length,
       historyBusy,
       historyWarning,
-      historyVersion,
       undo,
       redo,
       clearHistory,
@@ -263,23 +253,9 @@ export function App() {
     ],
   );
 
-  if (path === "/members")
-    return (
-      <MembersView
-        history={history}
-        externalDataVersion={externalDataVersion}
-      />
-    );
-  if (path === "/strategy")
-    return (
-      <StrategyTreeView
-        history={history}
-        externalDataVersion={externalDataVersion}
-      />
-    );
-  return (
-    <CapacityView history={history} externalDataVersion={externalDataVersion} />
-  );
+  if (path === "/members") return <MembersView history={history} />;
+  if (path === "/strategy") return <StrategyTreeView history={history} />;
+  return <CapacityView history={history} />;
 }
 
 export default App;

@@ -67,3 +67,14 @@ export function useMemberViewsQueries(memberIds: number[]) {
     })),
   });
 }
+
+// per-epic fan-out: 各 epic の getEpicView を個別のキャッシュエントリとして取得する。
+// 生データを返し、ビューモデルへの変換は呼び出し側の useMemo で行う。
+export function useEpicViewsQueries(epicIds: number[]) {
+  return useQueries({
+    queries: epicIds.map((epicId) => ({
+      queryKey: queryKeys.epicView(epicId),
+      queryFn: () => orpc.allocations.getEpicView({ epicId }),
+    })),
+  });
+}

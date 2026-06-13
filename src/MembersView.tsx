@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { GripVertical } from "lucide-react";
 import {
   type MouseEvent as ReactMouseEvent,
@@ -38,6 +39,14 @@ import {
 } from "./name-errors";
 import { navigate } from "./navigate";
 import { orpc } from "./orpc-client";
+import {
+  queryKeys,
+  useEpicsQuery,
+  useInitiativesQuery,
+  useMembersQuery,
+  useMemberViewsQueries,
+  useQuartersQuery,
+} from "./queries";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -99,13 +108,6 @@ type PeriodColumn = {
 };
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-function nextQuarterYQ(qs: Quarter[]): { year: number; quarter: number } {
-  const last = qs[qs.length - 1];
-  if (!last) return { year: new Date().getFullYear(), quarter: 1 };
-  if (last.quarter === 4) return { year: last.year + 1, quarter: 1 };
-  return { year: last.year, quarter: last.quarter + 1 };
-}
 
 function emptyMemberMonthData(): MemberMonthData {
   return { totalCapacity: 0, featureAllocations: [] };
@@ -178,6 +180,14 @@ function columnMemberLimit(column: PeriodColumn, maxCapacity: number): number {
   return column.type === "quarter"
     ? column.monthIds.length * maxCapacity
     : maxCapacity;
+}
+
+// UI 専用の展開フラグ（Set）をトグルする。キャッシュデータには載せない。
+function toggleInSet(set: Set<number>, id: number): Set<number> {
+  const next = new Set(set);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
 }
 
 // ── Sub-components ──────────────────────────────────────────────────────────
@@ -507,11 +517,21 @@ const CAPACITY_AGG_MODE_STORAGE_KEY = "roadmap.membersView.capacityAggMode";
 
 export function MembersView({
   history,
-  externalDataVersion,
 }: {
   history: HistoryController;
   externalDataVersion: number;
 }) {
+  const queryClient = useQueryClient();
+  const membersQuery = useMembersQuery();
+  const quartersQuery = useQuartersQuery();
+  const epicsQuery = useEpicsQuery();
+  const initiativesQuery = useInitiativesQuery();
+  const memberIds = useMemo(
+    () => (membersQuery.data ?? []).map((m) => m.id),
+    [membersQuery.data],
+  );
+  const memberViewsQueries = useMemberViewsQueries(memberIds);
+
   const {
     viewMode,
     setViewMode,
@@ -526,10 +546,11 @@ export function MembersView({
   const [capacityAggMode, setCapacityAggMode] = useState<CapacityAggMode>(() =>
     readStoredCapacityAggMode(CAPACITY_AGG_MODE_STORAGE_KEY, "total"),
   );
-  const [quarters, setQuarters] = useState<Quarter[]>([]);
-  const [memberRows, setMemberRows] = useState<MemberRow[]>([]);
+  // UI 専用の展開フラグ（キャッシュには載せない）。空集合 = 全行折りたたみ。
+  const [expandedMemberIds, setExpandedMemberIds] = useState<Set<number>>(
+    () => new Set(),
+  );
   const [draggingMemberId, setDraggingMemberId] = useState<number | null>(null);
-  const [allEpics, setAllEpics] = useState<Epic[]>([]);
   const [assigningMemberId, setAssigningMemberId] = useState<number | null>(
     null,
   );
@@ -539,7 +560,6 @@ export function MembersView({
     epicId: number;
     epicName: string;
   } | null>(null);
-  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [actionWarning, setActionWarning] = useState<string | null>(null);
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -609,6 +629,97 @@ export function MembersView({
     };
   }, []);
 
+  // ── 派生ビューモデル（クエリデータ + UI フラグの合成） ─────────────────────
+  const quarters = useMemo<Quarter[]>(
+    () =>
+      [...(quartersQuery.data ?? [])]
+        .map((q) => ({
+          ...q,
+          months: [...q.months].sort((a, b) => a.month - b.month),
+        }))
+        .sort((a, b) => a.year - b.year || a.quarter - b.quarter),
+    [quartersQuery.data],
+  );
+
+  const allEpics = useMemo<Epic[]>(() => {
+    const initiativeMap = new Map(
+      (initiativesQuery.data ?? []).map((i) => [i.id, i.name]),
+    );
+    return (epicsQuery.data ?? []).map((e) => ({
+      id: e.id,
+      name: e.name,
+      initiativeName: e.initiativeId
+        ? (initiativeMap.get(e.initiativeId) ?? null)
+        : null,
+    }));
+  }, [epicsQuery.data, initiativesQuery.data]);
+
+  const memberRows = useMemo<MemberRow[]>(() => {
+    const viewByMemberId = new Map<
+      number,
+      Awaited<ReturnType<typeof orpc.allocations.getMemberView>>
+    >();
+    for (const q of memberViewsQueries) {
+      if (q.data) viewByMemberId.set(q.data.member.id, q.data);
+    }
+    return (membersQuery.data ?? []).map((m) => {
+      const mv = viewByMemberId.get(m.id);
+      const monthMap = new Map<number, MemberMonthData>();
+      if (mv) {
+        for (const qd of mv.quarters) {
+          for (const md of qd.months) {
+            monthMap.set(md.month.id, {
+              totalCapacity: md.totalCapacity,
+              featureAllocations: md.epicAllocations.map((fa) => ({
+                featureId: fa.epic.id,
+                featureName: fa.epic.name,
+                epicName: fa.epic.initiative?.name ?? null,
+                capacity: fa.capacity,
+              })),
+            });
+          }
+        }
+      }
+      return {
+        id: m.id,
+        name: m.name,
+        maxCapacity: m.maxCapacity ?? null,
+        expanded: expandedMemberIds.has(m.id),
+        months: monthMap,
+      };
+    });
+  }, [membersQuery.data, memberViewsQueries, expandedMemberIds]);
+
+  // 初回ロードのみ全画面ゲートを出す（isFetching ではなく isLoading を使う）。
+  const loading =
+    membersQuery.isLoading ||
+    quartersQuery.isLoading ||
+    epicsQuery.isLoading ||
+    initiativesQuery.isLoading ||
+    memberViewsQueries.some((q) => q.isLoading);
+
+  // クォーター読み込み後、初回のみ表示レンジを初期化する。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refs from useQuarterRange are stable; intentionally runs once when quarters first load
+  useEffect(() => {
+    if (rangeInitializedRef.current) return;
+    if (quartersQuery.isLoading) return;
+    rangeInitializedRef.current = true;
+    if (rangeStartRef.current === null && rangeEndRef.current === null) {
+      const first = quarters[0];
+      const last = quarters[quarters.length - 1];
+      if (first && last) {
+        setRangeStart({ year: first.year, quarter: first.quarter });
+        setRangeEnd({ year: last.year, quarter: last.quarter });
+      } else {
+        const now = new Date();
+        const yr = now.getFullYear();
+        const q = Math.ceil((now.getMonth() + 1) / 3) as 1 | 2 | 3 | 4;
+        setRangeStart({ year: yr, quarter: q });
+        setRangeEnd({ year: yr, quarter: q });
+      }
+    }
+  }, [quarters, quartersQuery.isLoading]);
+
   const displayedQuarters = useMemo(() => {
     if (!rangeStart || !rangeEnd) return quarters;
     return quarters.filter((q) => isQuarterInRange(q, rangeStart, rangeEnd));
@@ -632,94 +743,6 @@ export function MembersView({
     } catch {}
   }, [capacityAggMode]);
 
-  // ── Initial load ────────────────────────────────────────────────────────
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refs from useQuarterRange are stable; accessing .current intentionally avoids stale-closure re-renders
-  const loadAll = useCallback(async () => {
-    setLoading(true);
-    const [qs, ms, es, is_] = await Promise.all([
-      orpc.quarters.list({}),
-      orpc.members.list({}),
-      orpc.epics.list({}),
-      orpc.initiatives.list({}),
-    ]);
-
-    const initiativeMap = new Map(is_.map((i) => [i.id, i.name]));
-    setAllEpics(
-      es.map((e) => ({
-        id: e.id,
-        name: e.name,
-        initiativeName: e.initiativeId
-          ? (initiativeMap.get(e.initiativeId) ?? null)
-          : null,
-      })),
-    );
-
-    const sortedQs = [...qs]
-      .map((q) => ({
-        ...q,
-        months: [...q.months].sort((a, b) => a.month - b.month),
-      }))
-      .sort((a, b) => a.year - b.year || a.quarter - b.quarter);
-
-    const memberViews = await Promise.all(
-      ms.map((m) => orpc.allocations.getMemberView({ memberId: m.id })),
-    );
-
-    const rows: MemberRow[] = memberViews.map((mv) => {
-      const monthMap = new Map<number, MemberMonthData>();
-      for (const qd of mv.quarters) {
-        for (const md of qd.months) {
-          monthMap.set(md.month.id, {
-            totalCapacity: md.totalCapacity,
-            featureAllocations: md.epicAllocations.map((fa) => ({
-              featureId: fa.epic.id,
-              featureName: fa.epic.name,
-              epicName: fa.epic.initiative?.name ?? null,
-              capacity: fa.capacity,
-            })),
-          });
-        }
-      }
-      const memberInfo = ms.find((m) => m.id === mv.member.id);
-      return {
-        id: mv.member.id,
-        name: mv.member.name,
-        maxCapacity: memberInfo?.maxCapacity ?? null,
-        expanded: false,
-        months: monthMap,
-      };
-    });
-
-    setQuarters(sortedQs);
-    if (!rangeInitializedRef.current) {
-      rangeInitializedRef.current = true;
-      if (rangeStartRef.current === null && rangeEndRef.current === null) {
-        const first = sortedQs[0];
-        const last = sortedQs[sortedQs.length - 1];
-        if (first && last) {
-          setRangeStart({ year: first.year, quarter: first.quarter });
-          setRangeEnd({ year: last.year, quarter: last.quarter });
-        } else {
-          const now = new Date();
-          const yr = now.getFullYear();
-          const q = Math.ceil((now.getMonth() + 1) / 3) as 1 | 2 | 3 | 4;
-          setRangeStart({ year: yr, quarter: q });
-          setRangeEnd({ year: yr, quarter: q });
-        }
-      }
-    }
-
-    setMemberRows(rows);
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    void history.version;
-    void externalDataVersion;
-    void loadAll();
-  }, [loadAll, history.version, externalDataVersion]);
-
   // ── Helpers ──────────────────────────────────────────────────────────────
 
   const colDivisor = (column: PeriodColumn): number =>
@@ -733,82 +756,18 @@ export function MembersView({
   ): MemberMonthData => aggregateMemberMonthData(row.months, column.monthIds);
 
   const toggleExpand = (memberId: number) => {
-    setMemberRows((rows) =>
-      rows.map((r) =>
-        r.id === memberId ? { ...r, expanded: !r.expanded } : r,
-      ),
-    );
+    setExpandedMemberIds((prev) => toggleInSet(prev, memberId));
   };
 
   const expandAll = () => {
-    setMemberRows((rows) => rows.map((r) => ({ ...r, expanded: true })));
+    setExpandedMemberIds(new Set((membersQuery.data ?? []).map((m) => m.id)));
   };
 
   const collapseAll = () => {
-    setMemberRows((rows) => rows.map((r) => ({ ...r, expanded: false })));
+    setExpandedMemberIds(new Set());
   };
 
   // ── Allocation helpers ────────────────────────────────────────────────────
-
-  const applyAllocationUpdate = useCallback(
-    (
-      updatedFeatures: Array<{
-        epicId: number;
-        months: Array<{
-          monthId: number;
-          totalCapacity: number;
-          unassignedCapacity: number;
-          memberAllocations: Array<{ memberId: number; capacity: number }>;
-        }>;
-      }>,
-    ) => {
-      setMemberRows((rows) =>
-        rows.map((member) => {
-          let changed = false;
-          const newMonths = new Map(member.months);
-          for (const updatedFeature of updatedFeatures) {
-            for (const updatedMonth of updatedFeature.months) {
-              const existing =
-                newMonths.get(updatedMonth.monthId) ?? emptyMemberMonthData();
-              const memberAlloc = updatedMonth.memberAllocations.find(
-                (a) => a.memberId === member.id,
-              );
-              const newCapacity = memberAlloc?.capacity ?? 0;
-              const existingAlloc = existing.featureAllocations.find(
-                (fa) => fa.featureId === updatedFeature.epicId,
-              );
-              if (existingAlloc?.capacity === newCapacity) continue;
-              changed = true;
-              let newFeatureAllocations: MemberMonthData["featureAllocations"];
-              if (newCapacity === 0) {
-                newFeatureAllocations = existing.featureAllocations.filter(
-                  (fa) => fa.featureId !== updatedFeature.epicId,
-                );
-              } else if (existingAlloc) {
-                newFeatureAllocations = existing.featureAllocations.map((fa) =>
-                  fa.featureId === updatedFeature.epicId
-                    ? { ...fa, capacity: newCapacity }
-                    : fa,
-                );
-              } else {
-                newFeatureAllocations = existing.featureAllocations;
-              }
-              const newTotalCapacity = newFeatureAllocations.reduce(
-                (sum, fa) => sum + fa.capacity,
-                0,
-              );
-              newMonths.set(updatedMonth.monthId, {
-                totalCapacity: newTotalCapacity,
-                featureAllocations: newFeatureAllocations,
-              });
-            }
-          }
-          return changed ? { ...member, months: newMonths } : member;
-        }),
-      );
-    },
-    [],
-  );
 
   const getRebalancePreview = useCallback(
     (
@@ -966,7 +925,7 @@ export function MembersView({
         }
 
         await history.record("Member capacityを変更", async () => {
-          const result = await orpc.allocations.updateMemberAllocation({
+          await orpc.allocations.updateMemberAllocation({
             epicId: featureId,
             memberId: member.id,
             capacity,
@@ -975,13 +934,14 @@ export function MembersView({
             quarterId: column.quarterId,
             capacityConflictResolution: "fitWithinLimit",
           });
-          applyAllocationUpdate(result.updatedFeatures);
+          // rebalance 系の解決は他メンバーにも波及しうるため memberView 全体を無効化。
+          await queryClient.invalidateQueries({ queryKey: ["memberView"] });
         });
       } finally {
         setBusy(false);
       }
     },
-    [applyAllocationUpdate, history],
+    [history, queryClient],
   );
 
   const resolveCapacityConflict = useCallback(
@@ -990,7 +950,7 @@ export function MembersView({
       setBusy(true);
       try {
         await history.record("Capacity競合を解決", async () => {
-          const result = await orpc.allocations.updateMemberAllocation({
+          await orpc.allocations.updateMemberAllocation({
             epicId: capacityConflict.featureId,
             periodType: capacityConflict.periodType,
             monthId: capacityConflict.monthId,
@@ -999,14 +959,14 @@ export function MembersView({
             capacity: capacityConflict.requestedCapacity,
             capacityConflictResolution: resolution,
           });
-          applyAllocationUpdate(result.updatedFeatures);
+          await queryClient.invalidateQueries({ queryKey: ["memberView"] });
         });
         setCapacityConflict(null);
       } finally {
         setBusy(false);
       }
     },
-    [applyAllocationUpdate, capacityConflict, history],
+    [capacityConflict, history, queryClient],
   );
 
   const resolveMaxCapacityOverflow = useCallback(
@@ -1015,7 +975,7 @@ export function MembersView({
       setBusy(true);
       try {
         await history.record("Max capacity超過を解決", async () => {
-          const result = await orpc.allocations.updateMemberAllocation({
+          await orpc.allocations.updateMemberAllocation({
             epicId: maxCapacityOverflow.featureId,
             periodType: maxCapacityOverflow.periodType,
             monthId: maxCapacityOverflow.monthId,
@@ -1024,14 +984,14 @@ export function MembersView({
             capacity: maxCapacityOverflow.requestedCapacity,
             capacityConflictResolution: resolution,
           });
-          applyAllocationUpdate(result.updatedFeatures);
+          await queryClient.invalidateQueries({ queryKey: ["memberView"] });
         });
         setMaxCapacityOverflow(null);
       } finally {
         setBusy(false);
       }
     },
-    [applyAllocationUpdate, maxCapacityOverflow, history],
+    [history, maxCapacityOverflow, queryClient],
   );
 
   // ── API actions ───────────────────────────────────────────────────────────
@@ -1049,16 +1009,7 @@ export function MembersView({
         });
       });
       if (!m) return;
-      setMemberRows((rows) => [
-        ...rows,
-        {
-          id: m.id,
-          name: m.name,
-          maxCapacity: m.maxCapacity ?? null,
-          expanded: false,
-          months: new Map(),
-        },
-      ]);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.members() });
     } catch (error) {
       const message = getNameErrorMessage(error);
       if (message) setActionWarning(message);
@@ -1074,12 +1025,10 @@ export function MembersView({
         return orpc.members.rename({ id, name });
       });
       if (!m) return name;
-      setMemberRows((rows) =>
-        rows.map((r) => (r.id === id ? { ...r, name: m.name } : r)),
-      );
+      await queryClient.invalidateQueries({ queryKey: queryKeys.members() });
       return m.name;
     },
-    [history],
+    [history, queryClient],
   );
 
   const deleteMember = useCallback(
@@ -1088,13 +1037,16 @@ export function MembersView({
       try {
         await history.record("Memberを削除", async () => {
           await orpc.members.delete({ id });
-          setMemberRows((rows) => rows.filter((r) => r.id !== id));
+          await queryClient.invalidateQueries({
+            queryKey: queryKeys.members(),
+          });
         });
+        queryClient.removeQueries({ queryKey: queryKeys.memberView(id) });
       } finally {
         setBusy(false);
       }
     },
-    [history],
+    [history, queryClient],
   );
 
   const moveMember = useCallback(
@@ -1103,62 +1055,25 @@ export function MembersView({
       const memberIndex = memberRows.findIndex((r) => r.id === memberId);
       const targetIndex = memberRows.findIndex((r) => r.id === targetId);
       const draggingDown = memberIndex < targetIndex;
-      const updated = await orpc.members.move(
+      await orpc.members.move(
         draggingDown
           ? { id: memberId, afterId: targetId }
           : { id: memberId, beforeId: targetId },
       );
-      setMemberRows((rows) => {
-        const stateById = new Map(rows.map((r) => [r.id, r]));
-        return updated.map((m) => {
-          const existing = stateById.get(m.id);
-          return existing
-            ? { ...existing, name: m.name, maxCapacity: m.maxCapacity }
-            : {
-                id: m.id,
-                name: m.name,
-                maxCapacity: m.maxCapacity ?? null,
-                expanded: false,
-                months: new Map(),
-              };
-        });
-      });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.members() });
     },
-    [memberRows],
+    [memberRows, queryClient],
   );
 
   const setMaxCapacity = useCallback(
     async (id: number, maxCapacity: number | null) => {
       await history.record("Max capacityを変更", async () => {
         await orpc.members.setMaxCapacity({ id, maxCapacity });
-        setMemberRows((rows) =>
-          rows.map((r) => (r.id === id ? { ...r, maxCapacity } : r)),
-        );
+        await queryClient.invalidateQueries({ queryKey: queryKeys.members() });
       });
     },
-    [history],
+    [history, queryClient],
   );
-
-  const refreshMemberRow = useCallback(async (memberId: number) => {
-    const mv = await orpc.allocations.getMemberView({ memberId });
-    const monthMap = new Map<number, MemberMonthData>();
-    for (const qd of mv.quarters) {
-      for (const md of qd.months) {
-        monthMap.set(md.month.id, {
-          totalCapacity: md.totalCapacity,
-          featureAllocations: md.epicAllocations.map((fa) => ({
-            featureId: fa.epic.id,
-            featureName: fa.epic.name,
-            epicName: fa.epic.initiative?.name ?? null,
-            capacity: fa.capacity,
-          })),
-        });
-      }
-    }
-    setMemberRows((rows) =>
-      rows.map((r) => (r.id === memberId ? { ...r, months: monthMap } : r)),
-    );
-  }, []);
 
   const assignEpicToMember = useCallback(
     async (memberId: number, epicId: number) => {
@@ -1166,13 +1081,15 @@ export function MembersView({
       try {
         await history.record("EpicをMemberに割り当て", async () => {
           await orpc.allocations.assignMember({ epicId, memberId });
-          await refreshMemberRow(memberId);
+          await queryClient.invalidateQueries({
+            queryKey: queryKeys.memberView(memberId),
+          });
         });
       } finally {
         setBusy(false);
       }
     },
-    [refreshMemberRow, history],
+    [history, queryClient],
   );
 
   const removeEpicFromMember = useCallback(
@@ -1181,14 +1098,16 @@ export function MembersView({
       try {
         await history.record("EpicをMemberから削除", async () => {
           await orpc.allocations.removeMemberFromEpic({ epicId, memberId });
-          await refreshMemberRow(memberId);
+          await queryClient.invalidateQueries({
+            queryKey: queryKeys.memberView(memberId),
+          });
         });
       } finally {
         setBusy(false);
         setRemoveEpicConfirm(null);
       }
     },
-    [refreshMemberRow, history],
+    [history, queryClient],
   );
 
   const runImportTSV = useCallback(async () => {
@@ -1200,7 +1119,7 @@ export function MembersView({
           orpc.import.memberTSVImport({ tsv: importTsv, mode: importMode }),
       );
       setImportResult(result);
-      await loadAll();
+      await queryClient.invalidateQueries();
     } catch (error) {
       setImportResult({
         success: 0,
@@ -1218,7 +1137,7 @@ export function MembersView({
     } finally {
       setImporting(false);
     }
-  }, [history, importMode, importTsv, loadAll]);
+  }, [history, importMode, importTsv, queryClient]);
 
   const applyRange = async (start: QuarterYQ, end: QuarterYQ) => {
     if (start.year * 4 + start.quarter > end.year * 4 + end.quarter) return;
@@ -1242,37 +1161,7 @@ export function MembersView({
         ),
       );
       if (!created) return;
-      const valid = created.filter(Boolean);
-      if (valid.length > 0) {
-        setQuarters((qs) =>
-          [
-            ...qs,
-            ...valid.map((q) => ({
-              ...q!,
-              months: [...q!.months].sort((a, b) => a.month - b.month),
-            })),
-          ].sort((a, b) => a.year - b.year || a.quarter - b.quarter),
-        );
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const _addQuarter = async () => {
-    setBusy(true);
-    try {
-      const { year, quarter } = nextQuarterYQ(quarters);
-      const q = await history.record("Quarterを追加", async () => {
-        return orpc.quarters.create({ year, quarter });
-      });
-      if (!q) return;
-      setQuarters((qs) =>
-        [
-          ...qs,
-          { ...q, months: [...q.months].sort((a, b) => a.month - b.month) },
-        ].sort((a, b) => a.year - b.year || a.quarter - b.quarter),
-      );
+      await queryClient.invalidateQueries({ queryKey: queryKeys.quarters() });
     } finally {
       setBusy(false);
     }

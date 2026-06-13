@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { orpc } from "./orpc-client";
 
 // クエリキー工場。配列キーにすることで接頭辞単位の部分無効化が可能。
@@ -40,5 +40,30 @@ export function useEpicsQuery() {
   return useQuery({
     queryKey: queryKeys.epics(),
     queryFn: () => orpc.epics.list({}),
+  });
+}
+
+export function useMembersQuery() {
+  return useQuery({
+    queryKey: queryKeys.members(),
+    queryFn: () => orpc.members.list({}),
+  });
+}
+
+export function useQuartersQuery() {
+  return useQuery({
+    queryKey: queryKeys.quarters(),
+    queryFn: () => orpc.quarters.list({}),
+  });
+}
+
+// per-member fan-out: 各メンバーの getMemberView を個別のキャッシュエントリとして取得する。
+// 生データを返し、ビューモデルへの変換は呼び出し側の useMemo で行う。
+export function useMemberViewsQueries(memberIds: number[]) {
+  return useQueries({
+    queries: memberIds.map((memberId) => ({
+      queryKey: queryKeys.memberView(memberId),
+      queryFn: () => orpc.allocations.getMemberView({ memberId }),
+    })),
   });
 }
